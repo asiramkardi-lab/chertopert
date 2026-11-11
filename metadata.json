@@ -1,0 +1,6 @@
+{
+  "name": "Fractal Elliott Wave Intelligence Copilot (FEI)",
+  "description": "پلتفرم هوشمند تحلیل فرکتالی امواج الیوت بر مبنای آموزش‌های بهاری، مدیریت سناریو، ویرایشگر امواج و دستیار تحلیل تکنیکال",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
