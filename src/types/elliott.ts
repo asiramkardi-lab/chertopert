@@ -73,6 +73,7 @@ export interface RuleValidationItem {
   score: number; // 0 to 100
   messageFa: string;
   details?: string;
+  conceptId?: string; // e.g. "C07", "C10", "C19", "C22", "C23", "C24"
   canBeSolvedByAlternate?: string; // e.g., "TERMINAL", "ANTI_TERMINAL", "DIAGONAL"
 }
 

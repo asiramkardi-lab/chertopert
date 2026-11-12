@@ -86,6 +86,7 @@ export class RulesEngine {
         type: 'HARD',
         passed: rule1Passed,
         score: rule1Passed ? 100 : 0,
+        conceptId: 'C07',
         messageFa: rule1Passed 
           ? `موج ۲ به میزان ${(retraceRatio2 * 100).toFixed(1)}٪ موج ۱ را اصلاح کرده و کف/سقف موج ۱ را نشکسته است.`
           : 'نقض قانون ۱: موج ۲ بیش از ۱۰۰٪ موج ۱ را پوشش داده است. (کف مطلق یا شروع سیکل جدید معتبر نیست یا الگو آنتی‌سیکل است)',
@@ -94,7 +95,7 @@ export class RulesEngine {
 
       if (!rule1Passed) {
         suggestedAlternative = 'ANTI_CYCLE';
-        alternativeReason = 'موج ۲ کف موج ۱ را نقض کرده است؛ ساختار فاز اول ۳ موجی و ساختار بعدی ۵ موجی (آنتی‌سیکل) بررسی شود.';
+        alternativeReason = 'موج ۲ کف موج ۱ را نقض کرده است؛ ساختار فاز اول ۳ موجی و ساختار بعدی ۵ موجی (آنتی‌سیکل C21) بررسی شود.';
       }
     }
 
@@ -112,6 +113,7 @@ export class RulesEngine {
         type: 'HARD',
         passed: rule2Passed,
         score: rule2Passed ? 100 : 0,
+        conceptId: 'C07',
         messageFa: rule2Passed
           ? `موج ۳ با طول ${len3.toFixed(1)} کوتاه‌ترین موج نیست (طول موج ۱: ${len1.toFixed(1)}، موج ۵: ${len5.toFixed(1)}).`
           : 'نقض قانون ۲: موج ۳ کوتاه‌ترین موج است! باید لیبل‌گذاری تغییر کرده و موج ۳ به عنوان موج ۱ جدید یا موج ممتد بازشماری شود.'
@@ -135,6 +137,7 @@ export class RulesEngine {
           type: 'HARD',
           passed: rule3Passed,
           score: rule3Passed ? 100 : 0,
+          conceptId: 'C07',
           messageFa: rule3Passed
             ? `موج ۴ با قیمت ${p4.toFixed(1)} بالاتر از سقف موج ۱ (${p1.toFixed(1)}) به پایان رسیده و تداخلی ندارد.`
             : `نقض قانون ۳: موج ۴ با قیمت ${p4.toFixed(1)} وارد حریم قیمتی موج ۱ (${p1.toFixed(1)}) شده است.`,
@@ -143,7 +146,7 @@ export class RulesEngine {
 
         if (hasOverlap) {
           suggestedAlternative = (vertices.length >= 6 && len5 > len3) ? 'ANTI_TERMINAL' : 'TERMINAL';
-          alternativeReason = `هم‌پوشانی موج ۴ و ۱ رخ داده است. سیستم پیشنهاد می‌دهد الگو به عنوان ${suggestedAlternative === 'TERMINAL' ? 'ترمینال (با موج ۵ کوتاه)' : 'آنتی‌ترمینال (با موج ۵ کشیده)'} بررسی شود.`;
+          alternativeReason = `هم‌پوشانی موج ۴ و ۱ رخ داده است. سیستم پیشنهاد می‌دهد الگو به عنوان ${suggestedAlternative === 'TERMINAL' ? 'ترمینال (C19 - موج ۵ کوتاه)' : 'آنتی‌ترمینال (C19 - موج ۵ کشیده)'} بررسی شود.`;
         }
       } else if (pattern === 'TERMINAL' || pattern === 'ANTI_TERMINAL' || pattern === 'LEADING_DIAGONAL' || pattern === 'ENDING_DIAGONAL' || pattern === 'ANTI_DIAGONAL') {
         // In Terminal and Diagonal, overlap is a structural requirement or feature
@@ -154,6 +157,7 @@ export class RulesEngine {
           type: 'STRUCTURE',
           passed: hasOverlap,
           score: hasOverlap ? 100 : 40,
+          conceptId: pattern.includes('DIAGONAL') ? 'C20' : 'C19',
           messageFa: hasOverlap
             ? `موج ۴ وارد محدوده موج ۱ شده که با ویژگی مشخصه الگوی ${pattern} کاملاً سازگار است.`
             : 'هشدار: در الگوی ترمینال/قطر معمولاً موج ۴ وارد محدوده موج ۱ می‌شود، اما در این شمارش تداخل ثبت نشده است.'

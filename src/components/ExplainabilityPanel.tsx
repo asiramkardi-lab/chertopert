@@ -136,7 +136,14 @@ export const ExplainabilityPanel: React.FC<ExplainabilityPanelProps> = ({
               }`}
             >
               <div className="flex items-start justify-between gap-1.5">
-                <span className="text-xs font-semibold leading-tight">{rule.nameFa}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold leading-tight">{rule.nameFa}</span>
+                  {rule.conceptId && (
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/30">
+                      [{rule.conceptId}]
+                    </span>
+                  )}
+                </div>
                 {rule.passed ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 ) : (
