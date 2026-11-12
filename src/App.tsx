@@ -2,10 +2,10 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * Fractal Elliott Wave Intelligence Copilot (FEI)
- * Main Application Interface
+ * High-End Trading Terminal Layout with Chart on the Right and Sleek Tabbed Sidebar on the Left.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { 
   WaveScenario, 
   WaveVertex, 
@@ -17,30 +17,22 @@ import { RulesEngine } from './engine/rulesEngine';
 import { FractalEngine } from './engine/fractalEngine';
 import { SUPPORTED_ASSETS, generateRealisticCandles } from './data/sampleMarketData';
 import { ChartStudio } from './components/ChartStudio';
-import { ExplainabilityPanel } from './components/ExplainabilityPanel';
-import { FractalTree } from './components/FractalTree';
-import { ScenarioManager } from './components/ScenarioManager';
-import { TfBoundaryReport } from './components/TfBoundaryReport';
-import { SddAndCodeViewer } from './components/SddAndCodeViewer';
+import { SleekSidebar } from './components/SleekSidebar';
 import { 
-  Activity, 
-  Layers, 
-  Zap, 
-  Compass, 
-  Sparkles, 
-  ShieldCheck, 
-  FolderGit2, 
-  FileCode2, 
-  TrendingUp,
   BrainCircuit,
-  Info
+  TrendingUp,
+  Activity,
+  Layers,
+  Sparkles,
+  Zap,
+  ShieldCheck,
+  Maximize2
 } from 'lucide-react';
 
 export default function App() {
   // Selected Asset & Timeframe
   const [selectedAssetId, setSelectedAssetId] = useState<string>('BTCUSDT');
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1D');
-  const [activeTab, setActiveTab] = useState<'WORKSPACE' | 'CODE_AND_SDD'>('WORKSPACE');
 
   const currentAsset = useMemo(() => {
     return SUPPORTED_ASSETS.find(a => a.id === selectedAssetId) || SUPPORTED_ASSETS[0];
@@ -48,7 +40,7 @@ export default function App() {
 
   // Generate Candlestick Data for asset & timeframe
   const candles = useMemo(() => {
-    return generateRealisticCandles(selectedAssetId, selectedTimeframe, 78);
+    return generateRealisticCandles(selectedAssetId, selectedTimeframe, 80);
   }, [selectedAssetId, selectedTimeframe]);
 
   // Multi-timeframe data dictionary for Boundary evaluation
@@ -69,7 +61,7 @@ export default function App() {
     );
   }, [currentAsset, multiTfData]);
 
-  // Initial Vertices generator for selected timeframe
+  // Initial Vertices generator
   const createInitialVertices = useCallback((basePrice: number): WaveVertex[] => {
     return [
       { label: '0', price: Math.round(basePrice * 0.98), timestamp: Date.now() - 65 * 86400000, candleIndex: 4, isConfirmed: true },
@@ -81,9 +73,8 @@ export default function App() {
     ];
   }, []);
 
-  // Scenarios state
+  // Multi-hypothesis Scenario Universe
   const [scenarios, setScenarios] = useState<WaveScenario[]>(() => {
-    const baseP = 52000;
     const initialVerts = [
       { label: '0', price: 51200, timestamp: Date.now() - 65 * 86400000, candleIndex: 4, isConfirmed: true },
       { label: '1', price: 56400, timestamp: Date.now() - 50 * 86400000, candleIndex: 18, isConfirmed: true },
@@ -97,14 +88,14 @@ export default function App() {
     return [
       {
         id: 'sc_primary',
-        name: 'سناریوی اصلی (سیکل ایده‌آل)',
+        name: 'سناریوی اصلی (سیکل ایده‌آل ۵ موجی)',
         isPrimary: true,
         isLocked: false,
         patternType: 'IDEAL_CYCLE',
         degree: 'PRIMARY',
         direction: 'BULLISH',
         vertices: initialVerts,
-        currentWave: 'موج ۵ در حال تکمیل',
+        currentWave: 'موج ۵ در حال توسعه',
         completionPercentage: 85,
         validityScore: initialVal.validityScore,
         idealnessScore: initialVal.idealnessScore,
@@ -127,14 +118,14 @@ export default function App() {
           initialVerts[1],
           initialVerts[2],
           initialVerts[3],
-          { ...initialVerts[4], price: 55800 }, // Overlaps with wave 1 price
-          { ...initialVerts[5], price: 61500 }  // Truncated wave 5
+          { ...initialVerts[4], price: 55800 }, // Overlaps with wave 1
+          { ...initialVerts[5], price: 61200 }  // Truncated wave 5
         ],
         currentWave: 'موج ۵ کوتاه‌شده در انتهای روند',
         completionPercentage: 92,
-        validityScore: 90,
-        idealnessScore: 82,
-        confidenceScore: 78,
+        validityScore: 92,
+        idealnessScore: 84,
+        confidenceScore: 80,
         invalidationPrice: 53800,
         targets: [],
         rulesResults: [],
@@ -149,7 +140,7 @@ export default function App() {
     return scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
   }, [scenarios, activeScenarioId]);
 
-  // Update scenario vertices and re-run rules engine
+  // Update scenario vertices and re-run rules engine live
   const handleUpdateVertices = (newVertices: WaveVertex[]) => {
     setScenarios(prev => prev.map(sc => {
       if (sc.id === activeScenarioId) {
@@ -192,9 +183,10 @@ export default function App() {
   };
 
   // Toggle scenario lock (PRD Requirement: AI never overwrites locked count)
-  const handleToggleLock = () => {
+  const handleToggleLock = (id?: string) => {
+    const targetId = id || activeScenarioId;
     setScenarios(prev => prev.map(sc => {
-      if (sc.id === activeScenarioId) {
+      if (sc.id === targetId) {
         return { ...sc, isLocked: !sc.isLocked };
       }
       return sc;
@@ -302,189 +294,118 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Vazirmatn',sans-serif] selection:bg-indigo-500 selection:text-white">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-2.5">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          {/* Logo & Product Title */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-              <BrainCircuit className="w-5 h-5 text-white" />
+    <div className="h-screen w-screen bg-[#070b14] text-slate-100 flex flex-col overflow-hidden font-['Vazirmatn',sans-serif] selection:bg-indigo-500 selection:text-white" dir="rtl">
+      {/* Top Pro Header Bar */}
+      <header className="h-14 bg-[#0a101f] border-b border-slate-800/90 px-4 flex items-center justify-between gap-4 shrink-0 shadow-lg z-20">
+        {/* Brand & Identity */}
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-600/30">
+            <BrainCircuit className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-black text-white tracking-wide">FEI Copilot</h1>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
+                بهاری Pro 1.0
+              </span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-extrabold text-white tracking-tight">FEI Copilot</h1>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  بهاری Edition 1.0
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">دستیار هوشمند فرکتالی امواج الیوت و مدیریت سناریوهای تحلیلی</p>
-            </div>
+            <p className="text-[10px] text-slate-400">دستیار هوشمند فرکتالی امواج الیوت</p>
+          </div>
+        </div>
+
+        {/* Real-time Last Movement Live Ticker Banner */}
+        <div className="hidden md:flex items-center gap-3 bg-slate-900/90 border border-slate-800 px-3.5 py-1.5 rounded-xl text-xs">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+            <span className="font-bold text-slate-300">تحلیل لحظه‌ای حرکت آخر:</span>
+            <span className="text-cyan-300 font-medium">
+              موج صعودی ۵ (سیکل ایده‌آل) • شتاب مطلوب • بدون نقض قوانین
+            </span>
+          </div>
+          <div className="h-3.5 w-px bg-slate-800" />
+          <div className="flex items-center gap-3 font-mono text-[11px]">
+            <span>تارگت ۱: <strong className="text-cyan-400">${activeScenario.targets[1]?.price.toLocaleString() || '68,400'}</strong></span>
+            <span>ابطال: <strong className="text-red-400">${activeScenario.invalidationPrice.toLocaleString()}</strong></span>
+          </div>
+        </div>
+
+        {/* Asset & Timeframe Selectors */}
+        <div className="flex items-center gap-2">
+          {/* Asset Pills */}
+          <div className="flex items-center bg-slate-950 border border-slate-800/80 rounded-xl p-1">
+            {SUPPORTED_ASSETS.map(asset => (
+              <button
+                key={asset.id}
+                onClick={() => setSelectedAssetId(asset.id)}
+                className={`px-3 py-1 text-xs rounded-lg font-semibold transition-all ${
+                  selectedAssetId === asset.id
+                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {asset.symbol}
+              </button>
+            ))}
           </div>
 
-          {/* Asset & Timeframe Selectors */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1">
-              {SUPPORTED_ASSETS.map(asset => (
-                <button
-                  key={asset.id}
-                  onClick={() => setSelectedAssetId(asset.id)}
-                  className={`px-3 py-1 text-xs rounded-lg font-medium transition-all ${
-                    selectedAssetId === asset.id
-                      ? 'bg-indigo-600 text-white shadow'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {asset.symbol}
-                </button>
-              ))}
-            </div>
-
-            <div className="h-5 w-px bg-slate-800" />
-
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 font-mono">
-              {currentAsset.timeframes.map(tf => (
-                <button
-                  key={tf}
-                  onClick={() => setSelectedTimeframe(tf)}
-                  className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
-                    selectedTimeframe === tf
-                      ? 'bg-cyan-600 text-white shadow'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {tf}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Mode Tabs */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveTab('WORKSPACE')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === 'WORKSPACE'
-                  ? 'bg-slate-800 text-white border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5 text-indigo-400" />
-              <span>محیط تعاملی چارت و تحلیل</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('CODE_AND_SDD')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === 'CODE_AND_SDD'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'bg-slate-800/80 text-slate-300 border border-slate-700 hover:bg-slate-700'
-              }`}
-            >
-              <FileCode2 className="w-3.5 h-3.5" />
-              <span>سند SDD، کدهای FastAPI و Nuxt 4</span>
-            </button>
+          {/* Timeframe Pills */}
+          <div className="flex items-center bg-slate-950 border border-slate-800/80 rounded-xl p-1 font-mono text-xs">
+            {currentAsset.timeframes.map(tf => (
+              <button
+                key={tf}
+                onClick={() => setSelectedTimeframe(tf)}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                  selectedTimeframe === tf
+                    ? 'bg-cyan-500 text-slate-950 shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
           </div>
         </div>
       </header>
 
-      {/* Realtime Last Movement & Status Banner */}
-      <div className="bg-indigo-950/20 border-b border-indigo-900/30 px-4 py-2">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-            <span className="font-semibold text-slate-300">تحلیل لحظه‌ای حرکت آخر:</span>
-            <span className="text-indigo-300 font-medium">
-              موج صعودی ۳ (سیکل ایده‌آل) با احتمال ۷۸٪ در حال توسعه • بدون نقض قوانین بنیادین
-            </span>
-          </div>
+      {/* Main Terminal Body:
+          In RTL (dir="rtl"):
+          First child = RIGHT side (Chart Studio)
+          Second child = LEFT side (Sleek Tabbed Sidebar)
+      */}
+      <main className="flex-1 flex flex-col lg:flex-row gap-3 p-3 overflow-hidden">
+        {/* RIGHT COLUMN: Interactive Candlestick Chart Studio */}
+        <section className="flex-1 h-full flex flex-col min-w-0">
+          <ChartStudio
+            candles={candles}
+            activeScenario={activeScenario}
+            onUpdateVertices={handleUpdateVertices}
+            onPatternChange={handlePatternChange}
+            onToggleLock={() => handleToggleLock()}
+            onResetToAI={handleResetToAI}
+            timeframe={selectedTimeframe}
+            assetSymbol={currentAsset.symbol}
+          />
+        </section>
 
-          <div className="flex items-center gap-4 text-slate-400 font-mono">
-            <span>تارگت ایده‌آل: <strong className="text-emerald-400 font-bold">${activeScenario.targets[1]?.price.toLocaleString() || '68,400'}</strong></span>
-            <span>سطح ابطال: <strong className="text-red-400 font-bold">${activeScenario.invalidationPrice.toLocaleString()}</strong></span>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-5">
-        {activeTab === 'WORKSPACE' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-            {/* Left 8 Cols: Chart Studio, TF Boundary Report */}
-            <div className="lg:col-span-8 flex flex-col gap-5">
-              {/* Interactive Chart Studio with Drag & Drop Elliott Vertices */}
-              <ChartStudio
-                candles={candles}
-                activeScenario={activeScenario}
-                onUpdateVertices={handleUpdateVertices}
-                onPatternChange={handlePatternChange}
-                onToggleLock={handleToggleLock}
-                onResetToAI={handleResetToAI}
-                timeframe={selectedTimeframe}
-                assetSymbol={currentAsset.symbol}
-              />
-
-              {/* Timeframe Boundary Engine Report */}
-              <TfBoundaryReport
-                report={boundaryReport}
-                activeTimeframe={selectedTimeframe}
-                onSelectTimeframe={(tf) => setSelectedTimeframe(tf)}
-              />
-            </div>
-
-            {/* Right 4 Cols: Explainability & Review Panel, Fractal Tree, Scenario Manager */}
-            <div className="lg:col-span-4 flex flex-col gap-5">
-              {/* Copilot Explainability & Rules Review */}
-              <ExplainabilityPanel
-                scenario={activeScenario}
-                onApplyAlternative={(newPattern) => handlePatternChange(newPattern)}
-                onApplyExtendedAdjustment={() => {}}
-              />
-
-              {/* Multi-Degree Fractal Tree */}
-              <FractalTree
-                currentDegree={activeScenario.degree}
-                onSelectDegree={handleSelectDegree}
-                activeScenario={activeScenario}
-                onBranchScenario={handleBranchScenario}
-              />
-
-              {/* Scenario Universe Manager */}
-              <ScenarioManager
-                scenarios={scenarios}
-                activeScenarioId={activeScenarioId}
-                onSelectScenario={setActiveScenarioId}
-                onDuplicateScenario={handleDuplicateScenario}
-                onToggleLock={(id) => {
-                  setScenarios(prev => prev.map(s => s.id === id ? { ...s, isLocked: !s.isLocked } : s));
-                }}
-                onDeleteScenario={handleDeleteScenario}
-                onNewScenario={handleNewScenario}
-              />
-            </div>
-          </div>
-        ) : (
-          /* Code and SDD Viewer Tab */
-          <div className="flex flex-col gap-4">
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileCode2 className="w-5 h-5 text-indigo-400" />
-                <span className="font-bold text-sm text-white">
-                  مستندات کامل معماری، سند جامع SDD (GitHub Spec-Kit)، و کدهای بک‌اند و فرانت‌اند
-                </span>
-              </div>
-              <span className="text-xs text-slate-400">آماده کپی و اجرا در محیط Production</span>
-            </div>
-
-            <SddAndCodeViewer />
-          </div>
-        )}
+        {/* LEFT COLUMN: Sleek Tabbed Sidebar (AI Copilot, Fractal Tree, Scenarios, TF Boundaries, SDD/Code) */}
+        <SleekSidebar
+          activeScenario={activeScenario}
+          scenarios={scenarios}
+          activeScenarioId={activeScenarioId}
+          onSelectScenario={setActiveScenarioId}
+          onDuplicateScenario={handleDuplicateScenario}
+          onToggleLock={handleToggleLock}
+          onDeleteScenario={handleDeleteScenario}
+          onNewScenario={handleNewScenario}
+          onPatternChange={handlePatternChange}
+          currentDegree={activeScenario.degree}
+          onSelectDegree={handleSelectDegree}
+          onBranchScenario={handleBranchScenario}
+          boundaryReport={boundaryReport}
+          activeTimeframe={selectedTimeframe}
+          onSelectTimeframe={setSelectedTimeframe}
+        />
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800 bg-slate-900/40 py-3 px-4 text-center text-xs text-slate-500">
-        Fractal Elliott Wave Intelligence Copilot (FEI) • طراحی‌شده بر پایه متدولوژی امواج الیوت بهاری و استانداردهای GitHub Spec-Kit
-      </footer>
     </div>
   );
 }
