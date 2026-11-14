@@ -71,7 +71,10 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
               }`}
             >
               <div className="flex items-center gap-3">
-                <div className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-indigo-400 animate-pulse' : 'bg-slate-600'}`} />
+                <div
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ backgroundColor: sc.color || (isActive ? '#818cf8' : '#475569') }}
+                />
                 <div className="flex flex-col gap-0.5">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-xs text-white">{sc.name}</span>

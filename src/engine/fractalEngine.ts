@@ -2,52 +2,74 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * Fractal Engine - Degree Management (V, W, Bold, Simple),
- * Automatic TF Boundary Evaluation (Lowest/Highest Valid TF),
+ * Dynamic TF Boundary Evaluation (Lowest/Highest Valid TF) with Pivot & ATR evidence,
  * and Downward / Upward Cross-Timeframe Consistency.
  */
 
-import { WaveDegree, DegreeConfig, TimeframeBoundaryReport, TimeframeEvaluation, Candle } from '../types/elliott';
+import {
+  WaveDegree,
+  DegreeConfig,
+  TimeframeBoundaryReport,
+  TimeframeEvaluation,
+  Candle,
+  WaveRole,
+  PatternFamily
+} from '../types/elliott';
+import { PivotDetector } from './pivotDetector';
 
 export const DEGREE_CONFIGS: Record<WaveDegree, DegreeConfig> = {
   SUPER_CYCLE: {
     id: 'SUPER_CYCLE',
     level: 1,
-    nameFa: 'سوپرسایکل (Super Cycle)',
+    nameFa: 'سوپرسایکل (V)',
     symbolPrefix: 'V',
-    color: '#8b5cf6', // Violet
+    color: '#a855f7',
     defaultTimeframe: '1M'
   },
   CYCLE: {
     id: 'CYCLE',
     level: 2,
-    nameFa: 'سایکل (Cycle)',
+    nameFa: 'سایکل (W)',
     symbolPrefix: 'W',
-    color: '#3b82f6', // Blue
+    color: '#38bdf8',
     defaultTimeframe: '1W'
   },
   PRIMARY: {
     id: 'PRIMARY',
     level: 3,
-    nameFa: 'اصلی (Primary - اعداد بولد)',
+    nameFa: 'اصلی (اعداد بولد)',
     symbolPrefix: '1',
-    color: '#10b981', // Emerald
+    color: '#10b981',
     defaultTimeframe: '1D'
   },
   INTERMEDIATE: {
     id: 'INTERMEDIATE',
     level: 4,
-    nameFa: 'میانی (Intermediate - اعداد ساده)',
+    nameFa: 'میانی (اعداد ساده)',
     symbolPrefix: '(1)',
-    color: '#f59e0b', // Amber
+    color: '#f59e0b',
     defaultTimeframe: '4H'
   }
 };
 
+export function getDegreeForTimeframe(tf: string): WaveDegree {
+  if (tf === '1M') return 'SUPER_CYCLE';
+  if (tf === '1W') return 'CYCLE';
+  if (tf === '1D') return 'PRIMARY';
+  return 'INTERMEDIATE';
+}
+
+export function getLowerDegree(degree: WaveDegree): WaveDegree {
+  if (degree === 'SUPER_CYCLE') return 'CYCLE';
+  if (degree === 'CYCLE') return 'PRIMARY';
+  return 'INTERMEDIATE';
+}
+
 export class FractalEngine {
   /**
-   * Evaluate timeframe boundaries dynamically:
-   * - Lowest Valid TF: minimum timeframe where candles >= 30, pivots are clear, noise is manageable.
-   * - Highest Valid TF: maximum timeframe with >= 20 bars to establish macro wave context.
+   * Evaluate timeframe boundaries dynamically with real ATR and Pivot evidence:
+   * - Lowest Valid TF: minimum timeframe where candles >= 25, pivots >= 4, noise manageable, and allowed by market profile.
+   * - Highest Valid TF: maximum timeframe with >= 18 bars to establish macro wave context & Absolute Bottom.
    */
   public static evaluateTimeframeBoundaries(
     assetMarketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY',
@@ -58,68 +80,80 @@ export class FractalEngine {
     const recommendedTFs: string[] = [];
     const unreliableTFs: string[] = [];
 
-    let lowestValid = '1D';
-    let highestValid = '1W';
-
-    // Standard ordering from macro to micro
-    const tfOrder = ['1M', '1W', '1D', '4H', '1H', '15M', '5M', '1M_INTRA'];
+    const tfOrder = ['1M', '1W', '1D', '4H', '1H', '15M'];
 
     for (const tf of tfOrder) {
       if (!availableTimeframes.includes(tf)) continue;
 
       const candles = dataByTf[tf] || [];
       const count = candles.length;
+      const pivots = PivotDetector.detectPivots(candles, 2, 2, 1.0);
+      const atr = PivotDetector.calculateATR(candles, 14);
+      const lastClose = candles[candles.length - 1]?.close || 1;
+      const lastAtr = atr[atr.length - 1] || 0;
+      const atrPercent = Math.round((lastAtr / lastClose) * 10000) / 100;
 
-      // Evaluation criteria
       let sufficiency: 'EXCELLENT' | 'ADEQUATE' | 'POOR' | 'INSUFFICIENT' = 'POOR';
       let noiseLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'MEDIUM';
       let eligible = false;
       let reason = '';
 
-      if (count < 15) {
+      if (count < 10) {
         sufficiency = 'INSUFFICIENT';
         noiseLevel = 'HIGH';
         eligible = false;
-        reason = `تعداد کندل‌ها (${count}) کمتر از حد نصاب ساختار موجی است.`;
+        reason = `تعداد کندل‌ها (${count}) کمتر از حداقل ۱۰ کندل برای موج‌شماری است (مستند C02).`;
         unreliableTFs.push(tf);
-      } else if (count >= 15 && count < 30) {
+      } else if (count >= 10 && count < 28) {
         sufficiency = 'POOR';
-        noiseLevel = 'MEDIUM';
-        eligible = tf === '1M' || tf === '1W';
-        reason = 'داده جهت تشخیص ساختار کلان کفایت می‌کند اما برای ریزموج‌ها محدود است.';
+        noiseLevel = 'LOW';
+        // 1M with ~30 bars is valid for Macro Super Cycle / Absolute Bottom
+        eligible = tf === '1M' && pivots.length >= 3;
+        reason = eligible
+          ? `دارای ${count} کندل و ${pivots.length} پیوت کلان؛ مناسب تشخیص کف مطلق و سطوح اول سایکل.`
+          : `داده محدود (${count} کندل)؛ برای تفکیک زیرموج‌ها ناکافی است.`;
         if (eligible) recommendedTFs.push(tf);
-      } else if (count >= 30 && count < 60) {
+        else unreliableTFs.push(tf);
+      } else if (count >= 28 && count < 60) {
         sufficiency = 'ADEQUATE';
         noiseLevel = 'LOW';
-        eligible = true;
-        reason = 'داده کافی برای تشخیص سیکل کامل و ریزموج‌ها.';
-        recommendedTFs.push(tf);
+        eligible = pivots.length >= 4;
+        reason = `دارای ${count} کندل و ${pivots.length} پیوت تأییدشده (ATR ${atrPercent}٪)؛ ساختار موجی شفاف.`;
+        if (eligible) recommendedTFs.push(tf);
+        else unreliableTFs.push(tf);
       } else {
         sufficiency = 'EXCELLENT';
-        noiseLevel = (tf === '15M' || tf === '5M') ? 'MEDIUM' : 'LOW';
+        noiseLevel = tf === '15M' ? 'MEDIUM' : 'LOW';
         eligible = true;
-        reason = 'داده عالی و پیوت‌های پرقدرت.';
+        reason = `داده کامل (${count} کندل)، ${pivots.length} پیوت تفکیک‌پذیر و نسبت نویز کنترل‌شده.`;
         recommendedTFs.push(tf);
       }
 
-      // Check TSE Iran constraint: max 4 degrees (usually 1M down to 4H or 1D)
-      if (assetMarketType === 'TSE_IRAN' && (tf === '15M' || tf === '5M')) {
+      // Specific market domain rules from Bahari documentation:
+      // 1) TSE Iran: max 4 degrees; timeframes below 4H (1H, 15M) are noisy/unreliable
+      if (assetMarketType === 'TSE_IRAN' && (tf === '1H' || tf === '15M')) {
         eligible = false;
         sufficiency = 'POOR';
         noiseLevel = 'HIGH';
-        reason = 'طبق مستندات بهاری، در بورس ایران به دلیل کیفیت داده، شمارش زیر درجه ۴ (تایم‌های زیر ۴ ساعته) توصیه نمی‌شود.';
-        unreliableTFs.push(tf);
+        reason = 'طبق مستند بهاری، در بورس ایران شمارش زیر درجه ۴ (تایم‌های زیر ۴ ساعته) به دلیل محدودیت نقدشوندگی و داده مجاز نیست.';
+        if (!unreliableTFs.includes(tf)) unreliableTFs.push(tf);
       }
 
-      let highestDegreePossible: WaveDegree = 'PRIMARY';
-      if (tf === '1M') highestDegreePossible = 'SUPER_CYCLE';
-      else if (tf === '1W') highestDegreePossible = 'CYCLE';
-      else if (tf === '1D') highestDegreePossible = 'PRIMARY';
-      else highestDegreePossible = 'INTERMEDIATE';
+      // 2) Commodity (Gold): 1M can be compressed/too slow, 15M has intraday noise
+      if (assetMarketType === 'COMMODITY' && tf === '15M') {
+        eligible = false;
+        noiseLevel = 'HIGH';
+        reason = 'نویز سشن‌های معاملاتی در تایم ۱۵ دقیقه انس بالاست؛ ۱ ساعته پایین‌ترین تایم معتبر است.';
+        if (!unreliableTFs.includes(tf)) unreliableTFs.push(tf);
+      }
+
+      const highestDegreePossible = getDegreeForTimeframe(tf);
 
       evaluations[tf] = {
         timeframe: tf,
         candleCount: count,
+        pivotCount: pivots.length,
+        atrPercent,
         dataSufficiency: sufficiency,
         noiseLevel,
         isEligibleForCounting: eligible,
@@ -128,41 +162,61 @@ export class FractalEngine {
       };
     }
 
-    // Determine boundaries
     const eligibleTfs = tfOrder.filter(t => evaluations[t]?.isEligibleForCounting);
-    if (eligibleTfs.length > 0) {
-      highestValid = eligibleTfs[0];
-      lowestValid = eligibleTfs[eligibleTfs.length - 1];
-    }
+    const highestValid = eligibleTfs.length > 0 ? eligibleTfs[0] : '1W';
+    const lowestValid = eligibleTfs.length > 0 ? eligibleTfs[eligibleTfs.length - 1] : '1D';
 
     return {
       highestValidTF: highestValid,
       lowestValidTF: lowestValid,
-      recommendedTFs,
+      recommendedTFs: eligibleTfs,
       unreliableTFs,
       evaluations
     };
   }
 
   /**
-   * Check cross-timeframe consistency
-   * e.g. If Daily Wave 3 is bullish, 4H subwaves must show 5-wave impulse (or momentum wave),
-   * not a corrective flat or zigzag in opposite direction.
+   * Check parent-child fractal consistency (C01, C03, C04, P07)
    */
   public static checkConsistency(
+    parentRole: WaveRole,
     parentWaveLabel: string,
-    parentDirection: 'BULLISH' | 'BEARISH',
-    subwavePattern: string
+    subwavePattern: PatternFamily
   ): { isConsistent: boolean; warningFa?: string } {
-    const isMainImpulse = ['1', '3', '5', 'A', 'C'].some(label => parentWaveLabel.includes(label));
+    if (parentRole === 'ROOT') return { isConsistent: true };
 
-    if (isMainImpulse) {
-      if (subwavePattern === 'FLAT_REGULAR' || subwavePattern === 'TRIANGLE_CONVERGING') {
-        return {
-          isConsistent: false,
-          warningFa: `هشدار تعارض فرکتالی: موج اصلی ${parentWaveLabel} در تایم‌فریم بالاتر باید ساختار ۵ موجی (یا شتابدار) داشته باشد، اما در تایم‌فریم پایین ساختار اصلاحی سه‌تایی ثبت شده است.`
-        };
-      }
+    const motivePatterns: PatternFamily[] = [
+      'IDEAL_CYCLE',
+      'TERMINAL',
+      'ANTI_TERMINAL',
+      'LEADING_DIAGONAL',
+      'ANTI_LEADING_DIAGONAL',
+      'ENDING_DIAGONAL',
+      'ANTI_DIAGONAL'
+    ];
+    const correctivePatterns: PatternFamily[] = [
+      'ZIGZAG',
+      'FLAT_REGULAR',
+      'FLAT_EXPANDED',
+      'FLAT_RUNNING',
+      'TRIANGLE_CONVERGING',
+      'TRIANGLE_EXPANDING',
+      'COMPLEX_COMBINATION',
+      'ANTI_CYCLE'
+    ];
+
+    if (parentRole === 'MOTIVE' && correctivePatterns.includes(subwavePattern)) {
+      return {
+        isConsistent: false,
+        warningFa: `تعارض فرکتالی (C04): موج مادر «${parentWaveLabel}» یک موج اصلی (پیشرو) است و باید ساختار درونی ۵ موجی (ایده‌آل، ترمینال یا قطر) داشته باشد، اما الگوی اصلاحی سه‌موجی انتخاب شده است.`
+      };
+    }
+
+    if (parentRole === 'CORRECTIVE' && motivePatterns.includes(subwavePattern)) {
+      return {
+        isConsistent: false,
+        warningFa: `تعارض فرکتالی (C04): موج مادر «${parentWaveLabel}» یک موج اصلاحی است و باید ساختار درونی ۳ موجی (زیگزاگ، فلت، مثلث یا ترکیبی) داشته باشد، نه ساختار ۵ موجی.`
+      };
     }
 
     return { isConsistent: true };

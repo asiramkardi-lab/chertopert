@@ -16,7 +16,7 @@ export interface DegreeConfig {
   defaultTimeframe: string;
 }
 
-export type PatternFamily = 
+export type PatternFamily =
   | 'IDEAL_CYCLE'
   | 'TERMINAL'
   | 'ANTI_TERMINAL'
@@ -33,7 +33,7 @@ export type PatternFamily =
   | 'TRIANGLE_EXPANDING'
   | 'COMPLEX_COMBINATION';
 
-export type WaveStatus = 
+export type WaveStatus =
   | 'DEVELOPING'
   | 'POTENTIAL'
   | 'CONFIRMED'
@@ -43,6 +43,8 @@ export type WaveStatus =
   | 'INCOMPLETE';
 
 export type WaveDirection = 'BULLISH' | 'BEARISH';
+
+export type WaveRole = 'MOTIVE' | 'CORRECTIVE' | 'ROOT';
 
 export type WaveNature = 'IMPULSIVE_MOMENTUM' | 'FRACTAL_EXTENDED';
 
@@ -73,8 +75,8 @@ export interface RuleValidationItem {
   score: number; // 0 to 100
   messageFa: string;
   details?: string;
-  conceptId?: string; // e.g. "C07", "C10", "C19", "C22", "C23", "C24"
-  canBeSolvedByAlternate?: string; // e.g., "TERMINAL", "ANTI_TERMINAL", "DIAGONAL"
+  conceptId?: string;
+  canBeSolvedByAlternate?: PatternFamily;
 }
 
 export interface TargetItem {
@@ -91,28 +93,36 @@ export interface TargetItem {
 export interface WaveScenario {
   id: string;
   name: string;
+  color: string; // Distinct scenario color on chart
   isPrimary: boolean;
   isLocked: boolean;
+  isSelectedForTree: boolean; // Kept by user in Wizard Step 2/3
+  isDiscarded?: boolean;
+  isPartial?: boolean; // e.g. only Wave 1-2 or 1-2-3 occurred so far
   patternType: PatternFamily;
   degree: WaveDegree;
   direction: WaveDirection;
   vertices: WaveVertex[];
-  currentWave: string; // e.g. "Wave 3 in progress"
+  currentWave: string;
   completionPercentage: number;
-  validityScore: number; // 0-100
-  idealnessScore: number; // 0-100
-  confidenceScore: number; // 0-100
+  validityScore: number;
+  idealnessScore: number;
+  confidenceScore: number;
   invalidationPrice: number;
   targets: TargetItem[];
   rulesResults: RuleValidationItem[];
   source: 'AI' | 'USER_EDITED' | 'MANUAL_DRAW';
-  subwaves?: WaveScenario[];
+  timeframe: string;
+  parentNodeId?: string;
+  parentLegLabel?: string; // e.g. "موج 1" or "موج 3"
   notes?: string;
 }
 
 export interface TimeframeEvaluation {
   timeframe: string;
   candleCount: number;
+  pivotCount: number;
+  atrPercent: number;
   dataSufficiency: 'EXCELLENT' | 'ADEQUATE' | 'POOR' | 'INSUFFICIENT';
   noiseLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   isEligibleForCounting: boolean;
@@ -128,14 +138,38 @@ export interface TimeframeBoundaryReport {
   evaluations: Record<string, TimeframeEvaluation>;
 }
 
-export interface CopilotSuggestion {
+export interface FractalNode {
   id: string;
-  timestamp: number;
-  titleFa: string;
-  messageFa: string;
-  ruleViolated?: string;
-  suggestedAction: 'CONVERT_PATTERN' | 'RELABEL_EXTENDED' | 'CREATE_BRANCH' | 'ADJUST_TARGET';
-  targetPattern?: PatternFamily;
-  suggestedVertices?: WaveVertex[];
-  resolved: boolean;
+  scenarioId: string;
+  scenarioName: string;
+  color: string;
+  timeframe: string;
+  degree: WaveDegree;
+  patternType: PatternFamily;
+  waveLabel: string; // "کل ساختار" or "موج 1", "موج 2", ...
+  role: WaveRole;
+  startTimestamp: number;
+  endTimestamp: number;
+  startPrice: number;
+  endPrice: number;
+  vertices: WaveVertex[];
+  validityScore: number;
+  isValid: boolean;
+  children: FractalNode[];
+}
+
+export interface DrillDownContext {
+  nodeId: string;
+  parentScenarioId: string;
+  parentScenarioName: string;
+  parentTimeframe: string;
+  targetTimeframe: string;
+  waveLabel: string;
+  role: WaveRole;
+  direction: WaveDirection;
+  startTimestamp: number;
+  endTimestamp: number;
+  startPrice: number;
+  endPrice: number;
+  degree: WaveDegree;
 }
