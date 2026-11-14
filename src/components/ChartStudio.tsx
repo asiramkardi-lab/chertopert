@@ -73,6 +73,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const dragMovedRef = useRef<boolean>(false);
   const frozenBoundsRef = useRef<{ minPrice: number; priceRange: number } | null>(null);
   const [draggingVertexIndex, setDraggingVertexIndex] = useState<number | null>(null);
   const [draggingBottom, setDraggingBottom] = useState<boolean>(false);
@@ -113,6 +114,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   // Reset selected vertex popover when active scenario or interaction mode changes
   useEffect(() => {
     setSelectedVertexIndex(null);
+    dragMovedRef.current = false;
     setDragMoved(false);
   }, [activeScenario.id, interactionMode]);
 
@@ -224,18 +226,22 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
   const handleVertexMouseDown = (index: number, e: React.MouseEvent) => {
     if (interactionMode !== 'EDIT') return;
+    e.preventDefault();
     e.stopPropagation();
     dragStartPosRef.current = { x: e.clientX, y: e.clientY };
     frozenBoundsRef.current = { minPrice, priceRange };
+    dragMovedRef.current = false;
     setDraggingVertexIndex(index);
     setDragMoved(false);
   };
 
   const handleBottomMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
     if (interactionMode === 'PICK_BOTTOM' || onUpdateAbsoluteBottom) {
       dragStartPosRef.current = { x: e.clientX, y: e.clientY };
       frozenBoundsRef.current = { minPrice, priceRange };
+      dragMovedRef.current = false;
       setDraggingBottom(true);
       setDragMoved(false);
     }
@@ -251,7 +257,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       : 0;
 
     if (draggingBottom && onUpdateAbsoluteBottom) {
-      if (dist < 4 && !dragMoved) return;
+      if (dist < 4 && !dragMovedRef.current) return;
+      dragMovedRef.current = true;
       setDragMoved(true);
       const { candleIndex, price, timestamp } = getIndexAndPriceFromCoords(mouseX, mouseY, true);
       onUpdateAbsoluteBottom({
@@ -265,24 +272,26 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     }
 
     if (draggingVertexIndex === null || activeScenario.isLocked) return;
-    if (dist < 4 && !dragMoved) return;
+    if (dist < 4 && !dragMovedRef.current) return;
+    dragMovedRef.current = true;
     setDragMoved(true);
 
     const { candleIndex, price, timestamp } = getIndexAndPriceFromCoords(mouseX, mouseY);
-    const updated = [...activeScenario.vertices];
-    if (updated[draggingVertexIndex]) {
-      updated[draggingVertexIndex] = {
-        ...updated[draggingVertexIndex],
-        candleIndex,
-        price,
-        timestamp
-      };
-      onUpdateVertices(updated);
-    }
+    const updated = activeScenario.vertices.map((v, i) =>
+      i === draggingVertexIndex
+        ? {
+            ...v,
+            candleIndex,
+            price,
+            timestamp
+          }
+        : v
+    );
+    onUpdateVertices(updated);
   };
 
   const handleMouseUp = () => {
-    if (draggingVertexIndex !== null && !dragMoved) {
+    if (draggingVertexIndex !== null && !dragMovedRef.current) {
       setSelectedVertexIndex(prev => (prev === draggingVertexIndex ? null : draggingVertexIndex));
       setCustomLabelInput(activeScenario.vertices[draggingVertexIndex]?.label || '');
     }
@@ -311,7 +320,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
   const handleSvgClick = (e: React.MouseEvent) => {
     if (!containerRef.current) return;
-    if (dragMoved) {
+    if (dragMovedRef.current || dragMoved) {
+      dragMovedRef.current = false;
       setDragMoved(false);
       return;
     }
