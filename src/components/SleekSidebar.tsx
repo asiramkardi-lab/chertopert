@@ -5,13 +5,17 @@
  * Features: AI Copilot & Rules, Fractal Tree, Scenario Universe, TF Boundary, and SDD/Code Viewer.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   WaveScenario, 
   PatternFamily, 
   WaveDegree, 
+  WaveRole,
+  WaveVertex,
   TimeframeBoundaryReport 
 } from '../types/elliott';
+import { ValidationSummary } from '../engine/rulesEngine';
+import { ChartInteractionMode } from './ChartStudio';
 import { ExplainabilityPanel } from './ExplainabilityPanel';
 import { FractalTree } from './FractalTree';
 import { ScenarioManager } from './ScenarioManager';
@@ -23,11 +27,9 @@ import {
   FolderGit2, 
   Compass, 
   FileCode2, 
-  Sparkles,
   ShieldCheck,
-  Zap,
-  Layers,
-  ChevronLeft
+  CornerDownLeft,
+  Layers
 } from 'lucide-react';
 
 export type SidebarTab = 'COPILOT' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
@@ -48,6 +50,20 @@ interface SleekSidebarProps {
   boundaryReport: TimeframeBoundaryReport;
   activeTimeframe: string;
   onSelectTimeframe: (tf: string) => void;
+  onValidateScenario?: (id: string, summary: ValidationSummary) => void;
+  onHoverScenario?: (id: string | null) => void;
+  onUpdateVertices?: (vertices: WaveVertex[]) => void;
+  interactionMode?: ChartInteractionMode;
+  onChangeInteractionMode?: (mode: ChartInteractionMode) => void;
+  drillContext?: {
+    key: string;
+    waveLabel: string;
+    parentTimeframe: string;
+    targetTimeframe: string;
+    role: WaveRole;
+    candleCount: number;
+  } | null;
+  onExitDrill?: () => void;
 }
 
 export const SleekSidebar: React.FC<SleekSidebarProps> = ({
@@ -65,9 +81,22 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   onBranchScenario,
   boundaryReport,
   activeTimeframe,
-  onSelectTimeframe
+  onSelectTimeframe,
+  onValidateScenario,
+  onHoverScenario,
+  onUpdateVertices,
+  interactionMode,
+  onChangeInteractionMode,
+  drillContext,
+  onExitDrill
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
+
+  useEffect(() => {
+    if (drillContext?.key) {
+      setActiveTab('SCENARIOS');
+    }
+  }, [drillContext?.key]);
 
   const tabs = [
     { id: 'COPILOT' as SidebarTab, label: 'دستیار هوشمند و قوانین', icon: Cpu, badge: `${activeScenario.validityScore}%` },
@@ -87,7 +116,10 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                if (tab.id !== 'SCENARIOS') onHoverScenario?.(null);
+              }}
               className={`flex items-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
                 isActive
                   ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
@@ -152,9 +184,42 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
         {activeTab === 'SCENARIOS' && (
           <div className="space-y-4">
-            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
-              📁 <strong>جهان سناریوها:</strong> تمام فرضیه‌های موازی و معتبر ساختاری در این بخش نگهداری می‌شوند. سناریوهای قفل‌شده توسط هوش مصنوعی دستکاری نخواهند شد.
-            </div>
+            {drillContext ? (
+              <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/40 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-white">
+                    <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <span>حالت دریل‌دان: {drillContext.waveLabel}</span>
+                  </div>
+                  <span className="font-mono text-[11px] text-cyan-300">
+                    {drillContext.parentTimeframe} ← {drillContext.targetTimeframe}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-300">
+                  <span>
+                    ساختار مورد انتظار:{' '}
+                    <strong className={drillContext.role === 'MOTIVE' ? 'text-emerald-300' : 'text-amber-300'}>
+                      {drillContext.role === 'MOTIVE' ? 'اصلی (۵ موجی)' : 'اصلاحی (۳ موجی)'}
+                    </strong>
+                    {' · '}
+                    <span className="font-mono tabular-nums text-slate-400">{drillContext.candleCount} کندل متناطر</span>
+                  </span>
+                  {onExitDrill && (
+                    <button
+                      onClick={onExitDrill}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium shrink-0"
+                    >
+                      <CornerDownLeft className="w-3 h-3" />
+                      <span>بازگشت</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
+                <strong>جهان سناریوها:</strong> برای بررسی ساختار درونی هر موج، روی خط آن موج در نمودار کلیک کنید تا داده‌های تایم‌فریم پایین‌تر و سناریوهای آن بارگذاری شوند.
+              </div>
+            )}
 
             <ScenarioManager
               scenarios={scenarios}
@@ -164,6 +229,12 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onToggleLock={onToggleLock}
               onDeleteScenario={onDeleteScenario}
               onNewScenario={onNewScenario}
+              onValidateScenario={onValidateScenario}
+              onApplyPattern={onPatternChange}
+              onHoverScenario={onHoverScenario}
+              onUpdateVertices={onUpdateVertices}
+              interactionMode={interactionMode}
+              onChangeInteractionMode={onChangeInteractionMode}
             />
           </div>
         )}

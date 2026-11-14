@@ -6,7 +6,7 @@
  * validating parent-child consistency (C04), editing sub-scenarios, and saving subtrees recursively.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FractalNode,
   DrillDownContext,
@@ -14,7 +14,7 @@ import {
   PatternFamily,
   WaveVertex
 } from '../types/elliott';
-import { PATTERN_LABELS_FA, inferWaveRole } from '../engine/rulesEngine';
+import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole } from '../engine/rulesEngine';
 import { DEGREE_CONFIGS } from '../engine/fractalEngine';
 import { getLowerTimeframe } from '../data/sampleMarketData';
 import { ChartInteractionMode } from './ChartStudio';
@@ -35,7 +35,8 @@ import {
   Move,
   Trash2,
   Sparkles,
-  CornerDownLeft
+  CornerDownLeft,
+  ShieldCheck
 } from 'lucide-react';
 
 const TF_ORDER = ['1M', '1W', '1D', '4H', '1H', '15M'];
@@ -67,6 +68,8 @@ interface WizardStep3DrillDownProps {
   onCreateScratchScenario: () => void;
   onBackToStep2: () => void;
   activeLevelScenario: WaveScenario;
+  onValidateScenario?: (id: string, summary: ValidationSummary) => void;
+  onHoverScenario?: (id: string | null) => void;
 }
 
 export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
@@ -91,11 +94,43 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   onChangeInteractionMode,
   onCreateScratchScenario,
   onBackToStep2,
-  activeLevelScenario
+  activeLevelScenario,
+  onValidateScenario,
+  onHoverScenario
 }) => {
   const [subTab, setSubTab] = useState<'SCENARIOS' | 'LEGS' | 'EDIT' | 'RULES'>('SCENARIOS');
+  const [validationBanner, setValidationBanner] = useState<{
+    scenarioId: string;
+    scenarioName: string;
+    summary: ValidationSummary;
+  } | null>(null);
 
   const currentDrill = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null;
+
+  useEffect(() => {
+    setValidationBanner(null);
+    if (currentDrill?.nodeId) {
+      setSubTab('SCENARIOS');
+    }
+  }, [activeLevelScenario.id, currentDrill?.nodeId]);
+
+  const handleValidateActiveLevel = () => {
+    const summary = RulesEngine.validateStructure(
+      activeLevelScenario.patternType,
+      activeLevelScenario.vertices,
+      activeLevelScenario.direction,
+      currentDrill?.role || 'ROOT',
+      currentDrill?.waveLabel || ''
+    );
+    setValidationBanner({
+      scenarioId: activeLevelScenario.id,
+      scenarioName: activeLevelScenario.name,
+      summary
+    });
+    if (onValidateScenario) {
+      onValidateScenario(activeLevelScenario.id, summary);
+    }
+  };
   const currentTF = activeLevelScenario.timeframe;
   const nextLowerTF = getLowerTimeframe(currentTF);
 
@@ -122,10 +157,16 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 onSelectRootNode(node.id);
               }
             }}
+            onMouseEnter={() => {
+              if (depth === 0) onHoverScenario?.(node.scenarioId);
+            }}
+            onMouseLeave={() => {
+              if (depth === 0) onHoverScenario?.(null);
+            }}
             className={`p-2.5 rounded-lg border transition-colors cursor-pointer ${
               isSelected
                 ? 'bg-slate-800/80 border-cyan-500/50'
-                : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                : 'bg-slate-900/60 border-slate-800 hover:border-indigo-500/50'
             }`}
           >
             <div className="flex items-center justify-between gap-2">
@@ -164,6 +205,112 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
 
   const failedHardRules = activeLevelScenario.rulesResults.filter(r => r.type === 'HARD' && !r.passed);
   const solvableAlt = failedHardRules.find(r => r.canBeSolvedByAlternate)?.canBeSolvedByAlternate;
+
+  const bannerHardFails = validationBanner
+    ? validationBanner.summary.rules.filter(r => r.type === 'HARD' && !r.passed)
+    : [];
+  const isBannerValid = Boolean(validationBanner?.summary.isValid && bannerHardFails.length === 0);
+
+  const renderValidationBanner = () => {
+    if (!validationBanner || validationBanner.scenarioId !== activeLevelScenario.id) return null;
+    return (
+      <div
+        className={`p-3.5 rounded-xl border space-y-2.5 transition-colors ${
+          isBannerValid
+            ? 'bg-emerald-950/35 border-emerald-500/50'
+            : 'bg-rose-950/35 border-rose-500/50'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {isBannerValid ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <div>
+              <h4 className={`text-xs font-bold ${isBannerValid ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {isBannerValid
+                  ? `تأیید معتبر: «${validationBanner.scenarioName}» مطابق قوانین است`
+                  : `خطا در اعتبارسنجی «${validationBanner.scenarioName}» (${bannerHardFails.length} نقض قانون)`}
+              </h4>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                الگو: {PATTERN_LABELS_FA[validationBanner.summary.patternType]}
+              </p>
+            </div>
+          </div>
+          <span
+            className={`px-2 py-0.5 rounded font-mono tabular-nums text-[11px] font-bold border shrink-0 ${
+              isBannerValid
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+            }`}
+          >
+            {validationBanner.summary.validityScore}%
+          </span>
+        </div>
+
+        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+          {validationBanner.summary.rules.map(rule => (
+            <div
+              key={rule.ruleId}
+              className={`p-2 rounded-lg border text-[11px] space-y-0.5 ${
+                rule.passed
+                  ? 'bg-emerald-950/25 border-emerald-500/30 text-emerald-200'
+                  : rule.type === 'HARD'
+                  ? 'bg-rose-950/45 border-rose-500/50 text-rose-200'
+                  : 'bg-amber-950/25 border-amber-500/30 text-amber-200'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 font-bold">
+                <div className="flex items-center gap-1.5">
+                  {rule.passed ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  ) : rule.type === 'HARD' ? (
+                    <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  )}
+                  <span>{rule.nameFa}</span>
+                </div>
+                <span className="font-mono tabular-nums text-[10px] opacity-80">{rule.score}%</span>
+              </div>
+              <p className="text-[11px] opacity-90 leading-relaxed pr-5">{rule.messageFa}</p>
+            </div>
+          ))}
+        </div>
+
+        {!isBannerValid && validationBanner.summary.suggestedAlternative && (
+          <div className="pt-2 border-t border-rose-500/25 flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[11px] text-amber-200">
+              پیشنهاد جایگزین: <strong>{PATTERN_LABELS_FA[validationBanner.summary.suggestedAlternative]}</strong>
+            </span>
+            <button
+              onClick={() => {
+                const alt = validationBanner.summary.suggestedAlternative!;
+                onPatternChange(alt);
+                const updated = RulesEngine.validateStructure(
+                  alt,
+                  activeLevelScenario.vertices,
+                  activeLevelScenario.direction,
+                  currentDrill?.role || 'ROOT',
+                  currentDrill?.waveLabel || ''
+                );
+                setValidationBanner({
+                  scenarioId: activeLevelScenario.id,
+                  scenarioName: activeLevelScenario.name,
+                  summary: updated
+                });
+              }}
+              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors"
+            >
+              تبدیل و اعتبارسنجی مجدد
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -225,7 +372,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
           </div>
         ) : (
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            برای مشاهده ساختار درونی هر موج در تایم پایین‌تر، روی دکمه «ریزش» کنار یال موج کلیک کنید یا مستقیماً روی موج در نمودار دابل‌کلیک کنید.
+            برای مشاهده داده‌ها و سناریوهای تایم‌فریم پایین‌تر هر موج، مستقیماً روی خط موج در نمودار کلیک کنید یا از تب «یال‌ها» دکمه ریزش را بزنید.
           </p>
         )}
 
@@ -240,7 +387,10 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
             {currentDrill ? `زیرسناریوها (${activeSubScenarios.length})` : `درخت (${fractalTreeNodes.length})`}
           </button>
           <button
-            onClick={() => setSubTab('LEGS')}
+            onClick={() => {
+              setSubTab('LEGS');
+              onHoverScenario?.(null);
+            }}
             className={`py-1.5 rounded-md font-medium ${
               subTab === 'LEGS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
@@ -248,7 +398,10 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
             یال‌ها ({waveLegs.length})
           </button>
           <button
-            onClick={() => setSubTab('EDIT')}
+            onClick={() => {
+              setSubTab('EDIT');
+              onHoverScenario?.(null);
+            }}
             className={`py-1.5 rounded-md font-medium ${
               subTab === 'EDIT' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
@@ -256,7 +409,10 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
             ویرایش
           </button>
           <button
-            onClick={() => setSubTab('RULES')}
+            onClick={() => {
+              setSubTab('RULES');
+              onHoverScenario?.(null);
+            }}
             className={`py-1.5 rounded-md font-medium ${
               subTab === 'RULES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
@@ -269,23 +425,41 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
       {/* Scrollable Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {subTab === 'SCENARIOS' && !currentDrill && (
-          <div className="space-y-2.5">
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
+          <div className="space-y-2.5" onMouseLeave={() => onHoverScenario?.(null)}>
+            <div className="text-[11px] text-slate-400 flex items-center justify-between gap-2">
               <span>درخت سناریوهای تأییدشده (کلیک برای نمایش روی چارت)</span>
+              <button
+                onClick={handleValidateActiveLevel}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition-colors shrink-0"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>تأیید (Validate)</span>
+              </button>
             </div>
+            {renderValidationBanner()}
             {renderTreeNodes(fractalTreeNodes)}
           </div>
         )}
 
         {subTab === 'SCENARIOS' && currentDrill && (
-          <div className="space-y-2.5">
-            <button
-              onClick={onCreateScratchScenario}
-              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/40 text-emerald-300 text-xs font-semibold"
-            >
-              <PenTool className="w-3.5 h-3.5" />
-              <span>ترسیم زیرموج دلخواه از صفر</span>
-            </button>
+          <div className="space-y-2.5" onMouseLeave={() => onHoverScenario?.(null)}>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onCreateScratchScenario}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 text-xs font-semibold"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>ترسیم زیرموج دلخواه از صفر</span>
+              </button>
+              <button
+                onClick={handleValidateActiveLevel}
+                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shrink-0"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>تأیید (Validate)</span>
+              </button>
+            </div>
+            {renderValidationBanner()}
 
             {activeSubScenarios.map(sc => {
               const isActive = sc.id === activeSubScenarioId;
@@ -296,12 +470,14 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 <div
                   key={sc.id}
                   onClick={() => onSelectSubScenario(sc.id)}
+                  onMouseEnter={() => onHoverScenario?.(sc.id)}
+                  onMouseLeave={() => onHoverScenario?.(null)}
                   className={`p-3 rounded-xl border transition-colors cursor-pointer space-y-2 ${
                     sc.isDiscarded
                       ? 'bg-slate-950/60 border-slate-900 opacity-55'
                       : isActive
                       ? 'bg-slate-900 border-slate-600'
-                      : 'bg-slate-900/50 border-slate-800/80 hover:border-slate-700'
+                      : 'bg-slate-900/50 border-slate-800/80 hover:border-indigo-500/50'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -455,20 +631,31 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
               </button>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-2">
               <label className="text-[11px] text-slate-400 block">نوع الگو:</label>
-              <select
-                value={activeLevelScenario.patternType}
-                onChange={e => onPatternChange(e.target.value as PatternFamily)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-              >
-                {(Object.keys(PATTERN_LABELS_FA) as PatternFamily[]).map(pf => (
-                  <option key={pf} value={pf}>
-                    {PATTERN_LABELS_FA[pf]}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={activeLevelScenario.patternType}
+                  onChange={e => onPatternChange(e.target.value as PatternFamily)}
+                  className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                >
+                  {(Object.keys(PATTERN_LABELS_FA) as PatternFamily[]).map(pf => (
+                    <option key={pf} value={pf}>
+                      {PATTERN_LABELS_FA[pf]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleValidateActiveLevel}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shrink-0"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>تأیید (Validate)</span>
+                </button>
+              </div>
             </div>
+
+            {renderValidationBanner()}
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">

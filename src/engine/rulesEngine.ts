@@ -507,17 +507,22 @@ export class RulesEngine {
     parentRole: WaveRole = 'ROOT',
     parentDirection: WaveDirection = 'BULLISH',
     parentNodeId?: string,
-    parentLegLabel?: string
+    parentLegLabel?: string,
+    endIndex?: number
   ): WaveScenario[] {
     if (candles.length < 10) return [];
 
     const safeStart = Math.max(0, Math.min(candles.length - 8, startIndex));
-    const sliced = candles.slice(safeStart);
+    const safeEnd =
+      endIndex !== undefined
+        ? Math.max(safeStart + 6, Math.min(candles.length - 1, endIndex))
+        : candles.length - 1;
+    const sliced = candles.slice(safeStart, safeEnd + 1);
     const pivots = PivotDetector.detectPivots(sliced, 2, 2, 0.8);
 
     // Build alternating High/Low pivot chain starting at safeStart
     const startPrice = sliced[0].low;
-    const endIdx = candles.length - 1;
+    const endIdx = safeEnd;
     const endPrice = candles[endIdx].close;
     const inferredDir: WaveDirection = parentRole === 'ROOT' ? (endPrice >= startPrice ? 'BULLISH' : 'BEARISH') : parentDirection;
     const isBull = inferredDir === 'BULLISH';
@@ -540,8 +545,8 @@ export class RulesEngine {
       return { idx: bestIdx, price: bestPrice };
     };
 
-    const span = candles.length - 1 - safeStart;
-    const v0 = pickPeak(safeStart, Math.min(candles.length - 1, safeStart + 2), isBull ? 'LOW' : 'HIGH');
+    const span = safeEnd - safeStart;
+    const v0 = pickPeak(safeStart, Math.min(safeEnd, safeStart + 2), isBull ? 'LOW' : 'HIGH');
 
     const scenarios: WaveScenario[] = [];
 
@@ -596,19 +601,20 @@ export class RulesEngine {
     const w2 = pickPeak(w1.idx + 3, safeStart + Math.round(span * 0.45), isBull ? 'LOW' : 'HIGH');
     const w3 = pickPeak(w2.idx + 4, safeStart + Math.round(span * 0.78), isBull ? 'HIGH' : 'LOW');
     const w4 = pickPeak(w3.idx + 3, safeStart + Math.round(span * 0.90), isBull ? 'LOW' : 'HIGH');
-    const w5 = pickPeak(w4.idx + 3, candles.length - 1, isBull ? 'HIGH' : 'LOW');
+    const w5 = pickPeak(w4.idx + 3, safeEnd, isBull ? 'HIGH' : 'LOW');
 
     const prefix = degree === 'SUPER_CYCLE' ? 'V' : degree === 'CYCLE' ? 'W' : '';
     const fmt = (lbl: string) => (degree === 'INTERMEDIATE' ? `(${lbl})` : `${prefix}${lbl}`);
 
     // Determine if data actually shows a partial 1-2-3 structure (like TSE_SHAPNA where w3 is near the end)
-    const isActuallyPartial = w3.idx >= candles.length - 10 || w4.idx >= candles.length - 4;
+    const isActuallyPartial =
+      endIndex === undefined && (w3.idx >= safeEnd - 10 || w4.idx >= safeEnd - 4);
 
     if (parentRole === 'CORRECTIVE') {
       // Corrective parent -> prioritize Zigzag, Flat, Triangle, W-X-Y
       const a = pickPeak(safeStart + Math.round(span * 0.15), safeStart + Math.round(span * 0.42), isBull ? 'HIGH' : 'LOW');
       const b = pickPeak(a.idx + 3, safeStart + Math.round(span * 0.68), isBull ? 'LOW' : 'HIGH');
-      const c = pickPeak(b.idx + 3, candles.length - 1, isBull ? 'HIGH' : 'LOW');
+      const c = pickPeak(b.idx + 3, safeEnd, isBull ? 'HIGH' : 'LOW');
 
       scenarios.push(
         mkScenario(
@@ -650,7 +656,7 @@ export class RulesEngine {
         const tB = pickPeak(a.idx + 3, safeStart + Math.round(span * 0.48), isBull ? 'LOW' : 'HIGH');
         const tC = pickPeak(tB.idx + 3, safeStart + Math.round(span * 0.68), isBull ? 'HIGH' : 'LOW');
         const tD = pickPeak(tC.idx + 3, safeStart + Math.round(span * 0.85), isBull ? 'LOW' : 'HIGH');
-        const tE = pickPeak(tD.idx + 3, candles.length - 1, isBull ? 'HIGH' : 'LOW');
+        const tE = pickPeak(tD.idx + 3, safeEnd, isBull ? 'HIGH' : 'LOW');
         scenarios.push(
           mkScenario(
             `sc_tri_${Date.now()}_3`,

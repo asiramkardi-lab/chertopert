@@ -11,10 +11,11 @@ import {
   WaveVertex,
   PatternFamily,
   WaveDegree,
+  WaveRole,
   Candle
 } from './types/elliott';
-import { RulesEngine, SCENARIO_COLORS } from './engine/rulesEngine';
-import { FractalEngine, getDegreeForTimeframe } from './engine/fractalEngine';
+import { RulesEngine, ValidationSummary, SCENARIO_COLORS, inferWaveRole } from './engine/rulesEngine';
+import { FractalEngine, getDegreeForTimeframe, getLowerDegree, DEGREE_CONFIGS } from './engine/fractalEngine';
 import { SUPPORTED_ASSETS, generateRealisticCandles, generateAllTimeframesForAsset } from './data/sampleMarketData';
 import { ChartStudio, ChartInteractionMode } from './components/ChartStudio';
 import { SleekSidebar } from './components/SleekSidebar';
@@ -29,6 +30,23 @@ import {
 } from 'lucide-react';
 
 type AppMode = 'WIZARD' | 'STUDIO' | 'SDD';
+
+const TF_ORDER = ['1M', '1W', '1D', '4H', '1H', '15M'];
+
+interface StudioDrillEntry {
+  key: string;
+  parentScenarioId: string;
+  parentScenarioName: string;
+  parentTimeframe: string;
+  targetTimeframe: string;
+  waveLabel: string;
+  role: WaveRole;
+  direction: 'BULLISH' | 'BEARISH';
+  degree: WaveDegree;
+  startTimestamp: number;
+  endTimestamp: number;
+  legIndex: number;
+}
 
 export default function App() {
   const [appMode, setAppMode] = useState<AppMode>('WIZARD');
@@ -101,22 +119,235 @@ export default function App() {
   const [scenarios, setScenarios] = useState<WaveScenario[]>(() => buildStudioScenarios(candles, selectedTimeframe));
   const [activeScenarioId, setActiveScenarioId] = useState<string>(() => scenarios[0]?.id || '');
 
+  // Free Studio Drill-Down state (multi-level fractal stack & cached sub-scenarios)
+  const [studioDrillStack, setStudioDrillStack] = useState<StudioDrillEntry[]>([]);
+  const [studioSubScenariosByKey, setStudioSubScenariosByKey] = useState<Record<string, WaveScenario[]>>({});
+  const [studioActiveSubIdByKey, setStudioActiveSubIdByKey] = useState<Record<string, string>>({});
+  const [hoveredStudioScenarioId, setHoveredStudioScenarioId] = useState<string | null>(null);
+
   useEffect(() => {
     const next = buildStudioScenarios(candles, selectedTimeframe);
     setScenarios(next);
     setActiveScenarioId(next[0]?.id || '');
+    setStudioDrillStack([]);
+    setStudioSubScenariosByKey({});
+    setStudioActiveSubIdByKey({});
+    setHoveredStudioScenarioId(null);
   }, [selectedAssetId, selectedTimeframe, candles, buildStudioScenarios]);
 
   const activeScenario = useMemo(() => {
     return scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
   }, [scenarios, activeScenarioId]);
 
+  const currentStudioDrill = studioDrillStack.length > 0 ? studioDrillStack[studioDrillStack.length - 1] : null;
+  const effectiveTimeframe = currentStudioDrill ? currentStudioDrill.targetTimeframe : selectedTimeframe;
+
+  const effectiveCandles = useMemo(() => {
+    if (!currentStudioDrill) return candles;
+    return generateRealisticCandles(selectedAssetId, currentStudioDrill.targetTimeframe, 72, {
+      startTs: currentStudioDrill.startTimestamp,
+      endTs: currentStudioDrill.endTimestamp
+    });
+  }, [currentStudioDrill, selectedAssetId, candles]);
+
+  const effectiveScenarios = useMemo(() => {
+    if (!currentStudioDrill) return scenarios;
+    return studioSubScenariosByKey[currentStudioDrill.key] || [];
+  }, [currentStudioDrill, studioSubScenariosByKey, scenarios]);
+
+  const effectiveActiveScenario = useMemo(() => {
+    if (!currentStudioDrill) return activeScenario;
+    const list = studioSubScenariosByKey[currentStudioDrill.key] || [];
+    const targetId = studioActiveSubIdByKey[currentStudioDrill.key];
+    return list.find(s => s.id === targetId) || list[0] || activeScenario;
+  }, [currentStudioDrill, studioSubScenariosByKey, studioActiveSubIdByKey, activeScenario]);
+
+  const hoveredStudioScenario = useMemo(() => {
+    if (!hoveredStudioScenarioId) return null;
+    return effectiveScenarios.find(s => s.id === hoveredStudioScenarioId) || null;
+  }, [hoveredStudioScenarioId, effectiveScenarios]);
+
+  const getNextValidLowerTF = useCallback(
+    (currentTf: string): string | null => {
+      const currentIdx = TF_ORDER.indexOf(currentTf);
+      const lowestIdx = TF_ORDER.indexOf(boundaryReport.lowestValidTF);
+      if (currentIdx === -1 || lowestIdx === -1 || currentIdx >= lowestIdx) return null;
+      return (
+        TF_ORDER.slice(currentIdx + 1, lowestIdx + 1).find(tf => boundaryReport.recommendedTFs.includes(tf)) ||
+        null
+      );
+    },
+    [boundaryReport]
+  );
+
+  const handleStudioDoubleClickWaveLeg = useCallback(
+    (legIndex: number) => {
+      const parentSc = effectiveActiveScenario;
+      const vStart = parentSc?.vertices[legIndex];
+      const vEnd = parentSc?.vertices[legIndex + 1];
+      if (!parentSc || !vStart || !vEnd) return;
+
+      const targetTF = getNextValidLowerTF(effectiveTimeframe);
+      if (!targetTF) return;
+      if (DEGREE_CONFIGS[parentSc.degree].level >= currentAsset.maxAllowedDegree) return;
+
+      const startTimestamp = Math.min(vStart.timestamp, vEnd.timestamp);
+      const endTimestamp = Math.max(vStart.timestamp, vEnd.timestamp);
+      const waveLabel = `موج ${vStart.label}→${vEnd.label}`;
+      const role = inferWaveRole(vEnd.label);
+      const direction: 'BULLISH' | 'BEARISH' = vEnd.price >= vStart.price ? 'BULLISH' : 'BEARISH';
+      const targetDegree = getLowerDegree(parentSc.degree);
+      const parentPrefix = currentStudioDrill ? currentStudioDrill.key : 'ROOT';
+      const key = `${parentPrefix}__${parentSc.id}__${legIndex}__${targetTF}`;
+
+      if (!studioSubScenariosByKey[key]) {
+        const legCandles = generateRealisticCandles(selectedAssetId, targetTF, 72, {
+          startTs: startTimestamp,
+          endTs: endTimestamp
+        });
+        let startIdx = legCandles.findIndex(c => c.timestamp >= startTimestamp);
+        if (startIdx < 0) startIdx = 0;
+        let endIdx = legCandles.length - 1;
+        for (let i = legCandles.length - 1; i >= startIdx; i--) {
+          if (legCandles[i].timestamp <= endTimestamp) {
+            endIdx = i;
+            break;
+          }
+        }
+
+        const generated = RulesEngine.generateCandidateScenarios(
+          legCandles,
+          targetTF,
+          targetDegree,
+          startIdx,
+          role,
+          direction,
+          parentSc.id,
+          waveLabel,
+          endIdx
+        );
+        setStudioSubScenariosByKey(prev => ({ ...prev, [key]: generated }));
+        if (generated[0]) {
+          setStudioActiveSubIdByKey(prev => ({ ...prev, [key]: generated[0].id }));
+        }
+      }
+
+      setStudioDrillStack(prev => [
+        ...prev,
+        {
+          key,
+          parentScenarioId: parentSc.id,
+          parentScenarioName: parentSc.name,
+          parentTimeframe: effectiveTimeframe,
+          targetTimeframe: targetTF,
+          waveLabel,
+          role,
+          direction,
+          degree: targetDegree,
+          startTimestamp,
+          endTimestamp,
+          legIndex
+        }
+      ]);
+      setStudioInteractionMode('EDIT');
+    },
+    [
+      effectiveActiveScenario,
+      effectiveTimeframe,
+      getNextValidLowerTF,
+      currentAsset.maxAllowedDegree,
+      currentStudioDrill,
+      studioSubScenariosByKey,
+      selectedAssetId
+    ]
+  );
+
+  const handleStudioSwitchDrillTimeframe = useCallback(
+    (newTf: string) => {
+      if (!currentStudioDrill) return;
+      const baseKey = currentStudioDrill.key.replace(/__[^_]+$/, '');
+      const nextKey = `${baseKey}__${newTf}`;
+      const nextDegree = getDegreeForTimeframe(newTf);
+
+      if (!studioSubScenariosByKey[nextKey]) {
+        const legCandles = generateRealisticCandles(selectedAssetId, newTf, 72, {
+          startTs: currentStudioDrill.startTimestamp,
+          endTs: currentStudioDrill.endTimestamp
+        });
+        let startIdx = legCandles.findIndex(c => c.timestamp >= currentStudioDrill.startTimestamp);
+        if (startIdx < 0) startIdx = 0;
+        let endIdx = legCandles.length - 1;
+        for (let i = legCandles.length - 1; i >= startIdx; i--) {
+          if (legCandles[i].timestamp <= currentStudioDrill.endTimestamp) {
+            endIdx = i;
+            break;
+          }
+        }
+
+        const generated = RulesEngine.generateCandidateScenarios(
+          legCandles,
+          newTf,
+          nextDegree,
+          startIdx,
+          currentStudioDrill.role,
+          currentStudioDrill.direction,
+          currentStudioDrill.parentScenarioId,
+          currentStudioDrill.waveLabel,
+          endIdx
+        );
+        setStudioSubScenariosByKey(prev => ({ ...prev, [nextKey]: generated }));
+        if (generated[0]) {
+          setStudioActiveSubIdByKey(prev => ({ ...prev, [nextKey]: generated[0].id }));
+        }
+      }
+
+      setStudioDrillStack(prev =>
+        prev.map((item, idx) =>
+          idx === prev.length - 1
+            ? { ...item, key: nextKey, targetTimeframe: newTf, degree: nextDegree }
+            : item
+        )
+      );
+      setStudioInteractionMode('EDIT');
+    },
+    [currentStudioDrill, studioSubScenariosByKey, selectedAssetId]
+  );
+
+  const handleStudioJumpDrillLevel = useCallback((levelIndex: number) => {
+    if (levelIndex < 0) {
+      setStudioDrillStack([]);
+    } else {
+      setStudioDrillStack(prev => prev.slice(0, levelIndex + 1));
+    }
+    setStudioInteractionMode('EDIT');
+  }, []);
+
+  const updateEffectiveScenarios = (updater: (list: WaveScenario[]) => WaveScenario[]) => {
+    if (currentStudioDrill) {
+      const drillKey = currentStudioDrill.key;
+      setStudioSubScenariosByKey(prev => ({
+        ...prev,
+        [drillKey]: updater(prev[drillKey] || [])
+      }));
+    } else {
+      setScenarios(updater);
+    }
+  };
+
   const handleUpdateVertices = (newVertices: WaveVertex[]) => {
-    const targetId = activeScenario?.id || activeScenarioId;
-    setScenarios(prev =>
+    const targetId = effectiveActiveScenario?.id;
+    updateEffectiveScenarios(prev =>
       prev.map(sc => {
         if (sc.id !== targetId) return sc;
-        const val = RulesEngine.validateStructure(sc.patternType, newVertices, sc.direction);
+        const val = currentStudioDrill
+          ? RulesEngine.validateStructure(
+              sc.patternType,
+              newVertices,
+              sc.direction,
+              currentStudioDrill.role,
+              currentStudioDrill.waveLabel
+            )
+          : RulesEngine.validateStructure(sc.patternType, newVertices, sc.direction);
         return {
           ...sc,
           vertices: newVertices,
@@ -133,10 +364,19 @@ export default function App() {
   };
 
   const handlePatternChange = (newPattern: PatternFamily) => {
-    setScenarios(prev =>
+    const targetId = effectiveActiveScenario.id;
+    updateEffectiveScenarios(prev =>
       prev.map(sc => {
-        if (sc.id !== activeScenario.id) return sc;
-        const val = RulesEngine.validateStructure(newPattern, sc.vertices, sc.direction);
+        if (sc.id !== targetId) return sc;
+        const val = currentStudioDrill
+          ? RulesEngine.validateStructure(
+              newPattern,
+              sc.vertices,
+              sc.direction,
+              currentStudioDrill.role,
+              currentStudioDrill.waveLabel
+            )
+          : RulesEngine.validateStructure(newPattern, sc.vertices, sc.direction);
         return {
           ...sc,
           patternType: newPattern,
@@ -152,9 +392,28 @@ export default function App() {
     );
   };
 
+  const handleValidateScenario = (id: string, summary: ValidationSummary) => {
+    updateEffectiveScenarios(prev =>
+      prev.map(sc =>
+        sc.id === id
+          ? {
+              ...sc,
+              patternType: summary.patternType,
+              validityScore: summary.validityScore,
+              idealnessScore: summary.idealnessScore,
+              confidenceScore: summary.confidenceScore,
+              invalidationPrice: summary.invalidationPrice,
+              targets: summary.targets,
+              rulesResults: summary.rules
+            }
+          : sc
+      )
+    );
+  };
+
   const handleToggleLock = (id?: string) => {
-    const targetId = id || activeScenario.id;
-    setScenarios(prev => prev.map(sc => (sc.id === targetId ? { ...sc, isLocked: !sc.isLocked } : sc)));
+    const targetId = id || effectiveActiveScenario.id;
+    updateEffectiveScenarios(prev => prev.map(sc => (sc.id === targetId ? { ...sc, isLocked: !sc.isLocked } : sc)));
   };
 
   const handleReset = () => {
@@ -164,68 +423,89 @@ export default function App() {
       const next = buildStudioScenarios(candles, selectedTimeframe);
       setScenarios(next);
       setActiveScenarioId(next[0]?.id || '');
+      setStudioDrillStack([]);
+      setStudioSubScenariosByKey({});
+      setStudioActiveSubIdByKey({});
     }
   };
 
   const handleSelectDegree = (degree: WaveDegree) => {
-    setScenarios(prev => prev.map(sc => (sc.id === activeScenario.id ? { ...sc, degree } : sc)));
+    const targetId = effectiveActiveScenario.id;
+    updateEffectiveScenarios(prev => prev.map(sc => (sc.id === targetId ? { ...sc, degree } : sc)));
   };
 
   const handleBranchScenario = (branchName: string, degree: WaveDegree) => {
     const newId = `sc_branch_${Date.now()}`;
     const newScenario: WaveScenario = {
-      ...activeScenario,
+      ...effectiveActiveScenario,
       id: newId,
-      name: `${activeScenario.name} (${branchName})`,
-      color: SCENARIO_COLORS[scenarios.length % SCENARIO_COLORS.length],
+      name: `${effectiveActiveScenario.name} (${branchName})`,
+      color: SCENARIO_COLORS[effectiveScenarios.length % SCENARIO_COLORS.length],
       isPrimary: false,
       isLocked: false,
       degree,
       source: 'USER_EDITED'
     };
-    setScenarios(prev => [...prev, newScenario]);
-    setActiveScenarioId(newId);
+    updateEffectiveScenarios(prev => [...prev, newScenario]);
+    if (currentStudioDrill) {
+      setStudioActiveSubIdByKey(prev => ({ ...prev, [currentStudioDrill.key]: newId }));
+    } else {
+      setActiveScenarioId(newId);
+    }
   };
 
   const handleDuplicateScenario = (id: string) => {
-    const target = scenarios.find(s => s.id === id);
+    const target = effectiveScenarios.find(s => s.id === id);
     if (!target) return;
     const newId = `sc_${Date.now()}`;
     const copy: WaveScenario = {
       ...target,
       id: newId,
       name: `${target.name} (نسخه کپی)`,
-      color: SCENARIO_COLORS[scenarios.length % SCENARIO_COLORS.length],
+      color: SCENARIO_COLORS[effectiveScenarios.length % SCENARIO_COLORS.length],
       isPrimary: false,
       isLocked: false
     };
-    setScenarios(prev => [...prev, copy]);
-    setActiveScenarioId(newId);
+    updateEffectiveScenarios(prev => [...prev, copy]);
+    if (currentStudioDrill) {
+      setStudioActiveSubIdByKey(prev => ({ ...prev, [currentStudioDrill.key]: newId }));
+    } else {
+      setActiveScenarioId(newId);
+    }
   };
 
   const handleDeleteScenario = (id: string) => {
-    if (scenarios.length <= 1) return;
-    const remaining = scenarios.filter(s => s.id !== id);
-    setScenarios(remaining);
-    if (activeScenario.id === id && remaining[0]) {
-      setActiveScenarioId(remaining[0].id);
+    if (effectiveScenarios.length <= 1) return;
+    const remaining = effectiveScenarios.filter(s => s.id !== id);
+    updateEffectiveScenarios(() => remaining);
+    if (effectiveActiveScenario.id === id && remaining[0]) {
+      if (currentStudioDrill) {
+        setStudioActiveSubIdByKey(prev => ({ ...prev, [currentStudioDrill.key]: remaining[0].id }));
+      } else {
+        setActiveScenarioId(remaining[0].id);
+      }
     }
   };
 
   const handleNewScenario = (scratch = false) => {
     const newId = `sc_user_${Date.now()}`;
-    const verts = scratch ? [] : activeScenario.vertices;
-    const val = RulesEngine.validateStructure('IDEAL_CYCLE', verts, 'BULLISH');
+    const verts = scratch ? [] : effectiveActiveScenario.vertices;
+    const parentRole = currentStudioDrill?.role || 'ROOT';
+    const parentDir = currentStudioDrill?.direction || 'BULLISH';
+    const defaultPattern: PatternFamily = parentRole === 'CORRECTIVE' ? 'ZIGZAG' : 'IDEAL_CYCLE';
+    const val = currentStudioDrill
+      ? RulesEngine.validateStructure(defaultPattern, verts, parentDir, parentRole, currentStudioDrill.waveLabel)
+      : RulesEngine.validateStructure(defaultPattern, verts, parentDir);
     const newSc: WaveScenario = {
       id: newId,
-      name: `سناریوی دستی ${scenarios.length + 1}`,
-      color: SCENARIO_COLORS[scenarios.length % SCENARIO_COLORS.length],
+      name: `سناریوی دستی ${effectiveScenarios.length + 1}`,
+      color: SCENARIO_COLORS[effectiveScenarios.length % SCENARIO_COLORS.length],
       isPrimary: false,
       isLocked: false,
       isSelectedForTree: true,
-      patternType: 'IDEAL_CYCLE',
-      degree: getDegreeForTimeframe(selectedTimeframe),
-      direction: 'BULLISH',
+      patternType: defaultPattern,
+      degree: getDegreeForTimeframe(effectiveTimeframe),
+      direction: parentDir,
       vertices: verts,
       currentWave: 'شمارش دستی کاربر',
       completionPercentage: 50,
@@ -236,10 +516,16 @@ export default function App() {
       targets: val.targets,
       rulesResults: val.rules,
       source: 'MANUAL_DRAW',
-      timeframe: selectedTimeframe
+      timeframe: effectiveTimeframe,
+      parentNodeId: currentStudioDrill?.parentScenarioId,
+      parentLegLabel: currentStudioDrill?.waveLabel
     };
-    setScenarios(prev => [...prev, newSc]);
-    setActiveScenarioId(newId);
+    updateEffectiveScenarios(prev => [...prev, newSc]);
+    if (currentStudioDrill) {
+      setStudioActiveSubIdByKey(prev => ({ ...prev, [currentStudioDrill.key]: newId }));
+    } else {
+      setActiveScenarioId(newId);
+    }
     if (scratch) setStudioInteractionMode('DRAW_SCRATCH');
   };
 
@@ -329,9 +615,12 @@ export default function App() {
               {currentAsset.timeframes.map(tf => (
                 <button
                   key={tf}
-                  onClick={() => setSelectedTimeframe(tf)}
+                  onClick={() => {
+                    setStudioDrillStack([]);
+                    setSelectedTimeframe(tf);
+                  }}
                   className={`px-2.5 py-1 rounded-md font-bold transition-colors ${
-                    selectedTimeframe === tf
+                    effectiveTimeframe === tf
                       ? 'bg-cyan-500 text-slate-950'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
@@ -355,37 +644,87 @@ export default function App() {
         <main className="flex-1 flex flex-col lg:flex-row gap-3 p-3 overflow-hidden">
           <section className="flex-1 h-full flex flex-col min-w-0">
             <ChartStudio
-              candles={candles}
-              activeScenario={activeScenario}
-              overlayScenarios={scenarios.filter(s => s.isSelectedForTree && s.id !== activeScenario.id)}
+              candles={effectiveCandles}
+              activeScenario={effectiveActiveScenario}
+              overlayScenarios={effectiveScenarios.filter(s => s.isSelectedForTree && s.id !== effectiveActiveScenario.id)}
               onUpdateVertices={handleUpdateVertices}
               onPatternChange={handlePatternChange}
               onToggleLock={() => handleToggleLock()}
               onResetToAI={handleReset}
-              timeframe={selectedTimeframe}
+              timeframe={effectiveTimeframe}
               assetSymbol={currentAsset.symbol}
               interactionMode={studioInteractionMode}
               onChangeInteractionMode={setStudioInteractionMode}
               onStartScratchDraw={() => handleNewScenario(true)}
+              lowestValidTimeframe={boundaryReport.lowestValidTF}
+              validTimeframes={boundaryReport.recommendedTFs}
+              onDoubleClickWaveLeg={handleStudioDoubleClickWaveLeg}
+              parentWindowHighlight={
+                currentStudioDrill
+                  ? {
+                      startTs: currentStudioDrill.startTimestamp,
+                      endTs: currentStudioDrill.endTimestamp,
+                      label: `${currentStudioDrill.waveLabel} (${currentStudioDrill.parentTimeframe})`
+                    }
+                  : null
+              }
+              drillTrail={studioDrillStack.map(d => ({
+                label: d.waveLabel,
+                timeframe: d.targetTimeframe
+              }))}
+              onJumpDrillLevel={handleStudioJumpDrillLevel}
+              onSwitchDrillTimeframe={handleStudioSwitchDrillTimeframe}
+              hoveredScenario={hoveredStudioScenario}
             />
           </section>
 
           <SleekSidebar
-            activeScenario={activeScenario}
-            scenarios={scenarios}
-            activeScenarioId={activeScenario.id}
-            onSelectScenario={setActiveScenarioId}
+            activeScenario={effectiveActiveScenario}
+            scenarios={effectiveScenarios}
+            activeScenarioId={effectiveActiveScenario.id}
+            onSelectScenario={id => {
+              if (currentStudioDrill) {
+                setStudioActiveSubIdByKey(prev => ({ ...prev, [currentStudioDrill.key]: id }));
+              } else {
+                setActiveScenarioId(id);
+              }
+            }}
             onDuplicateScenario={handleDuplicateScenario}
             onToggleLock={handleToggleLock}
             onDeleteScenario={handleDeleteScenario}
             onNewScenario={() => handleNewScenario(false)}
             onPatternChange={handlePatternChange}
-            currentDegree={activeScenario.degree}
+            currentDegree={effectiveActiveScenario.degree}
             onSelectDegree={handleSelectDegree}
             onBranchScenario={handleBranchScenario}
             boundaryReport={boundaryReport}
-            activeTimeframe={selectedTimeframe}
-            onSelectTimeframe={setSelectedTimeframe}
+            activeTimeframe={effectiveTimeframe}
+            onSelectTimeframe={tf => {
+              setStudioDrillStack([]);
+              setSelectedTimeframe(tf);
+            }}
+            onValidateScenario={handleValidateScenario}
+            onHoverScenario={setHoveredStudioScenarioId}
+            onUpdateVertices={handleUpdateVertices}
+            interactionMode={studioInteractionMode}
+            onChangeInteractionMode={setStudioInteractionMode}
+            drillContext={
+              currentStudioDrill
+                ? {
+                    key: currentStudioDrill.key,
+                    waveLabel: currentStudioDrill.waveLabel,
+                    parentTimeframe: currentStudioDrill.parentTimeframe,
+                    targetTimeframe: currentStudioDrill.targetTimeframe,
+                    role: currentStudioDrill.role,
+                    candleCount: effectiveCandles.length
+                  }
+                : null
+            }
+            onExitDrill={
+              currentStudioDrill
+                ? () => handleStudioJumpDrillLevel(studioDrillStack.length - 2)
+                : undefined
+            }
           />
         </main>
       )}

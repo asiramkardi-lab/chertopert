@@ -31,6 +31,7 @@ import {
 } from '../engine/fractalEngine';
 import {
   RulesEngine,
+  ValidationSummary,
   SCENARIO_COLORS,
   inferWaveRole
 } from '../engine/rulesEngine';
@@ -106,6 +107,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
   const [drillStack, setDrillStack] = useState<DrillDownContext[]>([]);
   const [subScenariosByKey, setSubScenariosByKey] = useState<Record<string, WaveScenario[]>>({});
   const [activeSubIdByKey, setActiveSubIdByKey] = useState<Record<string, string>>({});
+  const [hoveredWizardScenarioId, setHoveredWizardScenarioId] = useState<string | null>(null);
 
   // Reset wizard whenever asset changes or resetSignal increments
   useEffect(() => {
@@ -127,6 +129,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
     setDrillStack([]);
     setSubScenariosByKey({});
     setActiveSubIdByKey({});
+    setHoveredWizardScenarioId(null);
   }, [asset.id, resetSignal, boundaryReport.highestValidTF, boundaryReport.lowestValidTF, dataByTf]);
 
   // Keep absoluteBottom aligned if user changes confirmedHighestTF in Step 1
@@ -262,10 +265,15 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
       const vEnd = parentScenario.vertices[legIndex + 1];
       if (!vStart || !vEnd) return;
 
-      const targetTF = getLowerTimeframe(parentScenario.timeframe);
+      const currentIdx = TF_ORDER.indexOf(parentScenario.timeframe);
+      const lowestIdx = TF_ORDER.indexOf(confirmedLowestTF);
+      if (currentIdx === -1 || lowestIdx === -1 || currentIdx >= lowestIdx) return;
+
+      const targetTF =
+        TF_ORDER.slice(currentIdx + 1, lowestIdx + 1).find(tf => boundaryReport.recommendedTFs.includes(tf)) ||
+        getLowerTimeframe(parentScenario.timeframe);
       if (!targetTF) return;
 
-      const lowestIdx = TF_ORDER.indexOf(confirmedLowestTF);
       const targetIdx = TF_ORDER.indexOf(targetTF);
       const currentDegLevel = DEGREE_CONFIGS[parentScenario.degree].level;
       if (targetIdx > lowestIdx || currentDegLevel >= asset.maxAllowedDegree) return;
@@ -300,6 +308,13 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
 
         let startIdx = legCandles.findIndex(c => c.timestamp >= drillCtx.startTimestamp);
         if (startIdx < 0) startIdx = 0;
+        let endIdx = legCandles.length - 1;
+        for (let i = legCandles.length - 1; i >= startIdx; i--) {
+          if (legCandles[i].timestamp <= drillCtx.endTimestamp) {
+            endIdx = i;
+            break;
+          }
+        }
 
         const generated = RulesEngine.generateCandidateScenarios(
           legCandles,
@@ -309,7 +324,8 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
           role,
           direction,
           parentNodeId,
-          legLabel
+          legLabel,
+          endIdx
         );
 
         setSubScenariosByKey(prev => ({ ...prev, [key]: generated }));
@@ -323,7 +339,47 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
       setDrillStack(prev => [...prev, { ...drillCtx, nodeId: `${parentNodeId}__${legIndex}__${targetTF}` }]);
       setInteractionMode('EDIT');
     },
-    [asset.id, asset.maxAllowedDegree, confirmedLowestTF, subScenariosByKey, syncChildrenInTree]
+    [asset.id, asset.maxAllowedDegree, confirmedLowestTF, boundaryReport.recommendedTFs, subScenariosByKey, syncChildrenInTree]
+  );
+
+  const handleDrillFromStep2 = useCallback(
+    (legIndex: number) => {
+      const currentActive = macroScenarios.find(s => s.id === activeMacroId) || macroScenarios[0];
+      if (!currentActive) return;
+
+      const keptPool = macroScenarios.filter(s => (s.isSelectedForTree && !s.isDiscarded) || s.id === currentActive.id);
+      const nodes: FractalNode[] = keptPool.map(sc => {
+        const firstV = sc.vertices[0];
+        const lastV = sc.vertices[sc.vertices.length - 1];
+        const hardValid = sc.rulesResults.filter(r => r.type === 'HARD').every(r => r.passed);
+        return {
+          id: `node_${sc.id}`,
+          scenarioId: sc.id,
+          scenarioName: sc.name,
+          color: sc.color,
+          timeframe: sc.timeframe,
+          degree: sc.degree,
+          patternType: sc.patternType,
+          waveLabel: 'ساختار کلان',
+          role: 'ROOT',
+          startTimestamp: firstV?.timestamp ?? highestTfCandles[0]?.timestamp ?? 0,
+          endTimestamp: lastV?.timestamp ?? highestTfCandles[highestTfCandles.length - 1]?.timestamp ?? 0,
+          startPrice: firstV?.price ?? 0,
+          endPrice: lastV?.price ?? 0,
+          vertices: sc.vertices,
+          validityScore: sc.validityScore,
+          isValid: hardValid,
+          children: []
+        };
+      });
+
+      const rootId = `node_${currentActive.id}`;
+      setFractalTreeNodes(nodes);
+      setActiveRootNodeId(rootId);
+      setStep(3);
+      handleDrillIntoLeg(rootId, currentActive, legIndex);
+    },
+    [macroScenarios, activeMacroId, highestTfCandles, handleDrillIntoLeg]
   );
 
   // Current active context in Step 3
@@ -423,6 +479,16 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
     const pool = step === 2 ? macroScenarios : currentDrill ? activeSubScenarios : [];
     return pool.filter(s => overlayIds.includes(s.id) && !s.isDiscarded);
   }, [step, macroScenarios, currentDrill, activeSubScenarios, overlayIds]);
+
+  useEffect(() => {
+    setHoveredWizardScenarioId(null);
+  }, [step, currentDrillKey]);
+
+  const hoveredScenarioForChart: WaveScenario | null = useMemo(() => {
+    if (step === 1 || !hoveredWizardScenarioId) return null;
+    const pool = step === 2 || !currentDrill ? macroScenarios : activeSubScenarios;
+    return pool.find(s => s.id === hoveredWizardScenarioId) || null;
+  }, [step, hoveredWizardScenarioId, currentDrill, macroScenarios, activeSubScenarios]);
 
   // Update vertices handler (works for Step 2 macro, Step 3 Level 1, OR Step 3 drilled-down sub-scenario)
   const handleUpdateVertices = (newVertices: WaveVertex[]) => {
@@ -538,6 +604,57 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
             source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
           };
         });
+        syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill);
+        return { ...prev, [currentDrillKey]: updatedList };
+      });
+    }
+  };
+
+  const handleValidateWizardScenario = (scenarioId: string, summary: ValidationSummary) => {
+    const hardValid = summary.rules.filter(r => r.type === 'HARD').every(r => r.passed);
+    if (step === 2 || (step === 3 && !currentDrill)) {
+      setMacroScenarios(prev =>
+        prev.map(sc =>
+          sc.id === scenarioId
+            ? {
+                ...sc,
+                patternType: summary.patternType,
+                validityScore: summary.validityScore,
+                idealnessScore: summary.idealnessScore,
+                confidenceScore: summary.confidenceScore,
+                invalidationPrice: summary.invalidationPrice,
+                targets: summary.targets,
+                rulesResults: summary.rules
+              }
+            : sc
+        )
+      );
+      if (step === 3) {
+        setFractalTreeNodes(nodes =>
+          nodes.map(n =>
+            n.scenarioId === scenarioId
+              ? { ...n, patternType: summary.patternType, validityScore: summary.validityScore, isValid: hardValid }
+              : n
+          )
+        );
+      }
+    } else if (step === 3 && currentDrill) {
+      setSubScenariosByKey(prev => {
+        const list = prev[currentDrillKey] || [];
+        const updatedList: WaveScenario[] = list.map(sc =>
+          sc.id === scenarioId
+            ? {
+                ...sc,
+                patternType: summary.patternType,
+                validityScore: summary.validityScore,
+                idealnessScore: summary.idealnessScore,
+                confidenceScore: summary.confidenceScore,
+                invalidationPrice: summary.invalidationPrice,
+                targets: summary.targets,
+                rulesResults: summary.rules
+              }
+            : sc
+        );
         syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill);
         return { ...prev, [currentDrillKey]: updatedList };
       });
@@ -773,8 +890,12 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
             onStartScratchDraw={step >= 2 ? handleCreateScratchScenario : undefined}
             parentWindowHighlight={parentWindowHighlight}
             hideToolbarLockAndReset={step === 1}
+            lowestValidTimeframe={confirmedLowestTF}
+            validTimeframes={boundaryReport.recommendedTFs}
             onDoubleClickWaveLeg={
-              step === 3
+              step === 2
+                ? legIdx => handleDrillFromStep2(legIdx)
+                : step === 3
                 ? legIdx => {
                     const targetParentId = currentDrill
                       ? currentDrill.nodeId
@@ -783,6 +904,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
                   }
                 : undefined
             }
+            hoveredScenario={hoveredScenarioForChart}
           />
         </section>
 
@@ -854,6 +976,8 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
                 setStep(1);
               }}
               onProceedToStep3={handleProceedToStep3}
+              onValidateScenario={handleValidateWizardScenario}
+              onHoverScenario={setHoveredWizardScenarioId}
             />
           )}
 
@@ -921,6 +1045,8 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({ asset, resetSi
                 setStep(2);
               }}
               activeLevelScenario={activeScenarioForChart}
+              onValidateScenario={handleValidateWizardScenario}
+              onHoverScenario={setHoveredWizardScenarioId}
             />
           )}
         </aside>

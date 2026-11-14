@@ -24,10 +24,20 @@ import {
   Edit3,
   Layers,
   Anchor,
-  X
+  X,
+  GitBranch,
+  ChevronLeft,
+  CornerDownLeft
 } from 'lucide-react';
 
 export type ChartInteractionMode = 'EDIT' | 'ADD_VERTEX' | 'DRAW_SCRATCH' | 'PICK_BOTTOM';
+
+const TF_HIERARCHY = ['1M', '1W', '1D', '4H', '1H', '15M'];
+
+export interface DrillTrailItem {
+  label: string;
+  timeframe: string;
+}
 
 interface ChartStudioProps {
   candles: Candle[];
@@ -47,6 +57,12 @@ interface ChartStudioProps {
   parentWindowHighlight?: { startTs: number; endTs: number; label: string } | null;
   onStartScratchDraw?: () => void;
   hideToolbarLockAndReset?: boolean;
+  lowestValidTimeframe?: string;
+  validTimeframes?: string[];
+  drillTrail?: DrillTrailItem[];
+  onJumpDrillLevel?: (levelIndex: number) => void;
+  onSwitchDrillTimeframe?: (tf: string) => void;
+  hoveredScenario?: WaveScenario | null;
 }
 
 const QUICK_LABELS = ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C', 'D', 'E', 'W', 'X', 'Y'];
@@ -68,7 +84,13 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   onDoubleClickWaveLeg,
   parentWindowHighlight,
   onStartScratchDraw,
-  hideToolbarLockAndReset = false
+  hideToolbarLockAndReset = false,
+  lowestValidTimeframe,
+  validTimeframes,
+  drillTrail,
+  onJumpDrillLevel,
+  onSwitchDrillTimeframe,
+  hoveredScenario = null
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -86,6 +108,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [showVolume, setShowVolume] = useState<boolean>(true);
   const [snapToCandleExtreme, setSnapToCandleExtreme] = useState<boolean>(true);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [drillNotice, setDrillNotice] = useState<string | null>(null);
 
   const [dimensions, setDimensions] = useState({ width: 900, height: 600 });
 
@@ -111,12 +134,35 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     };
   }, []);
 
-  // Reset selected vertex popover when active scenario or interaction mode changes
+  // Reset selected vertex popover & hovered leg when active scenario, timeframe, or mode changes
   useEffect(() => {
     setSelectedVertexIndex(null);
+    setHoveredLeg(null);
+    setDrillNotice(null);
     dragMovedRef.current = false;
     setDragMoved(false);
-  }, [activeScenario.id, interactionMode]);
+  }, [activeScenario.id, interactionMode, timeframe]);
+
+  // Compute next valid lower timeframe for Fractal Drill-Down
+  const nextLowerValidTF = useMemo(() => {
+    const currentIdx = TF_HIERARCHY.indexOf(timeframe);
+    const lowestIdx = lowestValidTimeframe ? TF_HIERARCHY.indexOf(lowestValidTimeframe) : TF_HIERARCHY.length - 1;
+    if (currentIdx === -1 || currentIdx >= lowestIdx) return null;
+    if (validTimeframes && validTimeframes.length > 0) {
+      return TF_HIERARCHY.slice(currentIdx + 1, lowestIdx + 1).find(tf => validTimeframes.includes(tf)) || null;
+    }
+    return TF_HIERARCHY[currentIdx + 1] || null;
+  }, [timeframe, lowestValidTimeframe, validTimeframes]);
+
+  const triggerDrillDown = (legIndex: number) => {
+    if (!onDoubleClickWaveLeg) return;
+    if (!nextLowerValidTF && lowestValidTimeframe) {
+      setDrillNotice(`تایم‌فریم ${lowestValidTimeframe} پایین‌ترین تایم‌فریم معتبر این نماد است.`);
+      return;
+    }
+    setDrillNotice(null);
+    onDoubleClickWaveLeg(legIndex);
+  };
 
   const { width, height } = dimensions;
   const padding = { top: 48, right: 86, bottom: showVolume ? 74 : 40, left: 22 };
@@ -187,12 +233,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       if (forceLowSnap) {
         finalPrice = candle.low;
       } else {
+        // Snap strictly to the candle's high or low so vertices stay anchored to candles rather than empty coordinate space
         const distHigh = Math.abs(rawPrice - candle.high);
         const distLow = Math.abs(rawPrice - candle.low);
-        const snapThreshold = bounds.priceRange * 0.08;
-        if (Math.min(distHigh, distLow) < snapThreshold) {
-          finalPrice = distHigh < distLow ? candle.high : candle.low;
-        }
+        finalPrice = distHigh <= distLow ? candle.high : candle.low;
       }
     }
 
@@ -398,6 +442,55 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
   const degreeInfo = DEGREE_CONFIGS[activeScenario.degree];
   const scenarioColor = activeScenario.color || degreeInfo.color;
+
+  const activeHoveredScenario = useMemo(() => {
+    if (!hoveredScenario || hoveredScenario.timeframe !== timeframe || hoveredScenario.vertices.length < 2) {
+      return null;
+    }
+    return hoveredScenario;
+  }, [hoveredScenario, timeframe]);
+
+  const hoveredTraceData = useMemo(() => {
+    if (!activeHoveredScenario || candles.length === 0) return null;
+    const maxIdx = candles.length - 1;
+    const pts = activeHoveredScenario.vertices.map(v => {
+      const clampedIdx = Math.max(0, Math.min(maxIdx, v.candleIndex));
+      return {
+        x: getX(clampedIdx),
+        y: getY(v.price),
+        label: v.label,
+        price: v.price
+      };
+    });
+    if (pts.length < 2) return null;
+
+    let totalLength = 0;
+    const segments: { x1: number; y1: number; x2: number; y2: number; length: number; cumStart: number }[] = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+      segments.push({
+        x1: pts[i].x,
+        y1: pts[i].y,
+        x2: pts[i + 1].x,
+        y2: pts[i + 1].y,
+        length: len,
+        cumStart: totalLength
+      });
+      totalLength += len;
+    }
+
+    const pathD = pts.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+    const color = activeHoveredScenario.color || DEGREE_CONFIGS[activeHoveredScenario.degree].color || '#38bdf8';
+
+    return {
+      scenario: activeHoveredScenario,
+      color,
+      pts,
+      segments,
+      pathD,
+      totalLength: Math.max(1, Math.ceil(totalLength))
+    };
+  }, [activeHoveredScenario, candles.length, width, height, minPrice, priceRange, showVolume]);
 
   const gridSteps = 6;
   const gridLines = useMemo(() => {
@@ -614,6 +707,63 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         </div>
       </div>
 
+      {/* Drill-Down Breadcrumb & Valid Lower-TF Bar */}
+      {drillTrail && drillTrail.length > 0 && (
+        <div className="bg-[#091224] border-b border-indigo-500/25 px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] shrink-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <GitBranch className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            {onJumpDrillLevel && (
+              <button
+                onClick={() => onJumpDrillLevel(-1)}
+                className="text-slate-300 hover:text-white font-medium transition-colors"
+              >
+                نمای کلان
+              </button>
+            )}
+            {drillTrail.map((item, idx) => {
+              const isLast = idx === drillTrail.length - 1;
+              return (
+                <React.Fragment key={`${item.label}-${idx}`}>
+                  <ChevronLeft className="w-3 h-3 text-slate-600 shrink-0" />
+                  <button
+                    onClick={() => onJumpDrillLevel && onJumpDrillLevel(idx)}
+                    disabled={!onJumpDrillLevel || isLast}
+                    className={`font-medium transition-colors ${
+                      isLast ? 'text-cyan-300 font-bold cursor-default' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {item.label}{' '}
+                    <span className="font-mono text-[10px] text-indigo-300">({item.timeframe})</span>
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {onSwitchDrillTimeframe && lowestValidTimeframe && timeframe !== lowestValidTimeframe && (
+              <button
+                onClick={() => onSwitchDrillTimeframe(lowestValidTimeframe)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 text-[10.5px] font-medium transition-colors"
+                title="نمایش همین محدوده کندل‌ها در پایین‌ترین تایم‌فریم معتبر"
+              >
+                <Layers className="w-3 h-3" />
+                <span>پایین‌ترین معتبر ({lowestValidTimeframe})</span>
+              </button>
+            )}
+            {onJumpDrillLevel && (
+              <button
+                onClick={() => onJumpDrillLevel(drillTrail.length - 2)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10.5px] font-medium transition-colors"
+              >
+                <CornerDownLeft className="w-3 h-3" />
+                <span>سطح قبلی</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Chart Canvas */}
       <div
         ref={containerRef}
@@ -634,6 +784,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
               <stop offset="100%" stopColor="#ef4444" stopOpacity="0.05" />
             </linearGradient>
+            <filter id="elliott-wave-glow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blurInner" />
+              <feGaussianBlur in="SourceGraphic" stdDeviation="7.5" result="blurOuter" />
+              <feMerge>
+                <feMergeNode in="blurOuter" />
+                <feMergeNode in="blurInner" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
           </defs>
 
           {/* Parent Wave Time-Window Shade (in Step 3 Drill-Down) */}
@@ -853,8 +1012,14 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             .map(sc => {
               const pts = sc.vertices.map(v => `${getX(v.candleIndex)},${getY(v.price)}`).join(' ');
               const lastV = sc.vertices[sc.vertices.length - 1];
+              const isDimmedByHover = Boolean(hoveredTraceData && hoveredTraceData.scenario.id !== sc.id);
+              const isSelfHovered = hoveredTraceData?.scenario.id === sc.id;
               return (
-                <g key={`overlay-${sc.id}`} opacity="0.72">
+                <g
+                  key={`overlay-${sc.id}`}
+                  opacity={isSelfHovered ? 0.95 : isDimmedByHover ? 0.22 : 0.72}
+                  style={{ transition: 'opacity 180ms ease' }}
+                >
                   <polyline
                     points={pts}
                     fill="none"
@@ -895,6 +1060,31 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               );
             })}
 
+          {/* Hovered Wave Leg Candle-Window Preview Band */}
+          {onDoubleClickWaveLeg && hoveredLeg !== null && activeScenario.vertices[hoveredLeg] && activeScenario.vertices[hoveredLeg + 1] && (() => {
+            const vA = activeScenario.vertices[hoveredLeg];
+            const vB = activeScenario.vertices[hoveredLeg + 1];
+            const sIdx = Math.min(vA.candleIndex, vB.candleIndex);
+            const eIdx = Math.max(vA.candleIndex, vB.candleIndex);
+            const rx = getX(sIdx);
+            const rw = Math.max(8, getX(eIdx) - rx);
+            return (
+              <rect
+                x={rx}
+                y={padding.top}
+                width={rw}
+                height={Math.max(0, height - padding.top - padding.bottom - volumeHeight)}
+                fill={scenarioColor}
+                fillOpacity="0.07"
+                stroke={scenarioColor}
+                strokeOpacity="0.35"
+                strokeWidth="1"
+                strokeDasharray="3 3"
+                pointerEvents="none"
+              />
+            );
+          })()}
+
           {/* Active Scenario Wave Leg Segments (individually interactive for double-click drill-down) */}
           {activeScenario.vertices.length >= 2 &&
             activeScenario.vertices.slice(0, -1).map((vStart, legIdx) => {
@@ -904,17 +1094,27 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               const x2 = getX(vEnd.candleIndex);
               const y2 = getY(vEnd.price);
               const isLegHovered = hoveredLeg === legIdx;
+              const candleSpan = Math.abs(vEnd.candleIndex - vStart.candleIndex) + 1;
 
               return (
                 <g
                   key={`leg-${legIdx}`}
                   onMouseEnter={() => setHoveredLeg(legIdx)}
                   onMouseLeave={() => setHoveredLeg(null)}
-                  onDoubleClick={e => {
+                  onClick={e => {
+                    if (
+                      interactionMode !== 'EDIT' ||
+                      draggingVertexIndex !== null ||
+                      draggingBottom ||
+                      dragMovedRef.current ||
+                      !onDoubleClickWaveLeg
+                    ) {
+                      return;
+                    }
                     e.stopPropagation();
-                    if (onDoubleClickWaveLeg) onDoubleClickWaveLeg(legIdx);
+                    triggerDrillDown(legIdx);
                   }}
-                  className={onDoubleClickWaveLeg ? 'cursor-pointer' : ''}
+                  className={onDoubleClickWaveLeg && interactionMode === 'EDIT' ? 'cursor-pointer' : ''}
                 >
                   {/* Visible Wave Segment */}
                   <line
@@ -923,10 +1123,12 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                     x2={x2}
                     y2={y2}
                     stroke={scenarioColor}
-                    strokeWidth={isLegHovered ? '4' : '2.8'}
+                    strokeWidth={isLegHovered ? '4.5' : '2.8'}
                     strokeLinecap="round"
+                    opacity={hoveredTraceData && hoveredTraceData.scenario.id !== activeScenario.id ? 0.32 : 1}
+                    style={{ transition: 'opacity 180ms ease' }}
                   />
-                  {/* Invisible thick hit target for easy hover & double-click */}
+                  {/* Invisible thick hit target for easy hover & click drill-down */}
                   <line
                     x1={x1}
                     y1={y1}
@@ -935,11 +1137,13 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                     stroke="transparent"
                     strokeWidth="16"
                   />
-                  {onDoubleClickWaveLeg && isLegHovered && (
-                    <g transform={`translate(${(x1 + x2) / 2}, ${(y1 + y2) / 2 - 14})`}>
-                      <rect x="-56" y="-11" width="112" height="20" rx="5" fill="#0f172a" stroke={scenarioColor} strokeWidth="1" />
+                  {onDoubleClickWaveLeg && interactionMode === 'EDIT' && isLegHovered && (
+                    <g transform={`translate(${(x1 + x2) / 2}, ${(y1 + y2) / 2 - 14})`} pointerEvents="none">
+                      <rect x="-102" y="-11" width="204" height="20" rx="5" fill="#0f172a" stroke={scenarioColor} strokeWidth="1" />
                       <text x="0" y="3" textAnchor="middle" fill="#f8fafc" fontSize="9.5" fontWeight="600">
-                        دابل‌کلیک: تایم پایین‌تر ({vStart.label}→{vEnd.label})
+                        {nextLowerValidTF
+                          ? `کلیک: داده‌ها و سناریوهای ${nextLowerValidTF} (${candleSpan} کندل)`
+                          : `پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe})`}
                       </text>
                     </g>
                   )}
@@ -968,7 +1172,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 onDoubleClick={e => {
                   e.stopPropagation();
                   if (onDoubleClickWaveLeg && idx > 0) {
-                    onDoubleClickWaveLeg(idx - 1);
+                    triggerDrillDown(idx - 1);
                   }
                 }}
               >
@@ -1025,6 +1229,121 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               </g>
             );
           })}
+
+          {/* Smooth Sidebar-Hover Elliott Wave Path Trace & Glow Layer */}
+          {hoveredTraceData && (
+            <g
+              key={`hover-trace-${hoveredTraceData.scenario.id}`}
+              pointerEvents="none"
+              style={{ ['--wave-path-len' as string]: hoveredTraceData.totalLength }}
+            >
+              {/* Soft outer bloom halo */}
+              <path
+                d={hoveredTraceData.pathD}
+                fill="none"
+                stroke={hoveredTraceData.color}
+                strokeWidth="10"
+                strokeOpacity="0.34"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                filter="url(#elliott-wave-glow)"
+                className="fei-wave-trace"
+              />
+
+              {/* Mid luminous neon wave stroke */}
+              <path
+                d={hoveredTraceData.pathD}
+                fill="none"
+                stroke={hoveredTraceData.color}
+                strokeWidth="5"
+                strokeOpacity="0.88"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                filter="url(#elliott-wave-glow)"
+                className="fei-wave-trace"
+              />
+
+              {/* Crisp bright centerline core */}
+              <path
+                d={hoveredTraceData.pathD}
+                fill="none"
+                stroke="#ffffff"
+                strokeWidth="1.9"
+                strokeOpacity="0.92"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="fei-wave-trace"
+              />
+
+              {/* Directional flowing shimmer along wave segments */}
+              <path
+                d={hoveredTraceData.pathD}
+                fill="none"
+                stroke="#ffffff"
+                strokeWidth="3"
+                strokeOpacity="0.55"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="fei-wave-glow-flow"
+              />
+
+              {/* Staggered glowing vertex nodes & labels */}
+              {hoveredTraceData.pts.map((pt, vIdx) => {
+                const progress = hoveredTraceData.pts.length > 1 ? vIdx / (hoveredTraceData.pts.length - 1) : 0;
+                const delayMs = Math.round(progress * 360);
+                const showHoverBadge = hoveredTraceData.scenario.id !== activeScenario.id;
+                return (
+                  <g
+                    key={`ht-node-${vIdx}`}
+                    className="fei-vertex-bloom"
+                    style={{ animationDelay: `${delayMs}ms` }}
+                  >
+                    <circle
+                      cx={pt.x}
+                      cy={pt.y}
+                      r="9.5"
+                      fill={hoveredTraceData.color}
+                      fillOpacity="0.24"
+                      filter="url(#elliott-wave-glow)"
+                    />
+                    <circle
+                      cx={pt.x}
+                      cy={pt.y}
+                      r="5.5"
+                      fill={hoveredTraceData.color}
+                      stroke="#ffffff"
+                      strokeWidth="2"
+                    />
+                    {showHoverBadge && (
+                      <g transform={`translate(${pt.x}, ${pt.y - 22})`}>
+                        <rect
+                          x="-15"
+                          y="-11"
+                          width="30"
+                          height="19"
+                          rx="4"
+                          fill="#080e1c"
+                          stroke={hoveredTraceData.color}
+                          strokeWidth="1.4"
+                        />
+                        <text
+                          x="0"
+                          y="2.5"
+                          textAnchor="middle"
+                          fill="#ffffff"
+                          fontSize="10.5"
+                          fontWeight="800"
+                          fontFamily="JetBrains Mono, monospace"
+                        >
+                          {pt.label}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+          )}
 
           {/* Absolute Bottom Draggable Anchor Handle */}
           {absoluteBottom && (
@@ -1135,13 +1454,14 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                   {onDoubleClickWaveLeg && selectedVertexIndex > 0 && (
                     <button
                       onClick={() => {
-                        onDoubleClickWaveLeg(selectedVertexIndex - 1);
+                        triggerDrillDown(selectedVertexIndex - 1);
                         setSelectedVertexIndex(null);
                       }}
-                      className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-300 rounded-lg text-[11px] font-medium"
+                      disabled={!nextLowerValidTF && Boolean(lowestValidTimeframe)}
+                      className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-300 rounded-lg text-[11px] font-medium disabled:opacity-40"
                     >
                       <Layers className="w-3 h-3" />
-                      <span>زیرموج تایم پایین‌تر</span>
+                      <span>{nextLowerValidTF ? `ریزش به ${nextLowerValidTF}` : 'پایین‌ترین تایم معتبر'}</span>
                     </button>
                   )}
                   <button
@@ -1182,6 +1502,17 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 </span>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Drill-Down Lowest TF Notice Banner */}
+        {drillNotice && (
+          <div className="absolute top-3 right-4 z-20 flex items-center gap-2 bg-amber-950/95 border border-amber-500/40 text-amber-200 px-3 py-1.5 rounded-lg text-[11px] shadow-xl">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>{drillNotice}</span>
+            <button onClick={() => setDrillNotice(null)} className="text-amber-300 hover:text-white mr-1">
+              <X className="w-3 h-3" />
+            </button>
           </div>
         )}
 
@@ -1230,8 +1561,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <span>
                 {activeScenario.isLocked
                   ? 'سناریو قفل است؛ برای تغییر نقاط قفل را باز کنید.'
+                  : onDoubleClickWaveLeg && nextLowerValidTF
+                  ? `برای مشاهده داده‌ها و سناریوهای ${nextLowerValidTF} روی هر موج کلیک کنید، یا نقاط را بکشید.`
                   : onDoubleClickWaveLeg
-                  ? 'نقاط را بکشید، برای تغییر نام کلیک کنید، یا برای زیرموج‌ها روی هر موج دابل‌کلیک کنید.'
+                  ? `در پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe}) هستید؛ نقاط را بکشید یا کلیک کنید.`
                   : 'نقاط پیوت را بکشید یا برای تغییر لیبل و حذف روی هر نقطه کلیک کنید.'}
               </span>
             </>
