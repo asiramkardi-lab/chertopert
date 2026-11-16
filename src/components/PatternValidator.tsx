@@ -13,6 +13,7 @@ import {
   RulesEngine,
   ValidationSummary
 } from '../engine/rulesEngine';
+import { PatternEngines } from '../engine/patternEngines';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -29,7 +30,9 @@ import {
   Sparkles,
   Check,
   X,
-  Activity
+  Activity,
+  Zap,
+  Compass
 } from 'lucide-react';
 
 export interface StrictCheckItem {
@@ -94,6 +97,7 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
   const [selectedActionId, setSelectedActionId] = useState<string>('');
   const [auditTick, setAuditTick] = useState<number>(0);
   const [appliedFlash, setAppliedFlash] = useState<string | null>(null);
+  const [showWaveTraits, setShowWaveTraits] = useState<boolean>(false);
 
   const auditResult = useMemo(() => {
     // auditTick intentionally triggers deterministic re-evaluation when user clicks Re-Run
@@ -104,7 +108,8 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
       verts,
       scenario.direction,
       parentRole,
-      parentWaveLabel
+      parentWaveLabel,
+      candles
     );
 
     const checks: StrictCheckItem[] = [];
@@ -330,6 +335,31 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
       return b.projectedScore - a.projectedScore;
     });
 
+    const inputValidation = PatternEngines.validateInputData(candles, scenario.timeframe || '1D');
+    const absoluteBottom = RulesEngine.evaluateAbsoluteBottomAndValidLows(
+      candles,
+      verts,
+      scenario.direction
+    );
+    const waveCharacteristics = PatternEngines.analyzeWaveCharacteristics(scenario, candles);
+
+    const pType = scenario.patternType;
+    const specializedReport =
+      pType === 'LEADING_DIAGONAL' ||
+      pType === 'ANTI_LEADING_DIAGONAL' ||
+      pType === 'ENDING_DIAGONAL' ||
+      pType === 'ANTI_DIAGONAL'
+        ? { kind: 'DIAGONAL' as const, data: PatternEngines.analyzeDiagonal(scenario, candles) }
+        : pType === 'ZIGZAG'
+        ? { kind: 'ZIGZAG' as const, data: PatternEngines.analyzeZigzag(scenario, candles) }
+        : pType === 'FLAT_REGULAR' || pType === 'FLAT_EXPANDED' || pType === 'FLAT_RUNNING'
+        ? { kind: 'FLAT' as const, data: PatternEngines.analyzeFlat(scenario, candles) }
+        : pType === 'TRIANGLE_CONVERGING' || pType === 'TRIANGLE_EXPANDING'
+        ? { kind: 'TRIANGLE' as const, data: PatternEngines.analyzeTriangle(scenario, candles) }
+        : pType === 'COMPLEX_COMBINATION'
+        ? { kind: 'COMPLEX' as const, data: PatternEngines.analyzeComplexPattern(scenario, candles) }
+        : { kind: 'COMPLEX' as const, data: PatternEngines.analyzeComplexPattern(scenario, candles) };
+
     return {
       summary,
       checks,
@@ -337,7 +367,11 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
       strictWarnings,
       totalChecks,
       passedChecks,
-      correctiveActions
+      correctiveActions,
+      inputValidation,
+      absoluteBottom,
+      specializedReport,
+      waveCharacteristics
     };
   }, [scenario, candles, parentRole, parentWaveLabel, auditTick]);
 
@@ -609,6 +643,246 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* Step 0 Pre-Flight + Session 4-6 Banners (Absolute Bottom, Extension, Mislabeling, Wave 5 Warning) */}
+            <div className="space-y-1.5 pt-1">
+              <div
+                className={`p-2 rounded-lg border text-[10.5px] flex items-center justify-between gap-2 ${
+                  auditResult.inputValidation.valid
+                    ? 'bg-slate-950/75 border-slate-800 text-slate-300'
+                    : 'bg-rose-950/35 border-rose-500/45 text-rose-200'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Compass className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="truncate">
+                    گام ۰ سلامت داده: {auditResult.inputValidation.candleCount} کندل · دوجی{' '}
+                    <span className="font-mono tabular-nums">{auditResult.inputValidation.dojiPct}٪</span> · شروع پیشنهادی{' '}
+                    <span className="font-mono text-cyan-300">{auditResult.inputValidation.recommendedStartTf}</span>
+                  </span>
+                </div>
+                <span
+                  className={`font-mono text-[10px] font-bold shrink-0 ${
+                    auditResult.inputValidation.valid ? 'text-emerald-400' : 'text-rose-300'
+                  }`}
+                >
+                  {auditResult.inputValidation.valid ? 'سالم' : 'نقص داده'}
+                </span>
+              </div>
+
+              <div
+                className={`p-2 rounded-lg border text-[10.5px] flex items-start gap-2 ${
+                  auditResult.absoluteBottom.validLowInvalidated
+                    ? 'bg-rose-950/35 border-rose-500/45 text-rose-200'
+                    : auditResult.absoluteBottom.formed
+                    ? 'bg-emerald-950/25 border-emerald-500/30 text-emerald-100'
+                    : 'bg-slate-950/75 border-slate-800 text-slate-300'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 min-w-0">
+                  <div className="flex items-center gap-2 font-bold">
+                    <span>کف مطلق و کف‌های معتبر (جلسه ۶):</span>
+                    <span className="font-mono tabular-nums text-cyan-300">
+                      {auditResult.absoluteBottom.absoluteBottomPrice.toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-[10px] opacity-90 leading-relaxed">{auditResult.absoluteBottom.reasonFa}</p>
+                </div>
+              </div>
+
+              {auditResult.summary.detectedExtension && (
+                <div className="p-2 rounded-lg bg-indigo-950/35 border border-indigo-500/40 text-indigo-100 text-[10.5px] flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>کشیدگی فعال (جلسه ۴): {auditResult.summary.detectedExtension}</span>
+                  </span>
+                  <span className="font-mono text-[10px] text-amber-300">EXTENDED</span>
+                </div>
+              )}
+
+              {auditResult.summary.mislabelingStatus && auditResult.summary.mislabelingStatus !== 'CLEAN' && (
+                <div
+                  className={`p-2 rounded-lg border text-[10.5px] flex items-start gap-2 ${
+                    auditResult.summary.mislabelingStatus === 'INVALID'
+                      ? 'bg-rose-950/35 border-rose-500/45 text-rose-100'
+                      : 'bg-amber-950/30 border-amber-500/40 text-amber-100'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <div className="font-bold">
+                      {auditResult.summary.mislabelingStatus === 'MISLABELING'
+                        ? 'هشدار برچسب‌گذاری نادرست (جلسه ۵)'
+                        : auditResult.summary.mislabelingStatus === 'VALID_ALTERNATIVE'
+                        ? 'الگوی جایگزین معتبر شناسایی شد'
+                        : 'ساختار نامعتبر'}
+                    </div>
+                    {auditResult.summary.mislabelingReasonFa && (
+                      <p className="text-[10px] opacity-90 leading-relaxed">
+                        {auditResult.summary.mislabelingReasonFa}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {auditResult.summary.wave5TerminalWarning && (
+                <div className="p-2 rounded-lg bg-rose-950/35 border border-rose-500/45 text-rose-100 text-[10.5px] flex items-center gap-2">
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span>هشدار موج ۵ کشیده/ترمینال (CB-Wave ≥ 100٪ W4): ریسک چرخش ناگهانی بالا است.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Compact Specialized Engine Analysis for Active Pattern (Sessions 9-17) */}
+            <div className="p-2.5 rounded-xl bg-slate-950/85 border border-slate-800 space-y-2 text-[10.5px]">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-1.5">
+                <span className="font-bold text-cyan-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>تحلیل تخصصی الگوی فعال</span>
+                </span>
+                <span className="font-mono tabular-nums text-slate-400">
+                  اطمینان{' '}
+                  {auditResult.specializedReport.kind === 'COMPLEX'
+                    ? auditResult.specializedReport.data.confidence
+                    : auditResult.specializedReport.data.confidence}
+                  %
+                </span>
+              </div>
+
+              {auditResult.specializedReport.kind === 'DIAGONAL' && (
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex items-center justify-between font-semibold text-white">
+                    <span>{auditResult.specializedReport.data.variantLabelFa}</span>
+                    <span className="font-mono text-amber-300">
+                      موج {auditResult.specializedReport.data.waveLocation} ·{' '}
+                      {auditResult.specializedReport.data.wave2Covered100 ? 'پوشش ۱۰۰٪ موج ۲ ✓' : 'عدم پوشش ۱۰۰٪ موج ۲'}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    {auditResult.specializedReport.data.correctionTargetRangeFa} ·{' '}
+                    {auditResult.specializedReport.data.correctionDepthFa}
+                  </p>
+                </div>
+              )}
+
+              {auditResult.specializedReport.kind === 'ZIGZAG' && (
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex items-center justify-between font-semibold text-white">
+                    <span>{auditResult.specializedReport.data.subTypeLabelFa}</span>
+                    <span className="font-mono text-cyan-300 tabular-nums">
+                      B/A: {auditResult.specializedReport.data.bOverARatioPct}٪ · C/A: {auditResult.specializedReport.data.cOverARatioPct}٪
+                    </span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    {auditResult.specializedReport.data.waveCClassFa} · هدف پسازیگزاگ: {auditResult.specializedReport.data.postPatternTargetPrice.toLocaleString()}
+                    {auditResult.specializedReport.data.isAbCd ? ' · هم‌راستا با AB=CD' : ''}
+                  </p>
+                </div>
+              )}
+
+              {auditResult.specializedReport.kind === 'FLAT' && (
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex items-center justify-between font-semibold text-white">
+                    <span>{auditResult.specializedReport.data.subtypeLabelFa}</span>
+                    <span className="font-mono tabular-nums text-amber-300">
+                      B/A: {auditResult.specializedReport.data.bPctOfA}٪ · C/B: {auditResult.specializedReport.data.cPctOfB}٪
+                    </span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    {auditResult.specializedReport.data.vsSimpleZigzagFa}
+                    {auditResult.specializedReport.data.knotUntanglerRecommended ? ' · پیشنهاد گره‌گشایی زیرموج‌ها' : ''}
+                  </p>
+                </div>
+              )}
+
+              {auditResult.specializedReport.kind === 'TRIANGLE' && (
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex items-center justify-between font-semibold text-white">
+                    <span>{auditResult.specializedReport.data.triangleTypeLabelFa}</span>
+                    <span className="font-mono text-emerald-300">
+                      فراوانی {auditResult.specializedReport.data.frequencyPct}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    {auditResult.specializedReport.data.positionSlotLabelFa} · {auditResult.specializedReport.data.tradingApproachFa}
+                  </p>
+                </div>
+              )}
+
+              {auditResult.specializedReport.kind === 'COMPLEX' && (
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex items-center justify-between font-semibold text-white">
+                    <span>{auditResult.specializedReport.data.priorityLabelFa}</span>
+                    <span className="font-mono text-cyan-300">
+                      {auditResult.specializedReport.data.patternSignature} · X:{' '}
+                      {auditResult.specializedReport.data.xWaveCandleCount} کندل
+                    </span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    {auditResult.specializedReport.data.recommendFa}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Session 19: Wave Characteristics & Capital Management Toggle */}
+            <div className="rounded-xl bg-slate-950/80 border border-slate-800 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowWaveTraits(v => !v)}
+                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-bold text-slate-200 hover:bg-slate-900/80 transition-colors"
+              >
+                <span>شخصیت‌شناسی ۸ موج و چک‌لیست سرمایه (جلسه ۱۹)</span>
+                <span className="font-mono text-cyan-300">{showWaveTraits ? 'بستن' : 'مشاهده'}</span>
+              </button>
+              {showWaveTraits && (
+                <div className="p-2.5 border-t border-slate-800 space-y-2 text-[10px]">
+                  {auditResult.waveCharacteristics.waveAIdentificationWarningFa && (
+                    <div className="p-2 rounded bg-amber-950/30 border border-amber-500/35 text-amber-200 leading-relaxed">
+                      {auditResult.waveCharacteristics.waveAIdentificationWarningFa}
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    {auditResult.waveCharacteristics.items.map((w, idx) => (
+                      <div
+                        key={idx}
+                        className="p-1.5 rounded bg-slate-900/70 border border-slate-800/80 flex items-start justify-between gap-2"
+                      >
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="font-bold text-white flex items-center gap-1.5">
+                            <span className="font-mono text-cyan-300">{w.label}</span>
+                            <span className="text-slate-400">
+                              ({w.estimatedSubwaves} ریز‌موج · {w.candleSpan} کندل)
+                            </span>
+                          </div>
+                          <p className="text-slate-300 leading-relaxed">{w.traitFa}</p>
+                        </div>
+                        <span
+                          className={`font-mono text-[9.5px] shrink-0 px-1.5 py-0.5 rounded ${
+                            w.volumeProfile === 'HIGH'
+                              ? 'bg-emerald-500/15 text-emerald-300'
+                              : w.volumeProfile === 'LOW'
+                              ? 'bg-amber-500/15 text-amber-300'
+                              : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          حجم {w.volumeProfile === 'HIGH' ? 'بالا' : w.volumeProfile === 'LOW' ? 'کم' : 'متوسط'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="p-2 rounded bg-slate-900/80 border border-slate-800 space-y-1 text-slate-300">
+                    {auditResult.waveCharacteristics.capitalManagementChecklistFa.map((line, i) => (
+                      <div key={i} className={i === 0 ? 'font-bold text-emerald-300' : 'leading-relaxed'}>
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

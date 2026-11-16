@@ -5,18 +5,20 @@
  * Explains "Why this count?", checks Hard/Soft rules, and offers actionable suggestions.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { WaveScenario, PatternFamily } from '../types/elliott';
+import { RulesEngine } from '../engine/rulesEngine';
 import { 
   CheckCircle2, 
   XCircle, 
   AlertTriangle, 
   Sparkles, 
-  HelpCircle, 
   ArrowRight,
   ShieldCheck,
   TrendingUp,
-  Cpu
+  Cpu,
+  Zap,
+  ShieldAlert
 } from 'lucide-react';
 
 interface ExplainabilityPanelProps {
@@ -36,10 +38,15 @@ export const ExplainabilityPanel: React.FC<ExplainabilityPanelProps> = ({
   const rule3Failed = hardRules.find(r => r.ruleId === 'CARDINAL_RULE_3' && !r.passed);
   const rule1Failed = hardRules.find(r => r.ruleId === 'CARDINAL_RULE_1' && !r.passed);
 
+  const liveSummary = useMemo(
+    () => RulesEngine.validateStructure(scenario.patternType, scenario.vertices, scenario.direction),
+    [scenario.patternType, scenario.vertices, scenario.direction]
+  );
+
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-5">
       {/* Header & Quality Score Badges */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+      <div className="flex items-center justify-between border-b border-slate-800 pb-4 flex-wrap gap-2">
         <div className="flex items-center gap-2.5">
           <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
             <Cpu className="w-5 h-5 text-indigo-400" />
@@ -51,21 +58,21 @@ export const ExplainabilityPanel: React.FC<ExplainabilityPanelProps> = ({
         </div>
 
         {/* Triple Scores Display */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 font-mono tabular-nums">
           <div className="flex flex-col items-center px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl">
-            <span className="text-[10px] text-slate-400">اعتبار ساختار</span>
-            <span className={`text-sm font-bold ${scenario.validityScore >= 80 ? 'text-emerald-400' : 'text-red-400'}`}>
+            <span className="text-[10px] font-sans text-slate-400">اعتبار ساختار</span>
+            <span className={`text-sm font-bold ${scenario.validityScore >= 80 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {scenario.validityScore}/100
             </span>
           </div>
           <div className="flex flex-col items-center px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl">
-            <span className="text-[10px] text-slate-400">ایده‌آل بودن</span>
+            <span className="text-[10px] font-sans text-slate-400">ایده‌آل بودن</span>
             <span className="text-sm font-bold text-indigo-400">
               {scenario.idealnessScore}/100
             </span>
           </div>
           <div className="flex flex-col items-center px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl">
-            <span className="text-[10px] text-slate-400">اطمینان سناریو</span>
+            <span className="text-[10px] font-sans text-slate-400">اطمینان سناریو</span>
             <span className="text-sm font-bold text-cyan-400">
               {scenario.confidenceScore}%
             </span>
@@ -73,9 +80,57 @@ export const ExplainabilityPanel: React.FC<ExplainabilityPanelProps> = ({
         </div>
       </div>
 
+      {/* Sessions 4-6 Live Diagnostic Highlights */}
+      {(liveSummary.detectedExtension ||
+        (liveSummary.mislabelingStatus && liveSummary.mislabelingStatus !== 'CLEAN') ||
+        liveSummary.wave5TerminalWarning) && (
+        <div className="space-y-2 text-xs">
+          {liveSummary.detectedExtension && (
+            <div className="p-2.5 rounded-xl bg-indigo-950/35 border border-indigo-500/35 text-indigo-100 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-semibold">
+                <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>موج کشیده تشخیص‌داده‌شده: {liveSummary.detectedExtension}</span>
+              </div>
+              <button
+                type="button"
+                onClick={onApplyExtendedAdjustment}
+                className="text-[11px] font-bold text-cyan-300 hover:underline shrink-0"
+              >
+                همگام‌سازی اهداف
+              </button>
+            </div>
+          )}
+
+          {liveSummary.mislabelingStatus && liveSummary.mislabelingStatus !== 'CLEAN' && (
+            <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/35 text-amber-100 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-bold">
+                  {liveSummary.mislabelingStatus === 'MISLABELING'
+                    ? 'احتمال برچسب‌گذاری نادرست ساختار'
+                    : liveSummary.mislabelingStatus === 'VALID_ALTERNATIVE'
+                    ? 'جایگزین ساختاری معتبر در دسترس است'
+                    : 'ساختار نامعتبر'}
+                </div>
+                {liveSummary.mislabelingReasonFa && (
+                  <p className="text-[11px] opacity-90 leading-relaxed">{liveSummary.mislabelingReasonFa}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {liveSummary.wave5TerminalWarning && (
+            <div className="p-2.5 rounded-xl bg-rose-950/35 border border-rose-500/40 text-rose-100 flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>هشدار موج ۵ کشیده/ترمینال: احتمال بازگشت تند پس از شکست حد CB-Wave.</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Actionable AI Copilot Suggestions Alert Banner */}
       {(rule3Failed || rule1Failed) && (
-        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col gap-2.5 animate-pulse-subtle">
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col gap-2.5">
           <div className="flex items-center gap-2 text-amber-300 font-semibold text-sm">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <span>پیشنهاد خودکار اصلاح ساختار توسط دستیار (Copilot Action)</span>
@@ -85,7 +140,7 @@ export const ExplainabilityPanel: React.FC<ExplainabilityPanelProps> = ({
               ? 'موج ۴ با سقف موج ۱ هم‌پوشانی دارد که در سیکل ایده‌آل نقض قانون ۳ است. طبق اصول بهاری، اگر موج ۵ کوتاه شود، این الگو ترمینال (Terminal) است.'
               : 'موج ۲ کف موج ۱ را شکسته است؛ ساختار با آنتی‌سیکل (Anti-Cycle) سازگارتر است.'}
           </p>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             {rule3Failed && (
               <>
                 <button

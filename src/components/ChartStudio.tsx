@@ -223,7 +223,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       activeScenario.vertices,
       activeScenario.direction,
       parentRole,
-      parentWaveLabel
+      parentWaveLabel,
+      candles
     );
     setDiagnosticSummaryById(prev => ({ ...prev, [activeScenario.id]: liveSummary }));
   }, [
@@ -233,7 +234,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     activeScenario.vertices,
     activeScenario.direction,
     parentRole,
-    parentWaveLabel
+    parentWaveLabel,
+    candles
   ]);
 
   // Real-time Elliott Core Rule Violation Toast & Last-Valid Snapshot Tracker
@@ -252,7 +254,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       verts,
       activeScenario.direction,
       parentRole,
-      parentWaveLabel
+      parentWaveLabel,
+      candles
     );
 
     const hardFails: RuleValidationItem[] = summary.rules.filter(r => r.type === 'HARD' && !r.passed);
@@ -457,7 +460,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       activeScenario.vertices,
       activeScenario.direction,
       parentRole,
-      parentWaveLabel
+      parentWaveLabel,
+      candles
     );
     setDiagnosticSummaryById(prev => ({ ...prev, [activeScenario.id]: summary }));
     setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: true }));
@@ -892,6 +896,11 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     }
     return { startIdx, endIdx: Math.max(startIdx, endIdx) };
   }, [parentWindowHighlight, candles]);
+
+  // Three Market Trends Classifier (Session 2.1: Impulse / Correction / Side)
+  const marketTrend = useMemo(() => {
+    return RulesEngine.classifyMarketTrend(candles, activeScenario.vertices);
+  }, [candles, activeScenario.vertices]);
 
   // Floating measurement HUD info
   const hudInfo = useMemo(() => {
@@ -2658,30 +2667,49 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </div>
         )}
 
-        {/* Floating Wave Metrics HUD */}
-        {hudInfo && (
+        {/* Floating Wave Metrics & Market Trend Regime HUD */}
+        {(hudInfo || candles.length >= 6) && (
           <div className="absolute top-3 left-3 bg-slate-950/90 border border-slate-800 rounded-lg px-3 py-1.5 text-[11px] flex items-center gap-3 pointer-events-none">
-            <div className="flex items-center gap-1.5 text-slate-300">
-              <span className="text-slate-500">اصلاح موج ۲:</span>
-              <strong className="text-cyan-400 font-mono tabular-nums">{hudInfo.retrace2Pct}%</strong>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">روند:</span>
+              <strong
+                className={
+                  marketTrend.regime === 'IMPULSE'
+                    ? 'text-emerald-400 font-semibold'
+                    : marketTrend.regime === 'CORRECTION'
+                    ? 'text-amber-300 font-semibold'
+                    : 'text-slate-300 font-semibold'
+                }
+              >
+                {marketTrend.shortLabelFa}
+              </strong>
             </div>
-            <div className="h-3.5 w-px bg-slate-800" />
-            <div className="flex items-center gap-1.5 text-slate-300">
-              <span className="text-slate-500">موج ۳ / ۱:</span>
-              <strong className="text-indigo-400 font-mono tabular-nums">{hudInfo.w3Ratio}x</strong>
-            </div>
-            <div className="h-3.5 w-px bg-slate-800" />
-            <div className="flex items-center gap-1">
-              {hudInfo.hasOverlap ? (
-                <span className="text-amber-400 font-medium flex items-center gap-1">
-                  <AlertTriangle className="w-3 h-3" /> هم‌پوشانی ۴ و ۱
-                </span>
-              ) : (
-                <span className="text-emerald-400 font-medium flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> بدون هم‌پوشانی
-                </span>
-              )}
-            </div>
+            {hudInfo && (
+              <>
+                <div className="h-3.5 w-px bg-slate-800" />
+                <div className="flex items-center gap-1.5 text-slate-300">
+                  <span className="text-slate-500">اصلاح موج ۲:</span>
+                  <strong className="text-cyan-400 font-mono tabular-nums">{hudInfo.retrace2Pct}%</strong>
+                </div>
+                <div className="h-3.5 w-px bg-slate-800" />
+                <div className="flex items-center gap-1.5 text-slate-300">
+                  <span className="text-slate-500">موج ۳ / ۱:</span>
+                  <strong className="text-indigo-400 font-mono tabular-nums">{hudInfo.w3Ratio}x</strong>
+                </div>
+                <div className="h-3.5 w-px bg-slate-800" />
+                <div className="flex items-center gap-1">
+                  {hudInfo.hasOverlap ? (
+                    <span className="text-amber-400 font-medium flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> هم‌پوشانی ۴ و ۱
+                    </span>
+                  ) : (
+                    <span className="text-emerald-400 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> بدون هم‌پوشانی
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 

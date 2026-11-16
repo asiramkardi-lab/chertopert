@@ -1,0 +1,1280 @@
+# استخراج و تشریح کامل جلسه ۱۸ + تبدیل به SDD + پیاده‌سازی Backend و Frontend
+
+---
+
+## بخش ۱: استخراج مفاهیم جلسه ۱۸ از فایل پیوست
+
+جلسه هجدهم (`18.txt`) به **کشیدگی امواج (Wave Extension)** و **TMV/PRZ** می‌پردازد. این جلسه، جلسه‌ای کاربردی است که **هدف‌گذاری قیمتی و مدیریت معامله** را آموزش می‌دهد. مفاهیم استخراج‌شده:
+
+| شماره | مفهوم | مکان در فایل | ارتباط با جلسات دیگر |
+|-------|-------|-------------|---------------------|
+| ۱۸-۱ | **تعریف کشیدگی (بیش از شخصیت موج)** | 18.txt | مرتبط با جلسه ۴ (قانون ۲) |
+| ۱۸-۲ | **کشیدگی موج ۱ (شرایط و پیامدها)** | 18.txt | مرتبط با جلسه ۳ |
+| ۱۸-۳ | **کشیدگی موج ۳ (شرایط و پیامدها)** | 18.txt | مرتبط با جلسه ۱۸ |
+| ۱۸-۴ | **کشیدگی موج ۵ (شرایط و پیامدها)** | 18.txt | مرتبط با جلسه ۶ |
+| ۱۸-۵ | **کشیدگی موج ۱: موج ۲ < ۳۸.۲٪** | 18.txt | مرتبط با جلسه ۷ (فیبوناچی) |
+| ۱۸-۶ | **کشیدگی موج ۳: موج ۴ < ۳۸.۲٪** | 18.txt | مرتبط با جلسه ۷ |
+| ۱۸-۷ | **کشیدگی موج ۵: > ۱۶۱.۸٪ موج ۳** | 18.txt | مرتبط با جلسه ۸ |
+| ۱۸-۸ | **TMV (Target Movement Value)** | 18.txt | مرتبط با جلسه ۸ |
+| ۱۸-۹ | **PRZ (Potential Reversal Zone)** | 18.txt | مرتبط با جلسه ۷ |
+| ۱۸-۱۰ | **TMV Short/Long (Prime/Initial)** | 18.txt | مرتبط با جلسه ۸ |
+| ۱۸-۱۱ | **TMV Ideal (۱۰۰٪ پروجکشن)** | 18.txt | مرتبط با جلسه ۸ |
+| ۱۸-۱۲ | **TMV Alternate (۱۶۱.۸٪)** | 18.txt | مرتبط با جلسه ۸ |
+| ۱۸-۱۳ | **مدیریت معامله با TMV (Trailing Stop)** | 18.txt | مرتبط با جلسه ۱۹ |
+| ۱۸-۱۴ | **عدم رسم رتریسمنت روی موج ۵** | 18.txt | مرتبط با جلسه ۸ |
+
+---
+
+## بخش ۲: تشریح کامل هر مفهوم برای پیاده‌سازی توسط LLM
+
+### ۲.۱ تعریف کشیدگی (بیش از شخصیت موج)
+
+**تعریف دقیق:** کشیدگی یعنی یک موج **بیش از شخصیت معمول خودش** حرکت کرده است. شخصیت هر موج (طول معمول) از قوانین فیبوناچی و تجربه بازار به دست می‌آید.
+
+**نقل قول کلیدی:**
+> "زمانی که ما میگیم کشیدگی یک موج رو داریم یعنی اون موج ما بیش از اون شخصیت خودش حرکت کرده."
+
+**نکته حیاتی:** کشیدگی **نسبت به سایر امواج** سنجیده می‌شود، نه به یک عدد ثابت.
+
+**شرایط مرزی:**
+- **موج ۱ = ۲۰۰٪ موج ۳:** کشیدگی موج ۱.
+- **موج ۳ = ۲۰۰٪ موج ۱:** کشیدگی موج ۳ (رایج‌ترین).
+- **موج ۵ = ۲۰۰٪ موج ۳:** کشیدگی موج ۵ (نادر).
+- **همه امواج هم‌اندازه:** بدون کشیدگی.
+
+**تست:**
+- **T-18.1:** موج ۱ = ۲۰۰٪ موج ۳. الگوریتم باید کشیدگی موج ۱ تشخیص دهد.
+- **T-18.2:** موج ۳ = ۲۰۰٪ موج ۱. الگوریتم باید کشیدگی موج ۳ تشخیص دهد.
+- **T-18.3:** موج ۵ = ۲۰۰٪ موج ۳. الگوریتم باید کشیدگی موج ۵ تشخیص دهد.
+- **T-18.4:** همه امواج هم‌اندازه. الگوریتم نباید کشیدگی تشخیص دهد.
+
+---
+
+### ۲.۲ کشیدگی موج ۱ (شرایط و پیامدها)
+
+**تعریف دقیق:** کشیدگی موج ۱ زمانی رخ می‌دهد که:
+1. موج ۱ **بعد از یک اصلاح** (نه از کف مطلق) شروع شود.
+2. موج ۱ **کل حرکت قبلی** (۱۰۰٪) را پوشش دهد.
+3. موج ۲ **کمتر از ۳۸.۲٪** موج ۱ را اصلاح کند.
+
+**نقل قول کلیدی:**
+> "اگر یک اصلاح داشته باشیم و موج اول ما بعد از این اصلاح بتونه کل حرکت قبل یعنی صد درصد حرکت قبل رو بیاد پوشش بده به احتمال خیلی زیاد ما کشیدگی موج یک رو خواهیم داشت... کجا تایید میشه برای ما زمانی که موج دوم کمتر از ۳۸.۲ درصد موج اول بشه."
+
+**پیامدها:**
+- **موج ۳ کوتاه‌تر از ۱۰۰٪ موج ۱** می‌شود.
+- **موج ۴ احتمالاً وارد محدوده ۱** می‌شود (ترمینال).
+- **موج ۵ کوتاه** می‌شود.
+
+**شرایط مرزی:**
+- **موج ۱ بعد از اصلاح + ۱۰۰٪ پوشش قبلی + موج ۲ < ۳۸.۲٪:** کشیدگی موج ۱.
+- **موج ۱ از کف مطلق:** کشیدگی موج ۱ قابل تشخیص نیست (نیاز به مرجع).
+- **موج ۲ > ۳۸.۲٪:** کشیدگی موج ۱ قابل تأیید نیست.
+
+**تست:**
+- **T-18.5:** موج ۱ بعد از اصلاح + ۱۰۰٪ پوشش + موج ۲ < ۳۸.۲٪. الگوریتم باید کشیدگی موج ۱ تشخیص دهد.
+- **T-18.6:** موج ۱ از کف مطلق. الگوریتم باید کشیدگی را تشخیص ندهد.
+- **T-18.7:** موج ۲ > ۳۸.۲٪. الگوریتم باید کشیدگی را تأیید نکند.
+
+---
+
+### ۲.۳ کشیدگی موج ۳ (شرایط و پیامدها)
+
+**تعریف دقیق:** کشیدگی موج ۳ **رایج‌ترین** نوع کشیدگی است. زمانی رخ می‌دهد که:
+1. موج ۳ **بیش از ۱۶۱.۸٪** موج ۱ باشد.
+2. موج ۴ **کمتر از ۳۸.۲٪** موج ۳ را اصلاح کند.
+
+**نقل قول کلیدی:**
+> "کشیدگی موج سوم یه حالت ایده آلی تقریباً داره فقط با این تفاوت که موج پنجم به خودش نمیرسه و خیلی زود تموم میشه... موج چهارم احتمالاً کمتر از ۳۸.۲ درصد اصلاح میکنه و باعث کوتاه شدگی موج پنجم میشه."
+
+**پیامدها:**
+- **موج ۵ کوتاه‌تر از ۱۰۰٪ موج ۳** می‌شود.
+- **موج ۵ به TMV خود نمی‌رسد** (کوتاه‌شدگی).
+- **مدیریت معامله:** trailing stop ضروری است.
+
+**شرایط مرزی:**
+- **موج ۳ > ۱۶۱.۸٪ موج ۱ + موج ۴ < ۳۸.۲٪:** کشیدگی موج ۳.
+- **موج ۳ > ۲۶۱.۸٪:** کشیدگی شدید.
+- **موج ۴ > ۳۸.۲٪:** کشیدگی قابل تأیید نیست (ممکن است موج ۴ هنوز ادامه دارد).
+
+**تست:**
+- **T-18.8:** موج ۳ > ۱۶۱.۸٪ + موج ۴ < ۳۸.۲٪. الگوریتم باید کشیدگی موج ۳ تشخیص دهد.
+- **T-18.9:** موج ۳ > ۲۶۱.۸٪. الگوریتم باید کشیدگی شدید تشخیص دهد.
+- **T-18.10:** موج ۴ > ۳۸.۲٪. الگوریتم باید کشیدگی را تأیید نکند.
+
+---
+
+### ۲.۴ کشیدگی موج ۵ (شرایط و پیامدها)
+
+**تعریف دقیق:** کشیدگی موج ۵ **نادرترین** نوع کشیدگی است. زمانی رخ می‌دهد که:
+1. موج ۵ **بیش از ۱۶۱.۸٪** موج ۳ باشد.
+2. موج ۵ **بیش از ۲۰۰٪** موج ۳ باشد (کشیدگی شدید).
+
+**نقل قول کلیدی:**
+> "وقتی موج پنجم کشیده می‌شود معمولاً از ۱۶۱.۸ درصد می‌گیم دو برابر موج سوم دو برابر موج سوم میشه... از ۲۰۰ درصدش هم دیدیم داره عبور میکنه کم کم باید زنگ خطر رو احساس بکنیم چون هر لحظه امکان ریزش قیمت وجود داره."
+
+**پیامدها:**
+- **ریزش شدید** بعد از موج ۵.
+- **مدیریت معامله:** سیو سود ضروری است.
+- **زنگ خطر:** اگر موج ۵ > ۲۰۰٪ → ریزش قریب‌الوقوع.
+
+**شرایط مرزی:**
+- **موج ۵ > ۱۶۱.۸٪ موج ۳:** کشیدگی.
+- **موج ۵ > ۲۰۰٪ موج ۳:** کشیدگی شدید (زنگ خطر).
+- **موج ۵ > ۲۶۱.۸٪:** کشیدگی بسیار شدید.
+
+**تست:**
+- **T-18.11:** موج ۵ > ۱۶۱.۸٪. الگوریتم باید کشیدگی تشخیص دهد.
+- **T-18.12:** موج ۵ > ۲۰۰٪. الگوریتم باید کشیدگی شدید (زنگ خطر) تشخیص دهد.
+- **T-18.13:** موج ۵ > ۲۶۱.۸٪. الگوریتم باید کشیدگی بسیار شدید تشخیص دهد.
+
+---
+
+### ۲.۵ کشیدگی موج ۱: موج ۲ < ۳۸.۲٪
+
+**تعریف دقیق:** برای تأیید کشیدگی موج ۱، موج ۲ باید **کمتر از ۳۸.۲٪** موج ۱ را اصلاح کند.
+
+**نقل قول کلیدی:**
+> "کجا تایید میشه برای ما زمانی که موج دوم کمتر از ۳۸.۲ درصد موج اول بشه یا توی محدوده ۳۸.۲ درصد به اتمام برسه پس موج دوم اگر توی محدوده ۳۸۲ کمتر از ۳۸۲ درصد شد... موج یک دیگه شد میتونیم بگیم که در واقع... موج یک وجود داره."
+
+**شرایط مرزی:**
+- **موج ۲ < ۳۸.۲٪:** کشیدگی موج ۱ تأیید.
+- **موج ۲ = ۳۸.۲٪:** مرزی (تأیید با احتیاط).
+- **موج ۲ > ۳۸.۲٪:** کشیدگی موج ۱ تأیید نمی‌شود.
+
+**تست:**
+- **T-18.14:** موج ۲ < ۳۸.۲٪. الگوریتم باید کشیدگی موج ۱ را تأیید کند.
+- **T-18.15:** موج ۲ = ۳۸.۲٪. الگوریتم باید مرزی تشخیص دهد.
+- **T-18.16:** موج ۲ > ۳۸.۲٪. الگوریتم باید تأیید نکند.
+
+---
+
+### ۲.۶ کشیدگی موج ۳: موج ۴ < ۳۸.۲٪
+
+**تعریف دقیق:** برای تأیید کشیدگی موج ۳، موج ۴ باید **کمتر از ۳۸.۲٪** موج ۳ را اصلاح کند.
+
+**نقل قول کلیدی:**
+> "موج چهارم احتمالاً کمتر از ۳۸.۲ درصد اصلاح میکنه و باعث کوتاه شدگی موج پنجم میشه."
+
+**شرایط مرزی:**
+- **موج ۴ < ۳۸.۲٪:** کشیدگی موج ۳ تأیید.
+- **موج ۴ = ۳۸.۲٪:** مرزی.
+- **موج ۴ > ۳۸.۲٪:** کشیدگی موج ۳ تأیید نمی‌شود.
+
+**تست:**
+- **T-18.17:** موج ۴ < ۳۸.۲٪. الگوریتم باید کشیدگی موج ۳ را تأیید کند.
+- **T-18.18:** موج ۴ = ۳۸.۲٪. الگوریتم باید مرزی تشخیص دهد.
+- **T-18.19:** موج ۴ > ۳۸.۲٪. الگوریتم باید تأیید نکند.
+
+---
+
+### ۲.۷ کشیدگی موج ۵: > ۱۶۱.۸٪ موج ۳
+
+**تعریف دقیق:** کشیدگی موج ۵ زمانی تأیید می‌شود که موج ۵ **بیش از ۱۶۱.۸٪** موج ۳ باشد.
+
+**نقل قول کلیدی:**
+> "وقتی موج پنجم کشیده می‌شود معمولاً از ۱۶۱.۸ درصد می‌گیم دو برابر موج سوم."
+
+**شرایط مرزی:**
+- **موج ۵ = ۱۶۱.۸٪:** مرزی.
+- **موج ۵ > ۱۶۱.۸٪:** کشیدگی موج ۵.
+- **موج ۵ > ۲۰۰٪:** کشیدگی شدید.
+- **موج ۵ < ۱۶۱.۸٪:** بدون کشیدگی.
+
+**تست:**
+- **T-18.20:** موج ۵ = ۱۶۱.۸٪. الگوریتم باید مرزی تشخیص دهد.
+- **T-18.21:** موج ۵ > ۱۶۱.۸٪. الگوریتم باید کشیدگی تشخیص دهد.
+- **T-18.22:** موج ۵ < ۱۶۱.۸٪. الگوریتم باید بدون کشیدگی تشخیص دهد.
+
+---
+
+### ۲.۸ TMV (Target Movement Value)
+
+**تعریف دقیق:** TMV **هدف حرکت موج** است. محدوده‌ای که قیمت **باید** به آن برسد (برخلاف PRZ که **احتمالاً** می‌رسد).
+
+**نقل قول کلیدی:**
+> "تی ام وی ها چیه تی ها اهداف حرکت امواج هستند... تی ام وی ها محدوده هایی هستند که قیمت برای رسیدن به این محدوده ها شروع به حرکت میکنه یعنی اهداف اون امواج هستند."
+
+**انواع TMV:**
+1. **TMV Prime/Initial:** اولین هدف (سقف/کف موج قبلی).
+2. **TMV Ideal:** هدف اصلی (۱۰۰٪ پروجکشن).
+3. **TMV Alternate:** هدف جایگزین (۱۶۱.۸٪، ۲۶۱.۸٪).
+
+**شرایط مرزی:**
+- **TMV Prime:** سقف موج ۱ (برای موج ۳).
+- **TMV Ideal:** ۱۰۰٪ پروجکشن موج ۱ (برای موج ۳).
+- **TMV Alternate:** ۱۶۱.۸٪ پروجکشن موج ۱ (برای موج ۳).
+
+**تست:**
+- **T-18.23:** موج ۳ باید به TMV Prime برسد. الگوریتم باید سقف موج ۱ را تشخیص دهد.
+- **T-18.24:** موج ۳ باید به TMV Ideal برسد. الگوریتم باید ۱۰۰٪ پروجکشن را محاسبه کند.
+- **T-18.25:** موج ۳ باید به TMV Alternate برسد. الگوریتم باید ۱۶۱.۸٪ پروجکشن را محاسبه کند.
+
+---
+
+### ۲.۹ PRZ (Potential Reversal Zone)
+
+**تعریف دقیق:** PRZ **محدوده پرپتانسیل چرخش** است. محدوده‌ای که قیمت **احتمالاً** به آن می‌رسد و **چرخش** می‌کند.
+
+**نقل قول کلیدی:**
+> "پی آررز ها اهداف حرکتی امواج نیستند پی آررزها یه سری محدوده‌هایی هستند... اگر قیمت به این محدوده‌ها رسید احتمال چرخش قیمت وجود داره."
+
+**تفاوت TMV vs PRZ:**
+- **TMV:** هدف حرکت (قیمت باید برسد).
+- **PRZ:** محدوده چرخش (قیمت ممکن است برسد و برگردد).
+
+**شرایط مرزی:**
+- **PRZ = ۶۱.۸٪ رتریسمنت:** محدوده چرخش موج ۲.
+- **PRZ = ۷۸.۶٪ رتریسمنت:** محدوده چرخش موج ۲ (با شتاب‌گیری).
+- **PRZ = ۳۸.۲٪ رتریسمنت:** محدوده چرخش موج ۴.
+
+**تست:**
+- **T-18.26:** PRZ = ۶۱.۸٪. الگوریتم باید چرخش موج ۲ تشخیص دهد.
+- **T-18.27:** PRZ = ۷۸.۶٪. الگوریتم باید چرخش موج ۲ (با شتاب‌گیری) تشخیص دهد.
+- **T-18.28:** PRZ = ۳۸.۲٪. الگوریتم باید چرخش موج ۴ تشخیص دهد.
+
+---
+
+### ۲.۱۰ TMV Short/Long (Prime/Initial)
+
+**تعریف دقیق:** **TMV Prime** (یا Initial) اولین هدف حرکت است:
+- **در روند صعودی:** سقف موج ۱.
+- **در روند نزولی:** کف موج ۱.
+
+**نقل قول کلیدی:**
+> "این سقف موج قبلی رو به عنوان تی ام وی پی آر پرایمری در نظر اولیه ما تی ام بی کوتاه شده تی ام وی اولیه تی‌ام‌وی ایده‌آل که برای چیه برای رسیدن هدفه."
+
+**شرایط مرزی:**
+- **TMV Prime = سقف موج ۱:** در روند صعودی.
+- **TMV Prime = کف موج ۱:** در روند نزولی.
+- **TMV Prime = ۱۰۰٪ پروجکشن:** TMV Ideal (نه Prime).
+
+**تست:**
+- **T-18.29:** روند صعودی. الگوریتم باید سقف موج ۱ را به عنوان TMV Prime تشخیص دهد.
+- **T-18.30:** روند نزولی. الگوریتم باید کف موج ۱ را به عنوان TMV Prime تشخیص دهد.
+
+---
+
+### ۲.۱۱ TMV Ideal (۱۰۰٪ پروجکشن)
+
+**تعریف دقیق:** **TMV Ideal** = ۱۰۰٪ پروجکشن موج ۱ از انتهای موج ۲. این **هدف اصلی** است.
+
+**نقل قول کلیدی:**
+> "۱۰۰ فیبوناچی پروجکشن هست ۱۰۰ درصد اف سه که ما می‌زنیم فیبوناتچی سه نقطه‌ای این میشه چی تی ام وی ایده آل ما."
+
+**محاسبه:**
+- **X:** ابتدای موج ۱.
+- **Y:** انتهای موج ۱.
+- **Z:** انتهای موج ۲.
+- **TMV Ideal:** Z + (Y - X).
+
+**شرایط مرزی:**
+- **TMV Ideal = ۱۰۰٪:** هدف اصلی.
+- **TMV Ideal = ۱۲۷٪:** هدف جایگزین.
+- **TMV Ideal = ۱۶۱.۸٪:** TMV Alternate.
+
+**تست:**
+- **T-18.31:** X=۱۰۰، Y=۲۰۰، Z=۱۵۰. الگوریتم باید TMV Ideal = ۲۵۰ را محاسبه کند.
+- **T-18.32:** X=۱۰۰، Y=۲۰۰، Z=۱۵۰. الگوریتم باید TMV Alternate = ۳۱۱.۸ را محاسبه کند.
+
+---
+
+### ۲.۱۲ TMV Alternate (۱۶۱.۸٪)
+
+**تعریف دقیق:** **TMV Alternate** = ۱۶۱.۸٪ پروجکشن موج ۱ از انتهای موج ۲. این **هدف جایگزین** (بلندپروازانه) است.
+
+**نقل قول کلیدی:**
+> "بهش میگیم تی ام وی آلترنیت آلت ۱۶۱.۸ درصد ۱۶۱۸ درصد فیبوناچی سه نقطه‌ای ما اف ۳."
+
+**محاسبه:**
+- **TMV Alternate:** Z + (Y - X) × ۱.۶۱۸.
+
+**شرایط مرزی:**
+- **TMV Alternate = ۱۶۱.۸٪:** هدف بلندپروازانه.
+- **TMV Alternate = ۲۶۱.۸٪:** هدف بسیار بلندپروازانه.
+- **TMV Alternate < ۱۰۰٪:** نامعتبر.
+
+**تست:**
+- **T-18.33:** X=۱۰۰، Y=۲۰۰، Z=۱۵۰. الگوریتم باید TMV Alternate = ۳۱۱.۸ را محاسبه کند.
+- **T-18.34:** X=۱۰۰، Y=۲۰۰، Z=۱۵۰. الگوریتم باید TMV Alternate ۲۶۱.۸٪ = ۴۰۹.۸ را محاسبه کند.
+
+---
+
+### ۲.۱۳ مدیریت معامله با TMV (Trailing Stop)
+
+**تعریف دقیق:** با استفاده از TMV، معامله‌گر **استاپ** را تدریجاً **بالا** می‌برد تا سود را قفل کند:
+1. **ورود:** در ۶۱.۸٪ (موج ۲).
+2. **استاپ اول:** زیر موج ۲.
+3. **استاپ دوم:** پس از عبور از TMV Prime (سقف موج ۱).
+4. **استاپ سوم:** پس از عبور از TMV Ideal (۱۰۰٪).
+5. **استاپ چهارم:** پس از عبور از TMV Alternate (۱۶۱.۸٪).
+
+**نقل قول کلیدی:**
+> "اگر قیمت حرکت کرد و اومد بالا وقتی از این محدوده عبور میکنه استاپم رو میارم به کجا اینجا منتقل کنم اگر قیمت اومد و از این محدوده رفت بالاتر استاپم رو میارم کجا به اینجا منتقل کنم."
+
+**شرایط مرزی:**
+- **TMV Prime hit:** استاپ به زیر موج ۲.
+- **TMV Ideal hit:** استاپ به زیر ۶۱.۸٪.
+- **TMV Alternate hit:** استاپ به زیر ۱۰۰٪.
+- **کشیدگی موج ۵:** سیو سود فوری.
+
+**تست:**
+- **T-18.35:** TMV Prime hit. الگوریتم باید trailing stop را تشخیص دهد.
+- **T-18.36:** TMV Ideal hit. الگوریتم باید trailing stop را تشخیص دهد.
+- **T-18.37:** کشیدگی موج ۵. الگوریتم باید سیو سود فوری تشخیص دهد.
+
+---
+
+### ۲.۱۴ عدم رسم رتریسمنت روی موج ۵
+
+**تعریف دقیق:** موج ۵ **آخرین موج روند** است و **اصلاح ندارد**. بنابراین، رسم رتریسمنت روی موج ۵ **اشتباه** است.
+
+**نقل قول کلیدی:**
+> "موج پنجم که پایان یک روند بود اصلاح نداشت پس ما روی موج پنجم فیبوناچی رسم نمی‌کنیم... موج پنجم اصلا اصلاح نداره که من بخوام پایانش رو مشخص بکنم."
+
+**نکته حیاتی:** اگر روی موج ۵ رتریسمنت رسم کردید → **شمارش اشتباه** است (احتمالاً موج ۵ در واقع موج ۳ است).
+
+**شرایط مرزی:**
+- **رتریسمنت روی موج ۵:** اشتباه.
+- **رتریسمنت روی موج ۳:** صحیح (برای موج ۴).
+- **رتریسمنت روی موج ۱:** صحیح (برای موج ۲).
+
+**تست:**
+- **T-18.38:** رتریسمنت روی موج ۵. الگوریتم باید خطا بدهد.
+- **T-18.39:** رتریسمنت روی موج ۳. الگوریتم باید صحیح تشخیص دهد.
+- **T-18.40:** رتریسمنت روی موج ۱. الگوریتم باید صحیح تشخیص دهد.
+
+---
+
+## بخش ۳: تبدیل به SDD (Specification-Driven Development)
+
+### ۳.۱ Feature Specification: `wave-extension-tmv-engine`
+
+```markdown
+# Feature Specification: Wave Extension & TMV Engine
+
+Feature Branch: `017-wave-extension-tmv-engine`
+Created: 2026-10-28
+Status: Draft
+Input: User description: "A library that detects wave extension (1, 3, 5), computes TMV (Prime/Ideal/Alternate), identifies PRZ, recommends trailing stop levels, and forbids retracement on wave 5."
+
+## User Scenarios & Testing
+
+### User Story 1 - Detect Wave Extension (Priority: P1)
+
+The engine detects wave extension (1, 3, or 5) based on Fibonacci ratios.
+
+**Independent Test:** Given wave 3 = 200% of wave 1 + wave 4 < 38.2%, the engine returns `extension="wave_3"`.
+
+**Acceptance Scenarios:**
+- Given wave 1 = 200% of wave 3 + wave 2 < 38.2%, When detecting, Then returns `extension="wave_1"`.
+- Given wave 3 = 200% of wave 1 + wave 4 < 38.2%, When detecting, Then returns `extension="wave_3"`.
+- Given wave 5 = 200% of wave 3, When detecting, Then returns `extension="wave_5"`.
+- Given no wave > 161.8% of others, When detecting, Then returns `extension=None`.
+
+### User Story 2 - Compute TMV (Prime/Ideal/Alternate) (Priority: P1)
+
+The engine computes TMV Prime (previous wave high), Ideal (100% projection), Alternate (161.8% projection).
+
+**Independent Test:** Given X=100, Y=200, Z=150, the engine returns `prime=200, ideal=250, alternate=311.8`.
+
+**Acceptance Scenarios:**
+- Given X=100, Y=200, Z=150, When computing, Then returns `prime=200`.
+- Given X=100, Y=200, Z=150, When computing, Then returns `ideal=250`.
+- Given X=100, Y=200, Z=150, When computing, Then returns `alternate=311.8`.
+
+### User Story 3 - Identify PRZ (Priority: P1)
+
+The engine identifies PRZ for wave 2 (61.8%, 78.6%) and wave 4 (38.2%).
+
+**Independent Test:** Given wave 2 retracement, the engine returns `prz=61.8%`.
+
+**Acceptance Scenarios:**
+- Given wave 2 at 61.8%, When identifying, Then returns `prz=61.8% (ideal)`.
+- Given wave 2 at 78.6%, When identifying, Then returns `prz=78.6% (with acceleration)`.
+- Given wave 4 at 38.2%, When identifying, Then returns `prz=38.2%`.
+
+### User Story 4 - Recommend Trailing Stop (Priority: P1)
+
+The engine recommends trailing stop levels based on TMV hits.
+
+**Independent Test:** Given TMV Prime hit, the engine returns `stop=below_wave_2`.
+
+**Acceptance Scenarios:**
+- Given TMV Prime hit, When recommending, Then returns `stop=below_wave_2`.
+- Given TMV Ideal hit, When recommending, Then returns `stop=below_61.8%`.
+- Given TMV Alternate hit, When recommending, Then returns `stop=below_100%`.
+- Given wave 5 extension, When recommending, Then returns `stop=immediate_profit_taking`.
+
+### User Story 5 - Forbid Retracement on Wave 5 (Priority: P1)
+
+The engine forbids retracement on wave 5 (last wave has no correction).
+
+**Independent Test:** Given retracement on wave 5, the engine returns `valid=False`.
+
+**Acceptance Scenarios:**
+- Given retracement on wave 5, When validating, Then returns `valid=False`.
+- Given retracement on wave 3, When validating, Then returns `valid=True`.
+- Given retracement on wave 1, When validating, Then returns `valid=True`.
+
+### Edge Cases
+
+- **Wave 1 extension from absolute bottom:** Cannot detect (no reference).
+- **Wave 3 extension without wave 4 < 38.2%:** Extension unconfirmed.
+- **Wave 5 extension at 200%:** Strong warning.
+- **TMV Prime = TMV Ideal:** Wave 1 high = 100% projection (rare).
+- **PRZ overlap with TMV:** High confidence.
+- **PRZ without TMV:** Lower confidence.
+- **Wave 5 retracement with 100% coverage:** Invalid (rule 1 violation).
+- **Trailing stop at TMV Alternate + extension:** Immediate profit taking.
+- **Wave 3 extension + wave 5 short:** Confirmed terminal-like behavior.
+- **Wave 1 extension + wave 4 overlap:** Confirmed terminal.
+
+## Requirements
+
+### Functional Requirements
+
+- **FR-001:** System MUST detect wave extension (1, 3, 5).
+- **FR-002:** System MUST compute TMV Prime/Ideal/Alternate.
+- **FR-003:** System MUST identify PRZ for waves 2, 4.
+- **FR-004:** System MUST recommend trailing stop levels.
+- **FR-005:** System MUST forbid retracement on wave 5.
+- **FR-006:** System MUST validate wave 1 extension (wave 2 < 38.2%).
+- **FR-007:** System MUST validate wave 3 extension (wave 4 < 38.2%).
+- **FR-008:** System MUST validate wave 5 extension (>161.8% wave 3).
+- **FR-009:** System MUST expose all functionality via CLI (JSON in/out).
+
+### Key Entities
+
+- **Wave:** `{label, start_price, end_price, sub_waves}`
+- **ExtensionRequest:** `{wave_1, wave_2, wave_3, wave_4, wave_5, current_price}`
+- **ExtensionResponse:** `{extension, tmv, prz, trailing_stop, valid, confidence, warnings}`
+
+## Success Criteria
+
+- **SC-001:** Wave extension detection accuracy ≥ 90%.
+- **SC-002:** TMV computation accuracy = 100%.
+- **SC-003:** PRZ identification accuracy ≥ 90%.
+- **SC-004:** Trailing stop recommendation accuracy ≥ 85%.
+- **SC-005:** Wave 5 retracement forbiddance = 100%.
+- **SC-006:** CLI responds in < 100ms for 10 extensions.
+```
+
+### ۳.۲ Implementation Plan (خلاصه)
+
+```markdown
+# Implementation Plan: Wave Extension & TMV Engine
+
+**Branch**: `017-wave-extension-tmv-engine`
+**Language/Version**: Python 3.11+
+**Primary Dependencies**: pydantic, numpy, typer (CLI), pytest
+**Storage**: N/A (stateless library)
+**Testing**: pytest (contract → integration → unit)
+**Target Platform**: Linux/macOS/Windows (CLI); any Python env (library)
+**Project Type**: Library + CLI
+**Performance Goals**: < 100ms for 10 extensions
+**Constraints**: No network calls; deterministic output
+
+## Constitution Check
+
+### Article I: Library-First
+✅ Core logic in `wave_extension_tmv_engine/` package.
+
+### Article II: CLI Interface Mandate
+✅ CLI reads JSON from stdin, writes JSON to stdout.
+
+### Article III: Test-First
+✅ Tests written before implementation.
+
+### Article VII: Simplicity (≤3 projects)
+✅ One project: `wave-extension-tmv-engine`.
+
+### Article VIII: Anti-Abstraction
+✅ Direct use of numpy.
+
+### Article IX: Integration-First
+✅ Tests use course examples (شازند, خودرو).
+
+## Project Structure
+
+```text
+wave-extension-tmv-engine/
+├── src/
+│   └── wave_extension_tmv_engine/
+│       ├── __init__.py
+│       ├── models.py          # Wave, ExtensionRequest, ExtensionResponse
+│       ├── extension.py       # Detect wave 1/3/5 extension
+│       ├── tmv.py             # Compute TMV Prime/Ideal/Alternate
+│       ├── prz.py             # Identify PRZ
+│       ├── trailing.py        # Trailing stop recommendation
+│       ├── validation.py      # Forbid retracement on wave 5
+│       └── cli.py             # Typer CLI
+├── tests/
+│   ├── contract/
+│   │   └── test_cli_contract.py
+│   ├── integration/
+│   │   └── test_course_examples.py
+│   └── unit/
+│       ├── test_extension.py
+│       ├── test_tmv.py
+│       ├── test_prz.py
+│       ├── test_trailing.py
+│       └── test_validation.py
+├── pyproject.toml
+└── README.md
+```
+
+## Complexity Tracking
+
+| Violation | Justification |
+|-----------|---------------|
+| None | All gates pass. |
+```
+
+---
+
+## بخش ۴: پیاده‌سازی Backend (FastAPI)
+
+### ۴.۱ ساختار پروژه
+
+```
+backend/
+├── app/
+│   ├── main.py
+│   ├── api/
+│   │   └── v1/
+│   │       └── extension.py
+│   ├── core/
+│   │   ├── config.py
+│   │   └── logging.py
+│   ├── schemas/
+│   │   └── extension.py
+│   └── services/
+│       ├── extension_service.py
+│       ├── tmv_service.py
+│       ├── prz_service.py
+│       ├── trailing_service.py
+│       └── validation_service.py
+├── tests/
+│   ├── test_api.py
+│   └── test_services.py
+└── requirements.txt
+```
+
+### ۴.۲ کد کلیدی
+
+**`schemas/extension.py`:**
+```python
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
+
+class Wave(BaseModel):
+    label: str
+    start_price: float
+    end_price: float
+
+    @property
+    def length(self) -> float:
+        return abs(self.end_price - self.start_price)
+
+class ExtensionRequest(BaseModel):
+    wave_1: Wave
+    wave_2: Wave
+    wave_3: Wave
+    wave_4: Wave
+    wave_5: Optional[Wave] = None
+    current_price: Optional[float] = None
+
+class TMVResult(BaseModel):
+    prime: float
+    ideal: float
+    alternate: float
+    direction: Literal["up", "down"]
+
+class PRZResult(BaseModel):
+    level: float
+    price: float
+    context: str
+
+class ExtensionResponse(BaseModel):
+    extension: Optional[Literal["wave_1", "wave_3", "wave_5"]] = None
+    extension_severity: Optional[Literal["moderate", "strong", "severe"]] = None
+    tmv: Optional[TMVResult] = None
+    prz: Optional[PRZResult] = None
+    trailing_stop: Optional[str] = None
+    valid: bool = True
+    confidence: float = Field(ge=0, le=1)
+    warnings: list[str] = []
+    notes: list[str] = []
+```
+
+**`services/extension_service.py`:**
+```python
+from app.schemas.extension import ExtensionRequest
+
+def detect_extension(req: ExtensionRequest) -> tuple[str | None, str | None, list[str]]:
+    """Detect wave extension (1, 3, or 5)."""
+    warnings = []
+    
+    w1, w2, w3 = req.wave_1, req.wave_2, req.wave_3
+    w4 = req.wave_4
+    
+    # Wave 3 extension: w3 > 161.8% of w1 + w4 < 38.2% of w3
+    ratio_31 = w3.length / w1.length if w1.length > 0 else 0
+    ratio_43 = w4.length / w3.length if w3.length > 0 else 0
+    
+    if ratio_31 >= 1.618 and ratio_43 < 0.382:
+        if ratio_31 >= 2.618:
+            return "wave_3", "severe", ["Wave 3 severe extension"]
+        elif ratio_31 >= 2.0:
+            return "wave_3", "strong", ["Wave 3 strong extension"]
+        else:
+            return "wave_3", "moderate", []
+    
+    # Wave 5 extension
+    if req.wave_5:
+        w5 = req.wave_5
+        ratio_53 = w5.length / w3.length if w3.length > 0 else 0
+        if ratio_53 >= 1.618:
+            if ratio_53 >= 2.0:
+                return "wave_5", "strong", ["Wave 5 strong extension: expect sharp reversal"]
+            return "wave_5", "moderate", []
+    
+    # Wave 1 extension: w2 < 38.2% of w1
+    ratio_21 = w2.length / w1.length if w1.length > 0 else 0
+    if ratio_21 < 0.382:
+        # Check if w3 is short (< 100% w1)
+        if ratio_31 < 1.0:
+            return "wave_1", "moderate", ["Wave 1 extension confirmed"]
+    
+    return None, None, []
+```
+
+**`services/tmv_service.py`:**
+```python
+from app.schemas.extension import ExtensionRequest, TMVResult
+
+def compute_tmv(req: ExtensionRequest) -> TMVResult:
+    """Compute TMV Prime/Ideal/Alternate."""
+    x = req.wave_1.start_price
+    y = req.wave_1.end_price
+    z = req.wave_2.end_price
+    
+    direction = "up" if y > x else "down"
+    wave_length = abs(y - x)
+    sign = 1 if direction == "up" else -1
+    
+    prime = y  # Wave 1 high
+    ideal = z + sign * wave_length * 1.0
+    alternate = z + sign * wave_length * 1.618
+    
+    return TMVResult(
+        prime=round(prime, 4),
+        ideal=round(ideal, 4),
+        alternate=round(alternate, 4),
+        direction=direction
+    )
+```
+
+**`services/prz_service.py`:**
+```python
+from app.schemas.extension import ExtensionRequest, Wave, PRZResult
+
+PRZ_LEVELS = {
+    "wave_2": [0.618, 0.786],
+    "wave_4": [0.382, 0.50]
+}
+
+def identify_prz(req: ExtensionRequest, wave_label: str) -> PRZResult | None:
+    """Identify PRZ for wave 2 or 4."""
+    if wave_label == "wave_2":
+        base = req.wave_1
+        target_wave = req.wave_2
+    elif wave_label == "wave_4":
+        base = req.wave_3
+        target_wave = req.wave_4
+    else:
+        return None
+    
+    retracement = target_wave.length / base.length if base.length > 0 else 0
+    
+    for level in PRZ_LEVELS[wave_label]:
+        if abs(retracement - level) < 0.05:  # 5% tolerance
+            if level == 0.786:
+                context = "with acceleration"
+            elif level == 0.618:
+                context = "ideal"
+            elif level == 0.382:
+                context = "shallow (wave 4)"
+            else:
+                context = "standard"
+            return PRZResult(level=level, price=target_wave.end_price, context=context)
+    
+    return None
+```
+
+**`services/trailing_service.py`:**
+```python
+from app.schemas.extension import ExtensionResponse
+
+def recommend_trailing_stop(
+    current_price: float,
+    tmv: 'TMVResult',
+    extension: str | None
+) -> str:
+    """Recommend trailing stop based on TMV hits."""
+    if extension == "wave_5":
+        return "immediate_profit_taking"
+    
+    if current_price >= tmv.alternate:
+        return "below_100%_projection"
+    elif current_price >= tmv.ideal:
+        return "below_61.8%_retracement"
+    elif current_price >= tmv.prime:
+        return "below_wave_2"
+    
+    return "below_wave_2_initial"
+```
+
+**`services/validation_service.py`:**
+```python
+def validate_no_retracement_on_wave_5(wave_label: str) -> tuple[bool, str | None]:
+    """Forbid retracement on wave 5."""
+    if wave_label == "5":
+        return False, "Wave 5 is the last wave; it has no correction. Retracement is invalid."
+    return True, None
+```
+
+**`services/extension_tmv_service.py` (orchestrator):**
+```python
+from app.schemas.extension import ExtensionRequest, ExtensionResponse
+from app.services.extension_service import detect_extension
+from app.services.tmv_service import compute_tmv
+from app.services.prz_service import identify_prz
+from app.services.trailing_service import recommend_trailing_stop
+from app.services.validation_service import validate_no_retracement_on_wave_5
+
+def analyze_extension(req: ExtensionRequest) -> ExtensionResponse:
+    notes = []
+    warnings = []
+    
+    if req.wave_1.length == 0:
+        return ExtensionResponse(
+            valid=False, confidence=0.0,
+            warnings=["Wave 1 has zero length"]
+        )
+    
+    # Step 1: Extension
+    extension, severity, ext_warnings = detect_extension(req)
+    warnings.extend(ext_warnings)
+    if extension:
+        notes.append(f"Extension: {extension} ({severity})")
+    
+    # Step 2: TMV
+    tmv = compute_tmv(req)
+    notes.append(f"TMV: Prime={tmv.prime}, Ideal={tmv.ideal}, Alternate={tmv.alternate}")
+    
+    # Step 3: PRZ
+    prz = identify_prz(req, "wave_2")
+    if prz:
+        notes.append(f"PRZ: {prz.level*100}% ({prz.context})")
+    
+    # Step 4: Trailing stop
+    trailing = None
+    if req.current_price is not None:
+        trailing = recommend_trailing_stop(req.current_price, tmv, extension)
+        notes.append(f"Trailing: {trailing}")
+    
+    # Confidence
+    confidence = 0.8
+    if extension == "wave_5":
+        confidence = 0.9
+        warnings.append("Wave 5 extension: high reversal risk")
+    elif extension == "wave_3":
+        confidence = 0.85
+    elif extension is None:
+        confidence = 0.7
+    
+    return ExtensionResponse(
+        extension=extension,
+        extension_severity=severity,
+        tmv=tmv,
+        prz=prz,
+        trailing_stop=trailing,
+        valid=True,
+        confidence=confidence,
+        warnings=warnings,
+        notes=notes
+    )
+```
+
+**`api/v1/extension.py`:**
+```python
+from fastapi import APIRouter, HTTPException
+from app.schemas.extension import ExtensionRequest, ExtensionResponse
+from app.services.extension_tmv_service import analyze_extension
+from app.services.validation_service import validate_no_retracement_on_wave_5
+
+router = APIRouter(prefix="/api/v1/extension", tags=["extension"])
+
+@router.post("/analyze", response_model=ExtensionResponse)
+async def analyze_endpoint(req: ExtensionRequest):
+    if req.wave_1.length == 0:
+        raise HTTPException(400, "Wave 1 has zero length")
+    return analyze_extension(req)
+
+@router.post("/validate-retracement")
+async def validate_retracement_endpoint(wave_label: str):
+    valid, error = validate_no_retracement_on_wave_5(wave_label)
+    if not valid:
+        raise HTTPException(400, error)
+    return {"valid": True}
+```
+
+**`main.py`:**
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.v1.extension import router
+
+app = FastAPI(title="Wave Extension API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(router)
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+```
+
+### ۴.۳ بهینه‌سازی
+
+| موضوع | راهکار |
+|-------|--------|
+| **Performance** | O(1) برای هر محاسبه |
+| **Validation** | Pydantic v2 با `Field(ge=0, le=1)` |
+| **Error Handling** | `HTTPException` 400 برای zero-length wave |
+| **Testing** | pytest + httpx برای API |
+| **Deployment** | Docker multi-stage؛ uvicorn با workers=4 |
+
+---
+
+## بخش ۵: پیاده‌سازی Frontend (Nuxt 4)
+
+### ۵.۱ ساختار پروژه
+
+```
+frontend/
+├── app/
+│   ├── app.vue
+│   ├── pages/
+│   │   ├── index.vue          # Extension analyzer
+│   │   └── tmv.vue            # TMV/PRZ reference
+│   ├── components/
+│   │   ├── ExtensionInput.vue # Waves 1-5
+│   │   ├── ExtensionCard.vue  # Detected extension
+│   │   ├── TMVCard.vue        # Prime/Ideal/Alternate
+│   │   ├── PRZCard.vue        # PRZ identification
+│   │   ├── TrailingCard.vue   # Trailing stop
+│   │   └── Wave5Validator.vue # Forbid retracement on wave 5
+│   ├── composables/
+│   │   └── useExtensionEngine.ts
+│   └── assets/
+│       └── css/
+│           └── main.css
+├── nuxt.config.ts
+└── package.json
+```
+
+### ۵.۲ کد کلیدی
+
+**`composables/useExtensionEngine.ts`:**
+```typescript
+export const useExtensionEngine = () => {
+  const result = ref<ExtensionResponse | null>(null)
+  const loading = ref(false)
+  const error = ref<string | null>(null)
+
+  const analyze = async (req: ExtensionRequest) => {
+    loading.value = true
+    error.value = null
+    try {
+      result.value = await $fetch<ExtensionResponse>('/api/v1/extension/analyze', {
+        method: 'POST', body: req
+      })
+    } catch (e: any) {
+      error.value = e.data?.detail || 'Analysis failed'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return { result, loading, error, analyze }
+}
+```
+
+**`components/ExtensionInput.vue`:**
+```vue
+<template>
+  <UCard>
+    <template #header>
+      <h3 class="font-semibold">Wave Input (1-5)</h3>
+    </template>
+    <div class="space-y-4">
+      <div v-for="(label, i) in ['1', '2', '3', '4', '5']" :key="label" class="p-3 rounded-lg border border-muted">
+        <p class="text-sm font-medium mb-2">Wave {{ label }} <span v-if="label === '5'" class="text-xs text-muted">(optional)</span></p>
+        <div class="grid grid-cols-2 gap-2">
+          <UFormField label="Start Price">
+            <UInput v-model.number="waves[i].start_price" type="number" step="0.01" />
+          </UFormField>
+          <UFormField label="End Price">
+            <UInput v-model.number="waves[i].end_price" type="number" step="0.01" />
+          </UFormField>
+        </div>
+      </div>
+      <UFormField label="Current Price (for trailing stop)">
+        <UInput v-model.number="currentPrice" type="number" step="0.01" />
+      </UFormField>
+    </div>
+  </UCard>
+</template>
+
+<script setup lang="ts">
+const waves = defineModel<Wave[]>({ required: true })
+const currentPrice = defineModel<number>('currentPrice', { default: 0 })
+</script>
+```
+
+**`components/ExtensionCard.vue`:**
+```vue
+<template>
+  <UCard>
+    <template #header>
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">Wave Extension</h3>
+        <UBadge v-if="result?.extension" :color="severityColor">
+          {{ result.extension }} ({{ result.extension_severity }})
+        </UBadge>
+      </div>
+    </template>
+    <div v-if="result" class="space-y-3">
+      <UAlert
+        v-if="result.extension === 'wave_5'"
+        color="error"
+        title="Wave 5 extension"
+        description="High reversal risk! Consider immediate profit taking."
+        icon="i-lucide-alert-octagon"
+      />
+      <UAlert
+        v-else-if="result.extension === 'wave_3'"
+        color="primary"
+        title="Wave 3 extension"
+        description="Wave 5 will be short; trailing stop required."
+        icon="i-lucide-trending-up"
+      />
+      <UAlert
+        v-else-if="result.extension === 'wave_1'"
+        color="info"
+        title="Wave 1 extension"
+        description="Wave 3 may be short; wave 4 may overlap wave 1."
+        icon="i-lucide-info"
+      />
+      <UAlert
+        v-else
+        color="neutral"
+        title="No extension detected"
+        description="Standard wave proportions."
+        icon="i-lucide-minus"
+      />
+      <UAlert
+        v-for="(w, i) in result.warnings"
+        :key="i"
+        color="warning"
+        :title="w"
+        icon="i-lucide-alert-triangle"
+      />
+    </div>
+  </UCard>
+</template>
+
+<script setup lang="ts">
+const props = defineProps<{ result: ExtensionResponse | null }>()
+const severityColor = computed(() => {
+  if (props.result?.extension_severity === 'severe') return 'error'
+  if (props.result?.extension_severity === 'strong') return 'warning'
+  return 'primary'
+})
+</script>
+```
+
+**`components/TMVCard.vue`:**
+```vue
+<template>
+  <UCard>
+    <template #header>
+      <div class="flex items-center gap-2">
+        <UIcon name="i-lucide-target" class="w-5 h-5 text-primary" />
+        <h3 class="font-semibold">TMV (Target Movement Values)</h3>
+      </div>
+    </template>
+    <div v-if="result?.tmv" class="space-y-3">
+      <div class="p-3 rounded-lg bg-neutral/5 border border-muted">
+        <p class="text-sm font-medium">Prime</p>
+        <p class="text-lg font-mono font-bold">{{ result.tmv.prime.toFixed(2) }}</p>
+        <p class="text-xs text-muted">Wave 1 high</p>
+      </div>
+      <div class="p-3 rounded-lg bg-primary/5 border border-primary/20">
+        <p class="text-sm font-medium text-primary">Ideal (100%)</p>
+        <p class="text-lg font-mono font-bold">{{ result.tmv.ideal.toFixed(2) }}</p>
+        <p class="text-xs text-muted">100% projection</p>
+      </div>
+      <div class="p-3 rounded-lg bg-warning/5 border border-warning/20">
+        <p class="text-sm font-medium text-warning">Alternate (161.8%)</p>
+        <p class="text-lg font-mono font-bold">{{ result.tmv.alternate.toFixed(2) }}</p>
+        <p class="text-xs text-muted">Extended target</p>
+      </div>
+    </div>
+  </UCard>
+</template>
+
+<script setup lang="ts">
+defineProps<{ result: ExtensionResponse | null }>()
+</script>
+```
+
+**`components/PRZCard.vue`:**
+```vue
+<template>
+  <UCard>
+    <template #header>
+      <h3 class="font-semibold">PRZ (Potential Reversal Zone)</h3>
+    </template>
+    <div v-if="result?.prz" class="space-y-2">
+      <UBadge :color="przColor" size="lg">
+        {{ (result.prz.level * 100).toFixed(1) }}% retracement
+      </UBadge>
+      <p class="text-sm text-muted">{{ result.prz.context }}</p>
+      <p class="text-sm">Price: {{ result.prz.price.toFixed(2) }}</p>
+    </div>
+    <p v-else class="text-sm text-muted">No PRZ identified</p>
+  </UCard>
+</template>
+
+<script setup lang="ts">
+const props = defineProps<{ result: ExtensionResponse | null }>()
+const przColor = computed(() => {
+  const lvl = props.result?.prz?.level
+  if (lvl === 0.786) return 'warning'
+  if (lvl === 0.618) return 'primary'
+  if (lvl === 0.382) return 'info'
+  return 'neutral'
+})
+</script>
+```
+
+**`components/TrailingCard.vue`:**
+```vue
+<template>
+  <UCard>
+    <template #header>
+      <h3 class="font-semibold">Trailing Stop Recommendation</h3>
+    </template>
+    <div v-if="result?.trailing_stop" class="space-y-2">
+      <UAlert
+        :color="stopColor"
+        :title="stopLabel"
+        :description="stopDescription"
+        :icon="stopIcon"
+      />
+      <div class="text-xs text-muted space-y-1">
+        <p>• Prime hit → stop below wave 2</p>
+        <p>• Ideal hit → stop below 61.8% retracement</p>
+        <p>• Alternate hit → stop below 100% projection</p>
+        <p>• Wave 5 extension → immediate profit taking</p>
+      </div>
+    </div>
+  </UCard>
+</template>
+
+<script setup lang="ts">
+const props = defineProps<{ result: ExtensionResponse | null }>()
+
+const stopColor = computed(() => {
+  const s = props.result?.trailing_stop
+  if (s === 'immediate_profit_taking') return 'error'
+  if (s === 'below_100%_projection') return 'warning'
+  if (s === 'below_61.8%_retracement') return 'primary'
+  return 'success'
+})
+
+const stopLabel = computed(() => {
+  const labels: Record<string, string> = {
+    immediate_profit_taking: 'Immediate profit taking',
+    below_100%_projection: 'Stop below 100% projection',
+    below_61.8%_retracement: 'Stop below 61.8%',
+    below_wave_2: 'Stop below wave 2',
+    below_wave_2_initial: 'Initial stop below wave 2'
+  }
+  return labels[props.result?.trailing_stop ?? ''] ?? 'No recommendation'
+})
+
+const stopDescription = computed(() => {
+  const s = props.result?.trailing_stop
+  if (s === 'immediate_profit_taking') return 'Wave 5 extension detected; reversal imminent.'
+  if (s === 'below_100%_projection') return 'Alternate hit; lock in profits.'
+  if (s === 'below_61.8%_retracement') return 'Ideal hit; trail stop higher.'
+  if (s === 'below_wave_2') return 'Prime hit; move stop to below wave 2.'
+  return 'Initial stop below wave 2.'
+})
+
+const stopIcon = computed(() => {
+  const s = props.result?.trailing_stop
+  if (s === 'immediate_profit_taking') return 'i-lucide-alert-octagon'
+  if (s === 'below_100%_projection') return 'i-lucide-trending-down'
+  return 'i-lucide-shield'
+})
+</script>
+```
+
+**`components/Wave5Validator.vue`:**
+```vue
+<template>
+  <UCard>
+    <template #header>
+      <div class="flex items-center gap-2">
+        <UIcon name="i-lucide-shield-x" class="w-5 h-5 text-error" />
+        <h3 class="font-semibold">Wave 5 Retracement Validator</h3>
+      </div>
+    </template>
+    <div class="space-y-3">
+      <UFormField label="Wave Label">
+        <USelect v-model="waveLabel" :items="waveOptions" />
+      </UFormField>
+      <UAlert
+        v-if="waveLabel === '5'"
+        color="error"
+        title="Retracement on wave 5 is INVALID"
+        description="Wave 5 is the last wave; it has no correction."
+        icon="i-lucide-x-circle"
+      />
+      <UAlert
+        v-else
+        color="success"
+        title="Retracement is valid"
+        :description="`Wave ${waveLabel} has a following correction.`"
+        icon="i-lucide-check-circle"
+      />
+    </div>
+  </UCard>
+</template>
+
+<script setup lang="ts">
+const waveLabel = ref('3')
+
+const waveOptions = [
+  { label: 'Wave 1', value: '1' },
+  { label: 'Wave 2', value: '2' },
+  { label: 'Wave 3', value: '3' },
+  { label: 'Wave 4', value: '4' },
+  { label: 'Wave 5', value: '5' }
+]
+</script>
+```
+
+**`pages/index.vue`:**
+```vue
+<template>
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold text-primary">Wave Extension & TMV Analyzer</h1>
+      <UButton icon="i-lucide-play" :loading="loading" @click="runAll">
+        Analyze
+      </UButton>
+    </header>
+
+    <UAlert v-if="error" color="error" :title="error" icon="i-lucide-alert-circle" />
+
+    <ExtensionInput v-model="waves" v-model:current-price="currentPrice" />
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <ExtensionCard :result="result" />
+      <TMVCard :result="result" />
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <PRZCard :result="result" />
+      <TrailingCard :result="result" />
+    </div>
+
+    <Wave5Validator />
+  </div>
+</template>
+
+<script setup lang="ts">
+const waves = ref<Wave[]>([
+  { label: '1', start_price: 100, end_price: 200 },
+  { label: '2', start_price: 200, end_price: 140 },
+  { label: '3', start_price: 140, end_price: 450 },
+  { label: '4', start_price: 450, end_price: 400 },
+  { label: '5', start_price: 400, end_price: 500 }
+])
+const currentPrice = ref(450)
+
+const { result, loading, error, analyze } = useExtensionEngine()
+
+const runAll = () => analyze({
+  wave_1: waves.value[0],
+  wave_2: waves.value[1],
+  wave_3: waves.value[2],
+  wave_4: waves.value[3],
+  wave_5: waves.value[4],
+  current_price: currentPrice.value
+})
+</script>
+```
+
+### ۵.۳ اصول UI/UX (Nuxt UI v4)
+
+| اصل | پیاده‌سازی |
+|-----|-----------|
+| **Semantic Tokens** | `text-primary`, `bg-default`, `border-muted`, `bg-primary/5`, `bg-warning/5` |
+| **Dark Mode** | خودکار از Nuxt UI |
+| **Loading States** | `UButton :loading` |
+| **Error Handling** | `UAlert color="error"` |
+| **Color Coding** | wave_5=error, wave_3=primary, wave_1=info; severe=error, strong=warning |
+| **TMV Cards** | Prime=neutral, Ideal=primary, Alternate=warning |
+| **Trailing Stop** | Visual hierarchy with icons per level |
+| **Responsive** | `grid-cols-1 lg:grid-cols-2` |
+| **Component Reuse** | `UCard`, `UButton`, `UAlert`, `UBadge`, `UIcon`, `UFormField`, `UInput`, `USelect` |
+| **Accessibility** | آیکون‌ها همراه با متن؛ کنتراست کافی |
+
+---
+
+## بخش ۶: جمع‌بندی
+
+جلسه ۱۸ **کشیدگی امواج و TMV/PRZ** را به عنوان **ابزارهای هدف‌گذاری و مدیریت معامله** معرفی می‌کند:
+
+**مفاهیم اصلی:**
+1. **کشیدگی:** موج بیش از شخصیت معمول خود حرکت می‌کند.
+2. **کشیدگی موج ۱:** موج ۲ < ۳۸.۲٪ → موج ۳ کوتاه، موج ۴ ممکن است وارد محدوده ۱ شود.
+3. **کشیدگی موج ۳:** موج ۴ < ۳۸.۲٪ → موج ۵ کوتاه (کوتاه‌شدگی).
+4. **کشیدگی موج ۵:** > ۱۶۱.۸٪ موج ۳ → ریزش شدید (زنگ خطر).
+5. **TMV Prime:** سقف/کف موج قبلی.
+6. **TMV Ideal:** ۱۰۰٪ پروجکشن.
+7. **TMV Alternate:** ۱۶۱.۸٪ پروجکشن.
+8. **PRZ:** محدوده چرخش (۶۱.۸٪، ۷۸.۶٪ برای موج ۲؛ ۳۸.۲٪ برای موج ۴).
+9. **Trailing Stop:** استاپ را با TMV hit بالا ببرید.
+10. **عدم رتریسمنت روی موج ۵:** موج ۵ آخرین موج است، اصلاح ندارد.
+
+**پیاده‌سازی SDD:** ویژگی `wave-extension-tmv-engine` با ۵ User Story، CLI، تست‌های contract-first، و Constitution Check کامل.
+
+**Backend (FastAPI):** سرویس‌های `extension_service`، `tmv_service`، `prz_service`، `trailing_service`، `validation_service` با Pydantic schemas.
+
+**Frontend (Nuxt 4):** کامپوننت‌های `ExtensionInput`، `ExtensionCard`، `TMVCard`، `PRZCard`، `TrailingCard`، `Wave5Validator` با Nuxt UI v4.
+
+**نکته برای LLM:** هنگام پیاده‌سازی، ابتدا **تست‌های contract** (CLI JSON in/out) را بنویسید، سپس تست‌های integration با مثال‌های مستند (شازند، خودرو)، و در نهایت تست‌های unit برای هر سرویس. **هیچ کد implementation قبل از تست نوشته نشود.**

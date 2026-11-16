@@ -13,6 +13,7 @@ import {
   Candle,
   CompletedStructureAnalysis,
   ExtensionLayerTier,
+  FibImportanceLevel,
   FibonacciExtensionLayer,
   PatternFamily,
   ProjectedTargetItem,
@@ -20,7 +21,9 @@ import {
   ScenarioProjectionReport,
   StructureClass,
   TargetItem,
+  TmvPrzOverlapResult,
   TmwZone,
+  TmvTierSummary,
   WaveDirection,
   WaveRole,
   WaveScenario
@@ -70,6 +73,192 @@ export class TargetProjectionEngine {
 
   public static isTerminalPattern(pattern: PatternFamily): boolean {
     return pattern === 'TERMINAL' || pattern === 'ANTI_TERMINAL';
+  }
+
+  /**
+   * Session 7 (006-fibonacci-tools-engine):
+   * Compute standard Bahari Fibonacci Retracement levels (X -> Y) with per-level S/R & identification importance.
+   */
+  public static getRetracementImportanceLevels(
+    waveStartPrice: number,
+    waveEndPrice: number,
+    direction: WaveDirection
+  ): FibImportanceLevel[] {
+    const span = Math.abs(waveEndPrice - waveStartPrice);
+    if (span <= 0) return [];
+    const sign = direction === 'BULLISH' ? -1 : 1; // retracement pulls counter to impulse
+
+    return [
+      {
+        ratio: 0.236,
+        ratioLabel: '23.6%',
+        price: roundPrice(waveEndPrice + sign * span * 0.236),
+        srImportance: 'none',
+        srImportanceFa: 'بدون اعتبار حمایتی/مقاومتی',
+        idImportanceFa: 'مهم برای تشخیص موج ۱ کشیده',
+        descriptionFa: 'اگر موج ۲ در ۲۳.۶٪ برگردد، نشانه شتاب شدید و کشیدگی موج ۱ است.'
+      },
+      {
+        ratio: 0.382,
+        ratioLabel: '38.2%',
+        price: roundPrice(waveEndPrice + sign * span * 0.382),
+        srImportance: 'moderate',
+        srImportanceFa: 'حمایت/مقاومت متوسط (موج ۴ / A)',
+        idImportanceFa: 'تراز اصلی تشخیص موج ۴ و موج A',
+        descriptionFa: 'ناحیه استاندارد اصلاح موج ۴؛ در موج ۲ زیر حد ۵۰٪ ورود پرریسک است.'
+      },
+      {
+        ratio: 0.5,
+        ratioLabel: '50.0%',
+        price: roundPrice(waveEndPrice + sign * span * 0.5),
+        srImportance: 'very_weak',
+        srImportanceFa: 'حمایت/مقاومت بسیار ضعیف (فقط Fallback)',
+        idImportanceFa: 'حداقل آستانه مجاز اصلاح موج ۲',
+        descriptionFa: 'در تراز ۵۰٪ بدون پول‌بک یا ساختار ۵-۳-۵ واضح معامله نکنید.'
+      },
+      {
+        ratio: 0.618,
+        ratioLabel: '61.8%',
+        price: roundPrice(waveEndPrice + sign * span * 0.618),
+        srImportance: 'very_strong',
+        srImportanceFa: 'نسبت طلایی — حمایت/مقاومت بسیار قوی',
+        idImportanceFa: 'ایده‌آل‌ترین نقطه چرخش موج ۲ و ورود',
+        descriptionFa: 'باارزش‌ترین محدوده ستاپ‌گیری الیوت بهاری پس از تأیید کندلی/الگویی.'
+      },
+      {
+        ratio: 0.786,
+        ratioLabel: '78.6%',
+        price: roundPrice(waveEndPrice + sign * span * 0.786),
+        srImportance: 'strong',
+        srImportanceFa: 'حمایت/مقاومت قوی (آخرین سنگر)',
+        idImportanceFa: 'محدوده شتاب‌گیری موج ۱ کشیده و موج ۳ پرقدرت',
+        acceleration: true,
+        descriptionFa: 'نزدیک‌ترین تراز به مبدأ موج پیش از نقض قانون ۱؛ همراه با شتاب چرخش بالا.'
+      }
+    ];
+  }
+
+  /**
+   * Session 8 (007-fibonacci-projection-engine):
+   * Compute TMV Tiers (Prime, Short 0.618, Ideal 1.000, Alternate 1.618),
+   * Wave 3 Extension TMV reduction rule (Session 8.10), and TMV/PRZ overlap confidence.
+   */
+  public static computeTmvTiersAndOverlap(
+    scenario: WaveScenario,
+    przZones: PrzZone[]
+  ): {
+    tmvSummary?: TmvTierSummary;
+    overlapReport?: TmvPrzOverlapResult;
+    projectionPairNoteFa: string;
+    forbidWave5RetracementFa?: string;
+    wave3ExtensionEffectFa?: string;
+  } {
+    const verts = scenario.vertices;
+    const isCorrective = this.isCorrectivePattern(scenario.patternType);
+    const isTriangle = this.isTrianglePattern(scenario.patternType);
+    const forbidWave5RetracementFa =
+      !isCorrective && !isTriangle && verts.length >= 6
+        ? 'قانون اکید جلسه ۸ (C17): روی موج ۵ ابزار رتریسمنت رسم نکنید — آخرین موج روند هیچ اصلاح هم‌درجه‌ای ندارد.'
+        : undefined;
+
+    if (verts.length < 3) {
+      return {
+        projectionPairNoteFa: 'برای محاسبه پروجکشن سه‌نقطه‌ای (X←Y←Z) حداقل ۳ پیوت نیاز است.',
+        forbidWave5RetracementFa
+      };
+    }
+
+    const isBull = scenario.direction === 'BULLISH';
+    const sign = isBull ? 1 : -1;
+    const p0 = verts[0].price;
+    const p1 = verts[1].price;
+    const p2 = verts[2].price;
+    const len1 = Math.max(0.01, Math.abs(p1 - p0));
+
+    let prime = roundPrice(p1);
+    let baseSpan = len1;
+    let anchorPrice = p2;
+    let basisPairLabel = isCorrective ? 'A-B → موج C' : '۱-۲ → موج ۳';
+    let basisFa = isCorrective
+      ? 'جفت استاندارد A-B از انتهای موج B برای محاسبه TMV موج C'
+      : 'جفت ۱-۲ از انتهای موج ۲ برای محاسبه TMV موج ۳';
+    let wave3ExtendedReductionRatio: number | null = null;
+    let wave3ExtensionEffectFa: string | undefined;
+
+    if (!isCorrective && !isTriangle && verts.length >= 5) {
+      const p3 = verts[3].price;
+      const p4 = verts[4].price;
+      const len3 = Math.max(0.01, Math.abs(p3 - p2));
+      const w3Ratio = len3 / len1;
+      prime = roundPrice(p3);
+      baseSpan = len3;
+      anchorPrice = p4;
+      basisPairLabel = '۳-۴ → موج ۵';
+      basisFa = 'طبق قانون جفت‌های جلسه ۸، برای پیش‌بینی موج ۵ باید از جفت ۳-۴ (نه ۱-۲) استفاده شود';
+
+      if (w3Ratio >= 2.618) {
+        wave3ExtendedReductionRatio = 0.382;
+        wave3ExtensionEffectFa = `موج ۳ بسیار ممتد (${(w3Ratio * 100).toFixed(0)}٪ > ۲۶۱.۸٪ موج ۱)؛ هدف TMV موج ۵ به ضریب کاهشی ۰.۳۸۲ کاهش می‌یابد.`;
+      } else if (w3Ratio >= 1.618) {
+        wave3ExtendedReductionRatio = 0.618;
+        wave3ExtensionEffectFa = `موج ۳ کشیده (${(w3Ratio * 100).toFixed(0)}٪ > ۱۶۱.۸٪ موج ۱)؛ هدف TMV موج ۵ به محدوده ۰.۶۱۸ تعدیل می‌شود.`;
+      }
+    }
+
+    const effectiveIdealFactor = wave3ExtendedReductionRatio ?? 1.0;
+    const short0618 = roundPrice(anchorPrice + sign * baseSpan * 0.618);
+    const ideal100 = roundPrice(anchorPrice + sign * baseSpan * effectiveIdealFactor);
+    const alternate1618 = roundPrice(anchorPrice + sign * baseSpan * 1.618);
+
+    const tmvSummary: TmvTierSummary = {
+      prime,
+      short0618,
+      ideal100,
+      alternate1618,
+      wave3ExtendedReductionRatio,
+      basisPairLabel,
+      basisFa
+    };
+
+    const primaryPrz = przZones.find(z => z.isPrimary) || przZones[0];
+    let overlapReport: TmvPrzOverlapResult | undefined;
+    if (primaryPrz) {
+      const span = Math.max(0.01, Math.abs(ideal100));
+      if (ideal100 >= primaryPrz.lowPrice && ideal100 <= primaryPrz.highPrice) {
+        overlapReport = {
+          type: 'FULL',
+          confidence: 0.9,
+          gapPct: 0,
+          noteFa: 'همپوشانی کامل: تراز TMV Ideal دقیقاً درون محدوده PRZ قیمتی قرار گرفته است (اعتبار ۹۰٪).'
+        };
+      } else {
+        const dist = ideal100 < primaryPrz.lowPrice ? primaryPrz.lowPrice - ideal100 : ideal100 - primaryPrz.highPrice;
+        const gapPct = Math.round((dist / span) * 1000) / 10;
+        if (gapPct <= 5.0) {
+          overlapReport = {
+            type: 'PARTIAL',
+            confidence: 0.72,
+            gapPct,
+            noteFa: `همپوشانی جزئی: تراز TMV Ideal در فاصله ${gapPct}٪ از حاشیه PRZ قرار دارد (اعتبار ۷۲٪).`
+          };
+        } else {
+          overlapReport = {
+            type: 'NONE',
+            confidence: 0.45,
+            gapPct,
+            noteFa: `عدم همپوشانی: فاصله ${gapPct}٪ بین TMV Ideal و PRZ اصلی وجود دارد؛ نیاز به تایید بیشتر.`
+          };
+        }
+      }
+    }
+
+    return {
+      tmvSummary,
+      overlapReport,
+      projectionPairNoteFa: basisFa,
+      forbidWave5RetracementFa,
+      wave3ExtensionEffectFa
+    };
   }
 
   public static getStructureClass(pattern: PatternFamily): StructureClass {
@@ -1138,6 +1327,19 @@ export class TargetProjectionEngine {
       }
     }
 
+    const {
+      tmvSummary,
+      overlapReport,
+      projectionPairNoteFa,
+      forbidWave5RetracementFa,
+      wave3ExtensionEffectFa
+    } = this.computeTmvTiersAndOverlap(scenario, przZones);
+
+    const retracementTable =
+      verts.length >= 2
+        ? this.getRetracementImportanceLevels(verts[0].price, verts[1].price, scenario.direction)
+        : undefined;
+
     return {
       scenarioId: scenario.id,
       lastLegLabel,
@@ -1149,7 +1351,13 @@ export class TargetProjectionEngine {
       przZones,
       tmwZones,
       completedStructure,
-      extensionLayers
+      extensionLayers,
+      tmvSummary,
+      overlapReport,
+      retracementTable,
+      projectionPairNoteFa,
+      forbidWave5RetracementFa,
+      wave3ExtensionEffectFa
     };
   }
 }

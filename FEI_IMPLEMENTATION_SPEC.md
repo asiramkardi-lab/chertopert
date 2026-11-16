@@ -52,10 +52,15 @@
     ├── engine/
     │   ├── pivotDetector.ts            # ATR(14), swing pivots, 3-candle leg counts, shadow exceptions
     │   ├── fractalEngine.ts            # 4 wave degrees, TF boundary qualification, C04 parent-child consistency
-    │   ├── rulesEngine.ts              # Bahari rule validator, triple scoring & segment-bounded scenario generator
-    │   └── targetProjectionEngine.ts   # Last completed structure analyzer, Fibonacci extension layers, PRZ & TMW engine
+    │   ├── rulesEngine.ts              # Bahari rule validator, market trend classifier, triple scoring & scenario generator
+    │   ├── targetProjectionEngine.ts   # Last completed structure analyzer, Fibonacci extension layers, PRZ & TMW engine
+    │   ├── trendStrengthIndicator.ts   # Wilder RSI(14) divergence & volume-weighted momentum per wave segment/vertex
+    │   └── draftStorage.ts             # localStorage Draft Auto-Save serializer across Studio and 3-step Wizard
     └── components/
-        ├── ChartStudio.tsx             # Interactive SVG chart, candle snapping, drag cursor, click drill, hover glow
+        ├── ChartStudio.tsx             # Interactive SVG chart, candle snapping, drag cursor, click drill, vertex signals
+        ├── PatternValidator.tsx        # Strict multi-stage rule auditor & step-by-step corrective action UI
+        ├── RuleViolationToast.tsx      # Non-intrusive real-time hard-rule violation toast with 1-click revert
+        ├── TargetProjectionPanel.tsx   # Step 3 final target forecast studio & extension layer explorer
         ├── WizardWorkspace.tsx         # 3-step Wizard orchestrator, Step 2->3 drill, fractal tree recursive sync
         ├── WizardStep1Timeframes.tsx   # Step 1: TF boundary table, lower-TF preview & Absolute Bottom controls
         ├── WizardStep2Scenarios.tsx    # Step 2: Macro scenarios, overlay toggles, inline editor & Validate card
@@ -66,7 +71,7 @@
         ├── ExplainabilityPanel.tsx     # Hard/Soft/Fib rule breakdown cards, triple scores & 1-click pattern fixes
         ├── FractalTree.tsx             # 4-degree hierarchy tree & scenario branching UI
         ├── TfBoundaryReport.tsx        # Per-TF sufficiency/noise evaluation grid
-        └── SddAndCodeViewer.tsx        # Concept catalog, SDD, FastAPI & Nuxt 4 reference viewer
+        └── SddAndCodeViewer.tsx        # Concept catalog, Session 2 & 001-elliott-wave-engine SDD, FastAPI & Nuxt 4 viewer
 ```
 
 ---
@@ -340,6 +345,14 @@ Implemented directly on **`ChartStudio.tsx`** (toolbar **"ارزیابی قوا�
   - Clicking **any branch at any depth** calls `handleJumpToTreeBranch(node, rootId)` to restore that exact `drillStackPath`, load its corresponding lower-TF candle window, and focus that scenario on `ChartStudio`.
   - Hovering any wave leg in the tree or `گام‌ها` tab passes `highlightedLegIndex` to `ChartStudio` to illuminate that exact wave segment and shade its corresponding candle window on the chart.
 
+### 7.5 Real-Time Violation Toast, Draft Auto-Save & Session 2 Enhancements
+- **`RuleViolationToast` (`src/components/RuleViolationToast.tsx`)**: Tracks active scenario hard-rule & chronological ordering violations live during manual vertex edits, preserving pre-violation `ValidWaveSnapshot` states for 1-click **`بازگردانی به آخرین حالت معتبر`**.
+- **Draft Auto-Save (`src/engine/draftStorage.ts`)**: Persists Studio (per `(assetId, timeframe)`) and Wizard (per `assetId`) wave counting states under `fei_studio_autosave_draft_v1` with a `320ms` debounce and synchronous `beforeunload` / `pagehide` flush.
+- **Trend Strength Indicator (`src/engine/trendStrengthIndicator.ts`)**: Calculates Wilder `RSI(14)` regular/hidden divergence and volume-weighted momentum per wave segment, rendering color-coded (`GREEN` / `YELLOW` / `RED`) geometric signal badges next to every wave vertex on `ChartStudio`.
+- **Session 2 Bahari Enhancements (`src/engine/rulesEngine.ts`)**:
+  - `classifyMarketTrend`: Classifies active market regime as `IMPULSE`, `CORRECTION`, or `SIDE` (Section 2.1) and displays it live in `ChartStudio`'s HUD.
+  - `validateStructure(..., candles?)`: Evaluates Shadow Exception under Trend Pressure (`MIN_3_CANDLES`), Sibling Degree Time Consistency (`DEGREE_CONSISTENCY`, `C13`), `X_WAVE_MIN_3_CANDLES` / `COMPLEX_LAST_RESORT` (`C26`), and `LAST_WAVE_C17` boundary rules.
+
 ---
 
 ## 8. UI/UX & Engineering Invariants
@@ -353,4 +366,23 @@ Implemented directly on **`ChartStudio.tsx`** (toolbar **"ارزیابی قوا�
 3. **No Repainting / No Look-Ahead (`C31`, `P18`)**: Every `WaveVertex` carries explicit `isConfirmed: boolean`; developing endpoints never silently overwrite locked user counts (`isLocked === true`).
 4. **Hard Rule Non-Compensability (`C08`)**: Failed `HARD` rules cap `validityScore = 25` and `idealnessScore = 15` regardless of Fibonacci ratios.
 5. **Deterministic Composite State Keying**: Sub-scenarios in Wizard and Studio are keyed deterministically per parent scope, scenario ID, leg index, and target timeframe so multi-level navigation preserves user edits, locks, pattern morphs, validation states, and tree-to-chart correspondence without data loss.
+
+---
+
+## 9. Bahari Sessions 3–19 Full Engine & Top-Down Pipeline (SDD `002`–`018`)
+
+- **Step 0 Pre-Flight Check (`PatternEngines.validateInputData`)**: Validates OHLCV integrity (`empty`, `< 10` candles, `NaN`/`Infinity`, negative prices, `high < low`, out-of-order/duplicate timestamps, zero price movement, `> 50%` Doji rate) and recommends the macro start timeframe (`1M` / `1W` / `1D`).
+- **Sessions 3 & 5 (`src/engine/fractalEngine.ts`)**: Enforces 4-degree notation (`V`, `W`, Bold `1..5`, Simple `(1)..(5)`), TF degree caps (`1M:2, 1W:3, 1D:4`, strict TSE Iran cap at Degree 4), 1-click **Degree Promotion** (`detectDegreePromotionOpportunity` + `relabelVerticesForDegree`), and per-leg **Impulsive vs Fractal** classification (`classifyScenarioWaveNatures`).
+- **Sessions 4–6 (`src/engine/rulesEngine.ts`)**: Enforces Doji-filtered `MIN_3_CANDLES`, Anti-Cycle `3-5`, Terminal/Anti-Terminal CB-Wave (`W5 >= 100% W4`), Wave Extension (`WAVE_EXTENSION_CHECK` & `T-4.31/4.32`), Wave 4 complexity alternation, Mislabeling vs Valid Alternative separation, and `evaluateAbsoluteBottomAndValidLows`.
+- **Sessions 7–8 (`src/engine/targetProjectionEngine.ts`)**: Computes Retracement S/R & ID importance tiers (`23.6%..78.6%` + `acceleration`), enforces Wave 5 retracement prohibition, computes 4-tier TMV projections (`Prime`, `Short 0.618`, `Ideal 1.000`, `Alternate 1.618` with Wave 3 extension reduction), and evaluates `TMV`/`PRZ` overlap (`FULL` / `PARTIAL` / `NONE`).
+- **Sessions 9–19 (`src/engine/patternEngines.ts`)**:
+  - **Session 9 (`008`)**: `analyzeDiagonal` (5 diagonal subtypes, 100% W2 coverage, post-diagonal correction depth).
+  - **Session 10 (`009`)**: `analyzeZigzag` (Ideal `5-3-5`, Simple `3-3-3`, Anti `3-5-5`, AB=CD & post-zigzag targets).
+  - **Session 11 (`010`)**: `analyzeEntryStrategy` (min 50% retracement, `61.8%`/`78.6%` zones, `W2 vs A` classifier, 2-step `50%/50%` entry plan).
+  - **Sessions 12–13 (`011/012`)**: `analyzeFlat` (8 flat subtypes, `B > 61.8% A`, market-end restriction, Knot-Untangler).
+  - **Sessions 14–15 (`013/014`)**: `analyzeTriangle` (Contracting vs Expanding, slot validity, 50% completion before Box 3, Ending Triangle).
+  - **Sessions 16–17 (`015/016`)**: `analyzeComplexPattern` (9 standard combos `Z-X-Z..T-X-T`, main combos `I-X-Z..T-X-T`, X-wave >=3 candles, priority rank `1..7`, simplest preference).
+  - **Session 18 (`017`)**: `analyzeExtensionAndTrailing` (W1/W3/W5 extension detection + TMV trailing stop progression + W5 >200% reversal alert).
+  - **Session 19 (`018`)**: `analyzeWaveCharacteristics` (8-wave personality matrix, Wave A identification warning, Capital/Signal/Risk checklist).
+
 

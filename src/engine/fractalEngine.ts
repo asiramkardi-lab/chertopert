@@ -2,7 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * Fractal Engine - Degree Management (V, W, Bold, Simple),
- * Dynamic TF Boundary Evaluation (Lowest/Highest Valid TF) with Pivot & ATR evidence,
+ * Timeframe Degree Caps (Session 3.8 & 5.12), Degree Promotion (Session 3.6),
+ * Impulsive vs Fractal Wave Classification (Session 3.5 & 5.11),
+ * Dynamic TF Boundary Evaluation (Lowest/Highest Valid TF),
  * and Downward / Upward Cross-Timeframe Consistency.
  */
 
@@ -13,9 +15,14 @@ import {
   TimeframeEvaluation,
   Candle,
   WaveRole,
+  WaveNature,
+  WaveScenario,
+  WaveVertex,
   PatternFamily
 } from '../types/elliott';
 import { PivotDetector } from './pivotDetector';
+
+export const DEGREE_ORDER: WaveDegree[] = ['SUPER_CYCLE', 'CYCLE', 'PRIMARY', 'INTERMEDIATE'];
 
 export const DEGREE_CONFIGS: Record<WaveDegree, DegreeConfig> = {
   SUPER_CYCLE: {
@@ -52,6 +59,35 @@ export const DEGREE_CONFIGS: Record<WaveDegree, DegreeConfig> = {
   }
 };
 
+export interface DegreeAssignmentResult {
+  degrees: WaveDegree[];
+  droppedLevels: number;
+  maxAllowed: number;
+  reasonFa: string;
+}
+
+export interface DegreePromotionOpportunity {
+  shouldPromote: boolean;
+  canPromoteDegree: boolean;
+  fromDegree: WaveDegree;
+  toDegree: WaveDegree;
+  breakoutPct: number;
+  reasonFa: string;
+}
+
+export interface LegNatureAnalysis {
+  legIndex: number;
+  legLabel: string;
+  role: WaveRole;
+  nature: WaveNature;
+  assumedSubwaveCount: 3 | 5;
+  internalPivotCount: number;
+  candleSpan: number;
+  directionalRatio: number;
+  efficiencyRatio: number;
+  summaryFa: string;
+}
+
 export function getDegreeForTimeframe(tf: string): WaveDegree {
   if (tf === '1M') return 'SUPER_CYCLE';
   if (tf === '1W') return 'CYCLE';
@@ -65,7 +101,202 @@ export function getLowerDegree(degree: WaveDegree): WaveDegree {
   return 'INTERMEDIATE';
 }
 
+export function getHigherDegree(degree: WaveDegree): WaveDegree {
+  if (degree === 'INTERMEDIATE') return 'PRIMARY';
+  if (degree === 'PRIMARY') return 'CYCLE';
+  return 'SUPER_CYCLE';
+}
+
+export function formatVertexLabelForDegree(rawLabel: string, degree: WaveDegree): string {
+  const core = rawLabel.replace(/[()VW\s]/g, '').toUpperCase();
+  if (!core || core === '0') return '0';
+  if (degree === 'SUPER_CYCLE') return `V${core}`;
+  if (degree === 'CYCLE') return `W${core}`;
+  if (degree === 'INTERMEDIATE') return `(${core})`;
+  return core;
+}
+
+export function relabelVerticesForDegree(vertices: WaveVertex[], targetDegree: WaveDegree): WaveVertex[] {
+  return vertices.map(v => ({
+    ...v,
+    label: formatVertexLabelForDegree(v.label, targetDegree)
+  }));
+}
+
 export class FractalEngine {
+  /**
+   * Session 3.8 & 5.12: Maximum wave degrees allowed per timeframe & market profile.
+   * Daily: max 4, Weekly: max 3, Monthly: max 2. TSE Iran strictly caps at 4 degrees (no counting below 4H).
+   */
+  public static getMaxDegreesForTimeframe(
+    timeframe: string,
+    marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO'
+  ): number {
+    if (timeframe === '1M') return 2;
+    if (timeframe === '1W') return 3;
+    if (timeframe === '1D') return 4;
+    if (marketType === 'TSE_IRAN') return 4;
+    return 4;
+  }
+
+  /**
+   * Session 3.8: Assign valid wave degrees top-down (V, W, Bold, Simple) and drop micro-degrees beyond TF cap.
+   */
+  public static assignDegrees(
+    nestingDepth: number,
+    timeframe: string,
+    marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO'
+  ): DegreeAssignmentResult {
+    const maxAllowed = this.getMaxDegreesForTimeframe(timeframe, marketType);
+    const clampedCount = Math.max(1, Math.min(nestingDepth, maxAllowed, DEGREE_ORDER.length));
+    const degrees = DEGREE_ORDER.slice(0, clampedCount);
+    const droppedLevels = Math.max(0, nestingDepth - clampedCount);
+
+    const reasonFa =
+      droppedLevels > 0
+        ? `تایم‌فریم ${timeframe} حداکثر از ${maxAllowed} درجه پشتیبانی می‌کند؛ ${droppedLevels} سطح ریزموج اضافی طبق قانون توقف درجه حذف شد.`
+        : `تخصیص ${degrees.length} درجه ساختاری در تایم‌فریم ${timeframe} کاملاً مجاز است (حداکثر مجاز: ${maxAllowed}).`;
+
+    return {
+      degrees,
+      droppedLevels,
+      maxAllowed,
+      reasonFa
+    };
+  }
+
+  /**
+   * Session 3.6 & SDD FR-007: Detect when price has broken beyond the completed cycle extreme (Wave 5 / C)
+   * so existing degree labels should promote one level up (SIMPLE -> BOLD -> W -> V).
+   */
+  public static detectDegreePromotionOpportunity(
+    scenario: WaveScenario,
+    candles: Candle[]
+  ): DegreePromotionOpportunity {
+    const fromDegree = scenario.degree;
+    const toDegree = getHigherDegree(fromDegree);
+    const canPromoteDegree = fromDegree !== 'SUPER_CYCLE';
+
+    if (!scenario.vertices.length || candles.length === 0) {
+      return {
+        shouldPromote: false,
+        canPromoteDegree,
+        fromDegree,
+        toDegree,
+        breakoutPct: 0,
+        reasonFa: 'داده کافی برای بررسی ارتقاء درجه وجود ندارد.'
+      };
+    }
+
+    const lastV = scenario.vertices[scenario.vertices.length - 1];
+    const startIdx = Math.min(candles.length - 1, Math.max(0, lastV.candleIndex + 1));
+    const trailing = candles.slice(startIdx);
+    const isBull = scenario.direction === 'BULLISH';
+
+    let extremePrice = lastV.price;
+    for (const c of trailing) {
+      if (isBull && c.high > extremePrice) extremePrice = c.high;
+      if (!isBull && c.low < extremePrice) extremePrice = c.low;
+    }
+
+    const breakoutPct =
+      lastV.price > 0
+        ? Math.round((Math.abs(extremePrice - lastV.price) / lastV.price) * 1000) / 10
+        : 0;
+
+    const isCycleComplete = scenario.vertices.length >= 6 && !scenario.isPartial;
+    const shouldPromote = canPromoteDegree && isCycleComplete && breakoutPct >= 0.8;
+
+    return {
+      shouldPromote,
+      canPromoteDegree,
+      fromDegree,
+      toDegree,
+      breakoutPct,
+      reasonFa: shouldPromote
+        ? `قیمت پس از نقطه پایانی (${lastV.label}) به میزان ${breakoutPct.toFixed(1)}٪ از سقف/کف سیکل فراتر رفته است؛ طبق قانون ارتقاء درجه (۳-۶)، لیبل‌ها از «${DEGREE_CONFIGS[fromDegree].nameFa}» به «${DEGREE_CONFIGS[toDegree].nameFa}» ارتقاء می‌یابند.`
+        : canPromoteDegree
+        ? `در صورت شکست معتبر انتهای ساختار (${lastV.price.toLocaleString()}) و تشکیل سیکل بزرگ‌تر، امکان ارتقاء درجه به ${DEGREE_CONFIGS[toDegree].nameFa} فعال است.`
+        : 'ساختار هم‌اکنون در بالاترین درجه کلان (Super Cycle V) قرار دارد.'
+    };
+  }
+
+  /**
+   * Session 3.5 & Session 5.7/5.11: Distinguish Impulsive/Momentum waves (assumed 5 or 3 subwaves)
+   * from Fractal waves (visible alternating internal sub-swings).
+   */
+  public static classifyScenarioWaveNatures(
+    scenario: WaveScenario,
+    candles: Candle[]
+  ): LegNatureAnalysis[] {
+    if (scenario.vertices.length < 2 || candles.length === 0) return [];
+
+    const results: LegNatureAnalysis[] = [];
+    for (let i = 1; i < scenario.vertices.length; i++) {
+      const vStart = scenario.vertices[i - 1];
+      const vEnd = scenario.vertices[i];
+      const cleanLabel = vEnd.label.replace(/[()VW\s]/g, '').toUpperCase();
+      const role: WaveRole = ['2', '4', 'B', 'X', 'D'].includes(cleanLabel) ? 'CORRECTIVE' : 'MOTIVE';
+      const assumedSubwaveCount: 3 | 5 = role === 'MOTIVE' ? 5 : 3;
+
+      const sIdx = Math.max(0, Math.min(candles.length - 1, Math.min(vStart.candleIndex, vEnd.candleIndex)));
+      const eIdx = Math.max(sIdx, Math.min(candles.length - 1, Math.max(vStart.candleIndex, vEnd.candleIndex)));
+      const slice = candles.slice(sIdx, eIdx + 1);
+      const candleSpan = Math.max(1, eIdx - sIdx);
+      const legUp = vEnd.price >= vStart.price;
+
+      let sameDirCount = 0;
+      let pathSum = 0;
+      for (let k = 0; k < slice.length; k++) {
+        const c = slice[k];
+        const body = Math.abs(c.close - c.open);
+        const fullRange = Math.max(0.0001, c.high - c.low);
+        const isDoji = body <= fullRange * 0.08;
+        if (!isDoji) {
+          if (legUp && c.close > c.open) sameDirCount++;
+          if (!legUp && c.close < c.open) sameDirCount++;
+        }
+        if (k > 0) {
+          pathSum += Math.abs(c.close - slice[k - 1].close);
+        }
+      }
+
+      const directionalRatio = Math.round((sameDirCount / Math.max(1, slice.length)) * 100) / 100;
+      const netMove = Math.abs(vEnd.price - vStart.price);
+      const efficiencyRatio = Math.round((netMove / Math.max(0.0001, pathSum)) * 100) / 100;
+      const internalPivots = slice.length >= 7 ? PivotDetector.detectPivots(slice, 1, 1, 0.45) : [];
+      const internalPivotCount = internalPivots.length;
+
+      // Sharp directional leg with few internal swings -> IMPULSIVE_MOMENTUM (assume 5/3)
+      const isImpulsive =
+        internalPivotCount < 2 ||
+        (efficiencyRatio >= 0.56 && directionalRatio >= 0.62 && candleSpan <= 18);
+
+      const nature: WaveNature = isImpulsive ? 'IMPULSIVE_MOMENTUM' : 'FRACTAL_EXTENDED';
+
+      const summaryFa = isImpulsive
+        ? `موج شتابدار (کارایی ${(efficiencyRatio * 100).toFixed(0)}٪)؛ فرض ساختار درونی ${assumedSubwaveCount} موجی در نقش ${
+            role === 'MOTIVE' ? 'اصلی' : 'اصلاحی'
+          }.`
+        : `موج فرکتالی با ${internalPivotCount} پیوت استراحتی؛ زیرموج‌های ${assumedSubwaveCount}‌گانه در تایم پایین‌تر قابل شمارش هستند.`;
+
+      results.push({
+        legIndex: i - 1,
+        legLabel: `${vStart.label}←${vEnd.label}`,
+        role,
+        nature,
+        assumedSubwaveCount,
+        internalPivotCount,
+        candleSpan,
+        directionalRatio,
+        efficiencyRatio,
+        summaryFa
+      });
+    }
+
+    return results;
+  }
+
   /**
    * Evaluate timeframe boundaries dynamically with real ATR and Pivot evidence:
    * - Lowest Valid TF: minimum timeframe where candles >= 25, pivots >= 4, noise manageable, and allowed by market profile.
@@ -135,7 +366,8 @@ export class FractalEngine {
         eligible = false;
         sufficiency = 'POOR';
         noiseLevel = 'HIGH';
-        reason = 'طبق مستند بهاری، در بورس ایران شمارش زیر درجه ۴ (تایم‌های زیر ۴ ساعته) به دلیل محدودیت نقدشوندگی و داده مجاز نیست.';
+        reason =
+          'طبق مستند بهاری، در بورس ایران شمارش زیر درجه ۴ (تایم‌های زیر ۴ ساعته) به دلیل محدودیت نقدشوندگی و داده مجاز نیست.';
         if (!unreliableTFs.includes(tf)) unreliableTFs.push(tf);
       }
 

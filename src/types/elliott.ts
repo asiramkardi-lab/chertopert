@@ -161,6 +161,204 @@ export interface FibonacciExtensionLayer {
   direction: WaveDirection;
 }
 
+export interface FibImportanceLevel {
+  ratio: number;
+  ratioLabel: string;
+  price: number;
+  srImportance: 'none' | 'moderate' | 'very_weak' | 'very_strong' | 'strong';
+  srImportanceFa: string;
+  idImportanceFa: string;
+  acceleration?: boolean;
+  descriptionFa: string;
+}
+
+export interface TmvTierSummary {
+  prime: number;
+  short0618: number;
+  ideal100: number;
+  alternate1618: number;
+  wave3ExtendedReductionRatio: number | null;
+  basisPairLabel: string;
+  basisFa: string;
+}
+
+export interface TmvPrzOverlapResult {
+  type: 'FULL' | 'PARTIAL' | 'NONE';
+  confidence: number;
+  gapPct: number;
+  noteFa: string;
+}
+
+export interface DiagonalAnalysisReport {
+  detected: boolean;
+  diagonalVariant: 'LEADING_IDEAL' | 'LEADING_ANTI' | 'IMPULSIVE' | 'ANTI_DIAGONAL' | 'ENDING' | null;
+  variantLabelFa: string;
+  wave2Covered100: boolean;
+  strengthPattern: 'DECREASING' | 'INCREASING' | 'MIXED';
+  waveLocation: '1' | '3' | '5' | 'A' | 'C';
+  isCommonLocation: boolean;
+  correctionDepthFa: string;
+  correctionTargetRangeFa: string;
+  confidence: number;
+  warnings: string[];
+  notes: string[];
+}
+
+export interface ZigzagAnalysisReport {
+  detected: boolean;
+  subType: 'IDEAL' | 'SIMPLE' | 'ANTI';
+  subTypeLabelFa: string;
+  structureLabel: string;
+  cCoversB100: boolean;
+  cOverARatioPct: number;
+  bOverARatioPct: number;
+  waveCClass: 'TRUNCATED' | 'NORMAL' | 'EXTENDED' | 'INVALID';
+  waveCClassFa: string;
+  postPatternTargetPct: number;
+  postPatternBasisFa: string;
+  postPatternTargetPrice: number;
+  isAbCd: boolean;
+  abCdTolerancePct: number;
+  confidence: number;
+  warnings: string[];
+  notes: string[];
+}
+
+export type FlatSubtype =
+  | 'REGULAR'
+  | 'B_DEFICIENT'
+  | 'C_DEFICIENT'
+  | 'DOUBLE_DEFICIENT'
+  | 'IRREGULAR'
+  | 'IRREGULAR_DEFICIENT'
+  | 'IRREGULAR_EXTENDED'
+  | 'RUNNING_DEPRECATED';
+
+export interface FlatAnalysisReport {
+  detected: boolean;
+  subtype: FlatSubtype;
+  subtypeLabelFa: string;
+  bPctOfA: number;
+  cPctOfB: number;
+  validStructure335: boolean;
+  bOver618Valid: boolean;
+  usableAtCurrentContext: boolean;
+  cSubStructure: 'IDEAL' | 'DIAGONAL' | 'TERMINAL';
+  vsSimpleZigzagFa: string;
+  knotUntanglerRecommended: boolean;
+  confidence: number;
+  warnings: string[];
+  notes: string[];
+}
+
+export interface EntryStepPlan {
+  stepNumber: number;
+  labelFa: string;
+  price: number;
+  sizePct: number;
+  reasonFa: string;
+}
+
+export interface EntryStrategyReport {
+  retracementPct: number;
+  meetsMin50: boolean;
+  entryZone: 'START_WAVE_3' | '61.8%' | '78.6%' | '50%_PULLBACK' | 'NONE';
+  entryZoneLabelFa: string;
+  w2VsAScenario: 'W2' | 'A' | 'UNCERTAIN';
+  w2VsALabelFa: string;
+  scenarioConfidence: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  isFallback50: boolean;
+  accelerationAt786: boolean;
+  waveStrengthClass: 'STRONG' | 'MODERATE' | 'WEAK';
+  steps: EntryStepPlan[];
+  warnings: string[];
+  notes: string[];
+}
+
+export interface TriangleAnalysisReport {
+  detected: boolean;
+  triangleType: 'CONTRACTING' | 'EXPANDING' | 'INVALID';
+  triangleTypeLabelFa: string;
+  positionValid: boolean;
+  positionSlotLabelFa: string;
+  frequencyPct: string;
+  namingValid: boolean;
+  continuationLabelFa: string;
+  isCounterTrendAligned: boolean;
+  idealRetracement50: boolean;
+  idealCompletionBeforeBox3: boolean;
+  tradingApproachFa: string;
+  endingTriangle: boolean;
+  confidence: number;
+  warnings: string[];
+  notes: string[];
+}
+
+export interface ExtensionTmvTrailingReport {
+  extendedWave: 'WAVE_1' | 'WAVE_3' | 'WAVE_5' | null;
+  severity: 'MODERATE' | 'STRONG' | 'SEVERE' | null;
+  extensionLabelFa: string;
+  trailingStopStage:
+    | 'IMMEDIATE_PROFIT_TAKING'
+    | 'BELOW_100_PROJECTION'
+    | 'BELOW_618_RETRACEMENT'
+    | 'BELOW_WAVE_2'
+    | 'INITIAL_BELOW_WAVE_2';
+  trailingStopLabelFa: string;
+  trailingStopDescFa: string;
+  warnings: string[];
+}
+
+export interface ComplexPatternReport {
+  detected: boolean;
+  patternSignature: string; // e.g., Z-X-Z, Z-X-F, Z-X-F-X-Z
+  standard: boolean;
+  complexity: 'LOW' | 'MEDIUM' | 'HIGH' | 'TOO_COMPLEX';
+  priorityRank: number; // 1=Ideal .. 7=Complex
+  priorityLabelFa: string;
+  xWaveValid: boolean;
+  xWaveType: 'SINGLE' | 'ZIGZAG_SIMPLE' | 'ZIGZAG_IDEAL' | 'IMPULSIVE' | 'INVALID';
+  xWaveTypeFa: string;
+  xWaveCandleCount: number;
+  threeCardinalPassed: boolean;
+  violatedRules: number[];
+  recommend: 'SIMPLE' | 'COMPLEX_2' | 'COMPLEX_3' | 'RECOUNT';
+  recommendFa: string;
+  isMarketEndRestricted: boolean;
+  confidence: number;
+  warnings: string[];
+  notes: string[];
+}
+
+export interface WavePersonalityItem {
+  label: string;
+  role: WaveRole;
+  lengthPctOfRef: number | null;
+  candleSpan: number;
+  estimatedSubwaves: 3 | 5;
+  volumeProfile: 'LOW' | 'MODERATE' | 'HIGH';
+  traitFa: string;
+  valid: boolean;
+}
+
+export interface WaveCharacteristicsReport {
+  items: WavePersonalityItem[];
+  waveAIdentificationWarningFa?: string;
+  capitalManagementChecklistFa: string[];
+  overallConfidence: number;
+  warnings: string[];
+}
+
+export interface InputDataValidationReport {
+  valid: boolean;
+  candleCount: number;
+  dojiPct: number;
+  recommendedStartTf: '1D' | '1W' | '1M';
+  errors: string[];
+  warnings: string[];
+}
+
 export interface ScenarioProjectionReport {
   scenarioId: string;
   lastLegLabel: string;
@@ -173,6 +371,12 @@ export interface ScenarioProjectionReport {
   tmwZones: TmwZone[];
   completedStructure?: CompletedStructureAnalysis | null;
   extensionLayers?: FibonacciExtensionLayer[];
+  tmvSummary?: TmvTierSummary;
+  overlapReport?: TmvPrzOverlapResult;
+  retracementTable?: FibImportanceLevel[];
+  projectionPairNoteFa?: string;
+  forbidWave5RetracementFa?: string;
+  wave3ExtensionEffectFa?: string;
 }
 
 export interface WaveScenario {

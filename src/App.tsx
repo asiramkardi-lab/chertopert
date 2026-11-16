@@ -15,7 +15,14 @@ import {
   Candle
 } from './types/elliott';
 import { RulesEngine, ValidationSummary, SCENARIO_COLORS, inferWaveRole } from './engine/rulesEngine';
-import { FractalEngine, getDegreeForTimeframe, getLowerDegree, DEGREE_CONFIGS } from './engine/fractalEngine';
+import {
+  FractalEngine,
+  getDegreeForTimeframe,
+  getLowerDegree,
+  getHigherDegree,
+  relabelVerticesForDegree,
+  DEGREE_CONFIGS
+} from './engine/fractalEngine';
 import { SUPPORTED_ASSETS, generateRealisticCandles, generateAllTimeframesForAsset } from './data/sampleMarketData';
 import {
   loadDraft,
@@ -599,6 +606,40 @@ export default function App() {
     updateEffectiveScenarios(prev => prev.map(sc => (sc.id === targetId ? { ...sc, degree } : sc)));
   };
 
+  const handlePromoteScenarioDegree = (scenarioId?: string) => {
+    const targetId = scenarioId || effectiveActiveScenario?.id;
+    if (!targetId) return;
+    updateEffectiveScenarios(prev =>
+      prev.map(sc => {
+        if (sc.id !== targetId || sc.degree === 'SUPER_CYCLE') return sc;
+        const promotedDegree = getHigherDegree(sc.degree);
+        const relabeledVertices = relabelVerticesForDegree(sc.vertices, promotedDegree);
+        const val = currentStudioDrill
+          ? RulesEngine.validateStructure(
+              sc.patternType,
+              relabeledVertices,
+              sc.direction,
+              currentStudioDrill.role,
+              currentStudioDrill.waveLabel,
+              effectiveCandles
+            )
+          : RulesEngine.validateStructure(sc.patternType, relabeledVertices, sc.direction, 'ROOT', '', effectiveCandles);
+        return {
+          ...sc,
+          degree: promotedDegree,
+          vertices: relabeledVertices,
+          validityScore: val.validityScore,
+          idealnessScore: val.idealnessScore,
+          confidenceScore: val.confidenceScore,
+          invalidationPrice: val.invalidationPrice,
+          targets: val.targets,
+          rulesResults: val.rules,
+          source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
+        };
+      })
+    );
+  };
+
   const handleBranchScenario = (branchName: string, degree: WaveDegree) => {
     const newId = `sc_branch_${Date.now()}`;
     const newScenario: WaveScenario = {
@@ -931,6 +972,8 @@ export default function App() {
                 : undefined
             }
             candles={effectiveCandles}
+            marketType={currentAsset.marketType}
+            onPromoteDegree={handlePromoteScenarioDegree}
           />
         </main>
       )}

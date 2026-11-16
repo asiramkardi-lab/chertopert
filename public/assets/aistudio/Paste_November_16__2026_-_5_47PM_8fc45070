@@ -1,0 +1,788 @@
+## ۱. استخراج مفاهیم جلسه ۲ و سایر مباحث مرتبط از فایل پیوست
+
+### ۱.۱ مفاهیم اصلی جلسه ۲ (2.txt)
+
+جلسه دوم به طور مشخص به **مفاهیم پایه‌ای و ساختاری موج‌شماری** می‌پردازد. مفاهیم استخراج‌شده از این جلسه عبارت‌اند از:
+
+| شماره | مفهوم | توضیح مختصر | مکان در فایل |
+|-------|-------|-------------|--------------|
+| ۲-۱ | **سه روند اصلی بازار** | Impulse (حرکتی)، Correction (اصلاحی)، Side (خنثی) | 2.txt |
+| ۲-۲ | **روند Impulse** | روندی که هدف دارد و از نقطه‌ای به سمت تارگت حرکت می‌کند (صعودی یا نزولی) | 2.txt |
+| ۲-۳ | **روند Correction** | استراحت‌های قیمت در مسیر رسیدن به هدف؛ حرکات اصلاحی | 2.txt |
+| ۲-۴ | **روند Side** | حرکت خنثی و پوچ؛ معمولاً قبل یا بعد از Impulse/Correction رخ می‌دهد | 2.txt |
+| ۲-۵ | **سیکل ایده‌آل (Ideal Cycle)** | ۸ موج: ۵ موج Impulse + ۳ موج Correction؛ نام‌گذاری ۱-۲-۳-۴-۵ و A-B-C | 2.txt |
+| ۲-۶ | **امواج اصلی (Motive) در سیکل** | ۱، ۳، ۵، A، C | 2.txt |
+| ۲-۷ | **امواج اصلاحی (Corrective) در سیکل** | ۲، ۴، B | 2.txt |
+| ۲-۸ | **هم‌جهت بودن با روند** | ملاک اصلی/اصلاحی بودن، نه صعودی/نزولی بودن | 2.txt |
+| ۲-۹ | **قانون ساختار ۵-۳** | امواج اصلی ساختار ۵ موجی، امواج اصلاحی ساختار ۳ موجی | 2.txt |
+| ۲-۱۰ | **آخرین موج روند** | آخرین موج هر روند، موج اصلاحی ندارد | 2.txt |
+
+### ۱.۲ سایر مفاهیم مرتبط در جلسات دیگر
+
+| جلسه | مفهوم | ارتباط با جلسه ۲ |
+|------|-------|------------------|
+| ۱ | **مهندسی چارت** | موج‌شماری به عنوان نقشه راه، نه استراتژی معاملاتی |
+| ۳ | **فرکتال** | تکرار ساختارها در درجات مختلف؛ سیکل ایده‌آل در هر درجه تکرار می‌شود |
+| ۳ | **درجه امواج** | تا ۴ درجه در بورس؛ لیبل‌گذاری W، V، و اعداد |
+| ۴ | **قوانین سه‌گانه** | نقض نکردن موج ۱ توسط ۲؛ کوتاه‌ترین نبودن موج ۳؛ وارد نشدن موج ۴ به محدوده ۱ |
+| ۵ | **حرکت‌شناسی امواج** | حداقل ۳ کندل برای یک موج؛ هم‌خوانی درجات |
+| ۶ | **سیکل ترمینال و آنتی‌سیکل** | نقض قانون موج ۴ → ترمینال؛ نقض ساختار → آنتی‌سیکل |
+| ۷-۸ | **فیبوناچی** | درصدبندی امواج برای تعیین محدوده‌های چرخش |
+| ۹ | **الگوی قطر (Diagonal)** | ساختار ۳-۳-۳-۳-۳؛ نشانه ضعف روند |
+| ۱۰-۱۱ | **زیگزاگ، فلت** | الگوهای اصلاحی با ساختارهای ۵-۳-۵ و ۳-۳-۵ |
+| ۱۲-۱۵ | **مثلث** | ساختار ۳-۳-۳-۳-۳؛ فقط در امواج اصلاحی |
+| ۱۶-۱۷ | **الگوهای ترکیبی** | ترکیب دو الگو با X-wave |
+| ۱۸-۱۹ | **کشیدگی و ویژگی امواج** | شخصیت هر موج؛ TMV و PRZ |
+
+---
+
+## ۲. تشریح کامل هر مفهوم برای پیاده‌سازی توسط LLM
+
+### ۲.۱ سه روند اصلی بازار (Three Market Trends)
+
+**تعریف دقیق:** در هر لحظه، بازار در یکی از سه حالت قرار دارد:
+- **Impulse (حرکتی):** حرکت هدفمند از نقطه A به B. جهت آن می‌تواند صعودی یا نزولی باشد. مشخصه: سرعت، جهت‌داری، ساختار ۵ موجی (یا شتابدار).
+- **Correction (اصلاحی):** حرکت خلاف جهت Impulse قبلی یا استراحت در مسیر. ساختار ۳ موجی (یا ۵ موجی در آنتی‌سیکل).
+- **Side (خنثی):** حرکت افقی و بی‌هدف. کندل‌ها هم‌اندازه و در محدوده‌ای محدود.
+
+**نکته حیاتی برای LLM:** یک حرکت صعودی همیشه Impulse نیست. در درجات پایین‌تر، یک حرکت صعودی می‌تواند Correction باشد و برعکس. **جهت حرکت مهم نیست؛ هم‌جهتی یا خلاف‌جهتی با روندِ درجه بالاتر مهم است.**
+
+**شرایط مرزی:**
+- اگر حرکت هدف مشخصی ندارد و در محدوده‌ای نوسان می‌کند → Side.
+- اگر پس از یک Impulse قوی، حرکتی با دامنه کمتر و ساختار سه‌موجی رخ دهد → Correction.
+- اگر Side در ابتدای تشکیل یک Impulse باشد، ممکن است فاز تجمیع (Accumulation) باشد.
+
+**تست:** با یک سری قیمتی، الگوریتم باید بتواند حداقل سه موج متوالی هم‌جهت با ساختار ۵-۳-۵ را به عنوان Impulse تشخیص دهد. اگر ساختار ۳-۳-۳-۳-۳ در خلاف جهت روند قبلی باشد → Correction (مثلث).
+
+---
+
+### ۲.۲ سیکل ایده‌آل (Ideal Cycle)
+
+**تعریف دقیق:** یک الگوی ۸ موجی شامل ۵ موج Impulse (۱-۲-۳-۴-۵) و ۳ موج Correction (A-B-C).
+
+**ساختار درونی:**
+- موج ۱: Impulse (ساختار ۵ موجی یا شتابدار)
+- موج ۲: Correction (ساختار ۳ موجی؛ معمولاً زیگزاگ)
+- موج ۳: Impulse (ساختار ۵ موجی؛ معمولاً بلندترین)
+- موج ۴: Correction (ساختار ۳ موجی؛ معمولاً فلت یا مثلث)
+- موج ۵: Impulse (ساختار ۵ موجی یا شتابدار)
+- موج A: Impulse (خلاف روند اصلی)
+- موج B: Correction (در جهت روند اصلی)
+- موج C: Impulse (خلاف روند اصلی)
+
+**قوانین بنیادین (غیرقابل نقض):**
+1. موج ۲ نباید ۱۰۰٪ موج ۱ را پوشش دهد (اگر داد → شمارش اشتباه یا آنتی‌سیکل).
+2. موج ۳ نباید کوتاه‌ترین موج بین ۱، ۳، ۵ باشد.
+3. موج ۴ نباید وارد محدوده قیمتی موج ۱ شود (اگر شد → ترمینال یا شمارش اشتباه).
+
+**ویژگی‌های ایده‌آل (نه قانون):**
+- موج ۳ معمولاً بلندترین و پرشتاب‌ترین است.
+- موج ۴ معمولاً پیچیده‌تر از موج ۲ است.
+- اصلاح موج ۲ معمولاً ۵۰-۶۱.۸٪ و اصلاح موج ۴ معمولاً ۳۸.۲٪ است.
+
+**شرایط مرزی:**
+- اگر موج ۲ کمتر از ۲۳.۶٪ موج ۱ اصلاح کند → احتمال کشیدگی موج ۱.
+- اگر موج ۴ بیش از ۵۰٪ موج ۳ اصلاح کند → احتمال اصلاح پیچیده‌تر (فلت/مثلث).
+- اگر موج ۵ کوتاه‌تر از موج ۳ باشد → کوتاه‌شدگی (Truncation) یا ترمینال.
+
+**تست:** یک الگوریتم اعتبارسنجی باید سه قانون بنیادین را بررسی کند. اگر هر یک نقض شد، شمارش نامعتبر است و باید به دنبال الگوهای جایگزین (ترمینال، آنتی‌سیکل، قطر) گشت.
+
+---
+
+### ۲.۳ امواج اصلی و اصلاحی (Motive vs Corrective)
+
+**تعریف دقیق:**
+- **موج اصلی:** موجی که **هم‌جهت با روند درجه بالاتر** حرکت می‌کند. در روند صعودی: ۱، ۳، ۵، A، C (A و C در روند نزولیِ درجه بالاتر هم‌جهت‌اند).
+- **موج اصلاحی:** موجی که **خلاف جهت روند درجه بالاتر** حرکت می‌کند. در روند صعودی: ۲، ۴، B.
+
+**نکته کلیدی:** صعودی یا نزولی بودن یک موج، ملاک اصلی/اصلاحی بودن نیست. **جهت نسبی به روند درجه بالاتر** ملاک است.
+
+**ساختار:**
+- امواج اصلی: ساختار ۵ موجی (یا شتابدار → فرض ۵ موجی).
+- امواج اصلاحی: ساختار ۳ موجی (یا شتابدار → فرض ۳ موجی).
+
+**شرایط مرزی:**
+- یک موج شتابدار (بدون ساختار درونی قابل شمارش) اگر در جایگاه اصلی باشد → فرض ۵ موجی.
+- اگر در جایگاه اصلاحی باشد → فرض ۳ موجی.
+
+**تست:** برای هر موج، الگوریتم باید:
+1. جهت آن را نسبت به موج قبلیِ هم‌درجه تعیین کند.
+2. اگر هم‌جهت → Motive؛ اگر خلاف‌جهت → Corrective.
+3. ساختار درونی را بررسی کند؛ اگر قابل شمارش نبود، بر اساس جایگاه فرض کند.
+
+---
+
+### ۲.۴ فرکتال و درجه امواج (Fractal & Wave Degree)
+
+**تعریف:** ساختارهای موجی در هر درجه‌ای تکرار می‌شوند. یک موج ۵ تایی در درجه پایین، خود بخشی از یک موج ۱ در درجه بالاتر است.
+
+**درجات در بورس ایران:** حداکثر ۴ درجه شمارش قابل قبول است (به دلیل کیفیت داده). در فارکس تا ۱۵ درجه.
+
+**لیبل‌گذاری:**
+- Super Cycle: V1, V2, V3…
+- Cycle: W1, W2, W3…
+- Primary: 1, 2, 3…
+- Intermediate: (1), (2), (3)…
+
+**شرایط مرزی:**
+- اگر در نمودار روزانه، ساختار ۵ موجی دیده نشود → به تایم‌فریم پایین‌تر (۴ ساعته/۱ ساعته) بروید.
+- اگر در تایم بالاتر، موجی شتابدار به نظر می‌رسد → در تایم پایین‌تر ممکن است ۵ موجی باشد.
+
+**تست:** الگوریتم باید بتواند در دو تایم‌فریم متوالی (مثلاً روزانه و ۴ ساعته) هم‌خوانی ساختار را تأیید کند. اگر ساختار در تایم پایین‌تر ۵ موجی است، در تایم بالاتر به عنوان یک موج واحد (شتابدار یا ۵ موجی) در نظر گرفته می‌شود.
+
+---
+
+### ۲.۵ قوانین سه‌گانه (Three Cardinal Rules)
+
+**قانون ۱:** موج ۲ نمی‌تواند ۱۰۰٪ موج ۱ را پوشش دهد.
+- **پیامد نقض:** شمارش اشتباه است یا الگوی آنتی‌سیکل در جریان است.
+
+**قانون ۲:** موج ۳ نمی‌تواند کوتاه‌ترین موج بین ۱، ۳، ۵ باشد.
+- **پیامد نقض:** شمارش اشتباه است؛ ممکن است موج ۳ در واقع موج ۱ باشد.
+
+**قانون ۳:** موج ۴ نمی‌تواند وارد محدوده قیمتی موج ۱ شود.
+- **پیامد نقض:** اگر ساختار کلی ایده‌آل باشد → سیکل ترمینال. اگر نباشد → شمارش اشتباه.
+
+**شرایط مرزی:**
+- در آنتی‌ترمینال، موج ۴ وارد محدوده ۱ می‌شود اما موج ۵ کشیده می‌شود.
+- در ترمینال، موج ۴ وارد محدوده ۱ می‌شود و موج ۵ کوتاه می‌شود.
+- در الگوی قطر، موج ۴ همیشه وارد محدوده ۱ می‌شود (قانون نقض می‌شود اما الگو معتبر است).
+
+**تست:** یک تابع `validate_impulse(waves)` باید سه قانون را بررسی کند و خروجی `{valid: bool, violated_rule: int|null, alternative_pattern: str|null}` بدهد.
+
+---
+
+### ۲.۶ حرکت‌شناسی امواج (Wave Behavior)
+
+**حداقل کندل:** یک موج باید حداقل ۳ کندل در جهت خود داشته باشد (قاعده، نه قانون).
+
+**هم‌خوانی درجات:** امواج هم‌درجه باید اندازه و ساختار مشابه داشته باشند. موج ۲ نمی‌تواند یک کندل باشد و موج ۴ صد کندل.
+
+**استثنا:** در فشار روند شدید، یک شدو (سایه) می‌تواند به عنوان موج در نظر گرفته شود، به شرطی که قبل و بعد از آن قدرت روند مشهود باشد.
+
+**تست:** برای هر موج، تعداد کندل‌های هم‌جهت را بشمارید. اگر کمتر از ۳ باشد، بررسی کنید که آیا در یک روند قوی قرار دارد (با معیارهایی مثل فاصله از میانگین متحرک یا ADX). اگر نه → موج نامعتبر.
+
+---
+
+### ۲.۷ الگوهای اصلاحی (Corrective Patterns)
+
+#### زیگزاگ (Zigzag)
+- **ساختار:** ۵-۳-۵ (A=5, B=3, C=5)
+- **قانون:** موج C باید ۱۰۰٪ موج B را پوشش دهد.
+- **انواع:** ایده‌آل (۵-۳-۵)، آنتی‌ای (۳-۵-۵)، سیمپل (۳-۳-۳).
+- **نام‌گذاری بر اساس موج C:** کوتاه‌شده (۶۱.۸-۱۰۰٪)، معمولی (۱۰۰-۱۶۱.۸٪)، کشیده (>۱۶۱.۸٪).
+
+#### فلت (Flat)
+- **ساختار:** ۳-۳-۵
+- **قانون:** موج B باید >۶۱.۸٪ موج A باشد.
+- **انواع:** متعارف (B≈A، C≈B)، ناقص B (B<A)، ناقص C (C<B)، ناقص دوگانه، نامنظم (B>A)، نامنظم ناقص، نامنظم کشیده.
+
+#### مثلث (Triangle)
+- **ساختار:** ۳-۳-۳-۳-۳ (A-B-C-D-E)
+- **قانون:** فقط در امواج اصلاحی (۲، ۴، B) رخ می‌دهد. خلاف جهت روند.
+- **انواع:** مانع (Converging)، گستشی (Diverging)؛ صعودی/نزولی.
+
+**تست:** برای هر الگوی اصلاحی، قوانین ساختاری و نسبت‌های فیبوناچی باید بررسی شوند. الگوریتم باید بتواند بین زیگزاگ، فلت، و مثلث تمایز قائل شود.
+
+---
+
+### ۲.۸ الگوهای غیرایده‌آل (Non-Ideal Patterns)
+
+#### سیکل ترمینال (Terminal)
+- ساختار ایده‌آل اما موج ۴ وارد محدوده ۱ می‌شود.
+- موج ۵ کوتاه می‌شود (به هدف TMV نمی‌رسد).
+
+#### آنتی‌سیکل (Anti-Cycle)
+- ساختار ۳-۵ (برعکس ایده‌آل ۵-۳).
+- موج اول سه‌موجی، موج دوم پنج‌موجی.
+- فاز دوم باید ۱۰۰٪ آخرین موج فاز اول را پوشش دهد.
+
+#### الگوی قطر (Diagonal)
+- ساختار ۳-۳-۳-۳-۳.
+- موج ۴ وارد محدوده ۱ می‌شود.
+- انواع: پیشرو (Leading) در موج ۱ یا A؛ پایانی (Ending) در موج ۵ یا C.
+
+**تست:** اگر قوانین ایده‌آل نقض شد، الگوریتم باید به ترتیب ترمینال → آنتی‌سیکل → قطر → الگوی ترکیبی را بررسی کند.
+
+---
+
+### ۲.۹ فیبوناچی (Fibonacci Tools)
+
+| ابزار | کاربرد | نحوه رسم |
+|-------|--------|----------|
+| Retracement | میزان اصلاح موج اصلاحی نسبت به موج اصلی | X=ابتدا، Y=انتهای موج اصلی |
+| Extension | میزان حرکت موج جدید نسبت به سقف/کف قبلی | X=پایان، Y=ابتدا (برعکس) |
+| Projection | نسبت موج جدید به موج اصلی ماقبل | سه نقطه: X=ابتدا، Y=انتهای موج ۱، Z=انتهای موج ۲ |
+
+**درصدهای کلیدی:** ۲۳.۶، ۳۸.۲، ۵۰، ۶۱.۸، ۷۸.۶، ۱۰۰، ۱۲۷، ۱۶۱.۸، ۲۶۱.۸.
+
+**تست:** برای هر جفت موج متوالی، نسبت طول موج اصلاحی به موج اصلی محاسبه شود و با درصدهای فیبوناچی مقایسه گردد.
+
+---
+
+### ۲.۱۰ الگوهای ترکیبی (Complex Combinations)
+
+**تعریف:** ترکیب دو الگوی استاندارد (زیگزاگ، فلت، مثلث) با یک موج رابط به نام **X-wave**.
+
+**انواع:** Z-X-Z، Z-X-F، Z-X-T، F-X-F، T-X-T، و ترکیب با الگوهای اصلی (Ideal, Terminal, Diagonal).
+
+**X-wave:** معمولاً یک زیگزاگ، شتابدار، یا تک‌موج ساده. حداقل ۳ کندل.
+
+**قانون:** فقط زمانی از الگوهای ترکیبی استفاده کنید که هیچ‌یک از الگوهای ساده (ایده‌آل، ترمینال، قطر، زیگزاگ، فلت، مثلث) قابل اعمال نباشد.
+
+**تست:** الگوریتم باید ابتدا الگوهای ساده را بررسی کند. اگر همه ناموفق بودند، ترکیب‌های ممکن را با X-wave جستجو کند.
+
+---
+
+## ۳. تبدیل به SDD (Specification-Driven Development)
+
+بر اساس مستندات spec-kit، هر ویژگی باید به صورت یک **Library مستقل** با **CLI** و **تست‌های از پیش نوشته‌شده** طراحی شود. در ادامه، مشخصات کامل برای یک موتور تحلیل موج‌شماری ارائه می‌شود.
+
+### ۳.۱ Feature Specification: `elliott-wave-engine`
+
+```markdown
+# Feature Specification: Elliott Wave Engine
+
+Feature Branch: `001-elliott-wave-engine`
+Created: 2026-10-28
+Status: Draft
+Input: User description: "A library that takes OHLCV data and outputs Elliott Wave counts with confidence scores, following the Actor Waves methodology from the Bahari course."
+
+## User Scenarios & Testing
+
+### User Story 1 - Count Waves on a Price Series (Priority: P1)
+
+A developer feeds a pandas DataFrame with OHLCV data. The engine returns a list of wave counts (each with wave labels 1-5, A-C, or combinations) and a confidence score per count.
+
+**Why this priority:** This is the core value proposition. Without accurate wave counting, nothing else matters.
+
+**Independent Test:** Given a synthetic price series with a known 5-3-5 zigzag, the engine MUST return exactly one count matching the zigzag structure with confidence > 0.7.
+
+**Acceptance Scenarios:**
+- Given a clean 5-3-5 zigzag, When counting, Then returns one count with labels [1,2,3,4,5,A,B,C] and confidence ≥ 0.8.
+- Given a clean 3-3-5 flat, When counting, Then returns one count with labels [A,B,C] where B > 61.8% of A and confidence ≥ 0.7.
+- Given a noisy series with no clear structure, When counting, Then returns zero counts or counts with confidence < 0.3.
+
+### User Story 2 - Validate Rules and Report Violations (Priority: P1)
+
+For each candidate count, the engine reports which (if any) of the three cardinal rules are violated, and suggests alternative patterns.
+
+**Why this priority:** Rules are the guardrails. Without validation, counts are meaningless.
+
+**Independent Test:** Given a synthetic series where wave 4 overlaps wave 1, the engine MUST flag Rule 3 violation and suggest "Terminal" as an alternative.
+
+**Acceptance Scenarios:**
+- Given a series with wave 2 > 100% of wave 1, When validating, Then returns `violated_rule=1` and `alternative="Anti-Cycle"`.
+- Given a series with wave 3 shortest, When validating, Then returns `violated_rule=2` and `alternative=None` (count invalid).
+- Given a series with wave 4 overlapping wave 1 and wave 5 truncated, When validating, Then returns `violated_rule=3` and `alternative="Terminal"`.
+
+### User Story 3 - Identify Corrective Patterns (Priority: P2)
+
+The engine distinguishes between Zigzag, Flat, and Triangle based on internal structure and Fibonacci ratios.
+
+**Why this priority:** Corrective patterns are where most trading opportunities lie (entry at wave 3 start).
+
+**Independent Test:** Given a three-wave correction, the engine correctly classifies it as Zigzag (5-3-5), Flat (3-3-5), or Triangle (3-3-3-3-3).
+
+**Acceptance Scenarios:**
+- Given A=5 waves, B=3 waves, C=5 waves, and C > 100% of B, When classifying, Then returns "Zigzag".
+- Given A=3 waves, B=3 waves with B > 61.8% of A, C=5 waves, When classifying, Then returns "Flat".
+- Given five three-wave segments with converging highs/lows, When classifying, Then returns "Triangle (Contracting)".
+
+### Edge Cases
+
+- **Empty DataFrame:** Return empty list with `error="No data"`.
+- **Less than 10 candles:** Return `error="Insufficient data for wave counting"`.
+- **Single candle with extreme wick:** Do not count as a wave (minimum 3 candles rule).
+- **All candles same price (flat line):** Return `error="No price movement"`.
+- **NaN values in OHLCV:** Forward-fill or reject; MUST document behavior.
+- **Wave 5 truncated (Terminal):** Detect and label as "5 (truncated)" with terminal flag.
+- **X-wave with only 2 candles:** Invalid X-wave; treat as direct connection between patterns.
+
+## Requirements
+
+### Functional Requirements
+
+- **FR-001:** System MUST accept OHLCV data as input (list of dicts or pandas DataFrame).
+- **FR-002:** System MUST output a list of `WaveCount` objects, each containing: labels (list of strings), waves (list of `Wave` objects with start/end indices, prices), confidence (0-1), and violations (list of rule violations).
+- **FR-003:** System MUST implement the three cardinal rules as validators.
+- **FR-004:** System MUST detect at minimum these patterns: Ideal Cycle, Zigzag, Flat, Triangle, Terminal, Anti-Cycle, Diagonal.
+- **FR-005:** System MUST calculate Fibonacci retracement/extension ratios for each wave pair and use them in pattern classification.
+- **FR-006:** System MUST suggest alternative patterns when cardinal rules are violated.
+- **FR-007:** System MUST expose all functionality via a CLI that reads JSON from stdin and writes JSON to stdout.
+- **FR-008:** System MUST log all decisions (pattern selected, rules checked, alternatives rejected) in a structured format for debugging.
+
+### Key Entities
+
+- **Wave:** `{label: str, start_idx: int, end_idx: int, start_price: float, end_price: float, direction: "up"|"down", degree: int}`
+- **WaveCount:** `{id: str, labels: [str], waves: [Wave], confidence: float, violations: [RuleViolation], alternative: str|null}`
+- **RuleViolation:** `{rule: 1|2|3, description: str, severity: "error"|"warning"}`
+- **Pattern:** Enum: `IDEAL, ZIGZAG, FLAT, TRIANGLE, TERMINAL, ANTI_CYCLE, DIAGONAL, COMPLEX`
+
+## Success Criteria
+
+- **SC-001:** On a synthetic 5-3-5 zigzag, top-1 accuracy ≥ 95%.
+- **SC-002:** On a synthetic 3-3-5 flat, top-1 accuracy ≥ 90%.
+- **SC-003:** All cardinal rule violations are correctly identified (precision = 1.0, recall ≥ 0.95).
+- **SC-004:** CLI responds in < 500ms for 1000 candles on a standard laptop.
+- **SC-005:** Documentation includes at least 10 worked examples from the Bahari course.
+
+## Assumptions
+
+- Input data is daily or higher timeframe (no 1-minute data for initial version).
+- Wave counting is deterministic for clean patterns; confidence scores handle ambiguity.
+- User has basic knowledge of Elliott Wave terminology.
+```
+
+### ۳.۲ Implementation Plan (خلاصه)
+
+```markdown
+# Implementation Plan: Elliott Wave Engine
+
+**Branch**: `001-elliott-wave-engine`
+**Language/Version**: Python 3.11+
+**Primary Dependencies**: pandas, numpy, pydantic, typer (CLI), pytest
+**Storage**: N/A (stateless library)
+**Testing**: pytest (contract tests first, then integration, then unit)
+**Target Platform**: Linux/macOS/Windows (CLI); any Python environment (library)
+**Project Type**: Library + CLI
+**Performance Goals**: <500ms for 1000 candles
+**Constraints**: No network calls; deterministic output for identical input
+
+## Constitution Check
+
+### Article I: Library-First
+✅ Core logic in `elliott_wave_engine/` package. CLI is a thin wrapper.
+
+### Article II: CLI Interface Mandate
+✅ CLI reads JSON from stdin, writes JSON to stdout. Supports `--format json` and `--verbose`.
+
+### Article III: Test-First
+✅ Tests written before implementation. Order: contract → integration → unit.
+
+### Article VII: Simplicity (≤3 projects)
+✅ One project: `elliott-wave-engine`.
+
+### Article VIII: Anti-Abstraction
+✅ Direct use of pandas/numpy. No custom abstractions for basic operations.
+
+### Article IX: Integration-First
+✅ Tests use real price data (synthetic and historical samples), not mocks.
+
+## Project Structure
+
+```text
+elliott-wave-engine/
+├── src/
+│   └── elliott_wave_engine/
+│       ├── __init__.py
+│       ├── models.py          # Wave, WaveCount, RuleViolation
+│       ├── rules.py           # Cardinal rule validators
+│       ├── patterns.py        # Pattern detection (Ideal, Zigzag, Flat, etc.)
+│       ├── fibonacci.py       # Fibonacci ratio calculations
+│       ├── counter.py         # Main wave counting logic
+│       └── cli.py             # Typer CLI
+├── tests/
+│   ├── contract/
+│   │   └── test_cli_contract.py
+│   ├── integration/
+│   │   └── test_synthetic_patterns.py
+│   └── unit/
+│       ├── test_rules.py
+│       ├── test_patterns.py
+│       └── test_fibonacci.py
+├── pyproject.toml
+└── README.md
+```
+
+## Complexity Tracking
+
+| Violation | Justification |
+|-----------|---------------|
+| None | All gates pass. |
+```
+
+---
+
+## ۴. پیاده‌سازی پیشنهادی Backend (FastAPI)
+
+### ۴.۱ ساختار پروژه
+
+```
+backend/
+├── app/
+│   ├── main.py
+│   ├── api/
+│   │   └── v1/
+│   │       └── waves.py
+│   ├── core/
+│   │   ├── config.py
+│   │   └── logging.py
+│   ├── schemas/
+│   │   └── wave.py
+│   └── services/
+│       └── wave_engine.py
+├── tests/
+│   ├── test_api.py
+│   └── test_engine.py
+└── requirements.txt
+```
+
+### ۴.۲ کد کلیدی
+
+**`schemas/wave.py`:**
+```python
+from pydantic import BaseModel, Field
+from typing import Literal
+
+class OHLCV(BaseModel):
+    timestamp: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0
+
+class WavePoint(BaseModel):
+    label: str
+    index: int
+    price: float
+
+class WaveCount(BaseModel):
+    id: str
+    labels: list[str]
+    points: list[WavePoint]
+    confidence: float = Field(ge=0, le=1)
+    violations: list[dict] = []
+    alternative: str | None = None
+
+class CountRequest(BaseModel):
+    data: list[OHLCV]
+    max_degree: int = 4
+    min_confidence: float = 0.3
+
+class CountResponse(BaseModel):
+    counts: list[WaveCount]
+    errors: list[str] = []
+```
+
+**`services/wave_engine.py` (هسته اصلی):**
+```python
+import numpy as np
+from typing import Optional
+from app.schemas.wave import WaveCount, WavePoint
+
+def count_waves(prices: list[float], highs: list[float], lows: list[float]) -> list[WaveCount]:
+    """
+    Main entry point. Returns list of candidate wave counts.
+    """
+    # 1. Find pivots (local extrema)
+    pivots = find_pivots(highs, lows, window=5)
+    
+    # 2. Build candidate sequences
+    candidates = build_candidates(pivots, prices)
+    
+    # 3. Validate cardinal rules
+    valid = []
+    for seq in candidates:
+        violations = validate_rules(seq, prices)
+        if not any(v['severity'] == 'error' for v in violations):
+            valid.append(seq)
+    
+    # 4. Classify patterns
+    results = []
+    for seq in valid:
+        pattern = classify_pattern(seq, prices)
+        confidence = calculate_confidence(seq, pattern, prices)
+        results.append(WaveCount(
+            id=hash_sequence(seq),
+            labels=seq.labels,
+            points=[WavePoint(label=l, index=i, price=prices[i]) 
+                    for l, i in zip(seq.labels, seq.points)],
+            confidence=confidence,
+            violations=violations,
+            alternative=suggest_alternative(seq, pattern)
+        ))
+    
+    # 5. Sort by confidence, return top N
+    return sorted(results, key=lambda x: x.confidence, reverse=True)[:5]
+
+def find_pivots(highs: list[float], lows: list[float], window: int = 5) -> list[dict]:
+    """Find local extrema using a rolling window."""
+    pivots = []
+    for i in range(window, len(highs) - window):
+        if highs[i] == max(highs[i-window:i+window+1]):
+            pivots.append({'index': i, 'type': 'high', 'price': highs[i]})
+        if lows[i] == min(lows[i-window:i+window+1]):
+            pivots.append({'index': i, 'type': 'low', 'price': lows[i]})
+    return pivots
+
+def validate_rules(seq, prices) -> list[dict]:
+    """Validate three cardinal rules."""
+    violations = []
+    waves = seq.waves
+    
+    # Rule 1: Wave 2 must not retrace 100% of Wave 1
+    if len(waves) >= 2:
+        w1 = waves[0]
+        w2 = waves[1]
+        if w2.end_price <= w1.start_price if w1.direction == 'up' else w2.end_price >= w1.start_price:
+            violations.append({'rule': 1, 'severity': 'error', 
+                             'description': 'Wave 2 retraced 100%+ of Wave 1'})
+    
+    # Rule 2: Wave 3 must not be shortest
+    if len(waves) >= 3:
+        lengths = [abs(w.end_price - w.start_price) for w in waves[:3]]
+        if lengths[2] == min(lengths):
+            violations.append({'rule': 2, 'severity': 'error',
+                             'description': 'Wave 3 is the shortest'})
+    
+    # Rule 3: Wave 4 must not overlap Wave 1
+    if len(waves) >= 4:
+        w1 = waves[0]
+        w4 = waves[3]
+        if w1.direction == 'up' and w4.end_price <= w1.end_price:
+            violations.append({'rule': 3, 'severity': 'warning',
+                             'description': 'Wave 4 overlaps Wave 1 (possible Terminal/Diagonal)'})
+        elif w1.direction == 'down' and w4.end_price >= w1.end_price:
+            violations.append({'rule': 3, 'severity': 'warning',
+                             'description': 'Wave 4 overlaps Wave 1 (possible Terminal/Diagonal)'})
+    
+    return violations
+```
+
+**`api/v1/waves.py`:**
+```python
+from fastapi import APIRouter, HTTPException
+from app.schemas.wave import CountRequest, CountResponse
+from app.services.wave_engine import count_waves
+
+router = APIRouter(prefix="/api/v1/waves", tags=["waves"])
+
+@router.post("/count", response_model=CountResponse)
+async def count_waves_endpoint(req: CountRequest):
+    if len(req.data) < 10:
+        raise HTTPException(400, "Insufficient data (minimum 10 candles)")
+    
+    prices = [d.close for d in req.data]
+    highs = [d.high for d in req.data]
+    lows = [d.low for d in req.data]
+    
+    counts = count_waves(prices, highs, lows)
+    filtered = [c for c in counts if c.confidence >= req.min_confidence]
+    
+    return CountResponse(counts=filtered)
+```
+
+**`main.py`:**
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.v1.waves import router
+
+app = FastAPI(title="Elliott Wave Engine API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(router)
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+```
+
+### ۴.۳ بهینه‌سازی و بهترین روش‌ها
+
+| موضوع | راهکار |
+|-------|--------|
+| **Performance** | استفاده از `numpy` برای محاسبات برداری؛ cache نتایج pivot detection |
+| **Async** | FastAPI async endpoints؛ عملیات CPU-bound در `run_in_threadpool` |
+| **Validation** | Pydantic v2 با `Field` constraints |
+| **Error Handling** | `HTTPException` با کدهای مشخص؛ logging ساختاریافته |
+| **Testing** | pytest + httpx برای API tests؛ synthetic data generators برای engine tests |
+| **Deployment** | Docker multi-stage build؛ uvicorn با workers=4 |
+
+---
+
+## ۵. پیاده‌سازی پیشنهادی Frontend (Nuxt 4)
+
+### ۵.۱ ساختار پروژه
+
+```
+frontend/
+├── app/
+│   ├── app.vue
+│   ├── pages/
+│   │   ├── index.vue          # Main analysis page
+│   │   └── history.vue        # Saved analyses
+│   ├── components/
+│   │   ├── WaveChart.vue      # Candlestick + wave overlay
+│   │   ├── CountTable.vue     # List of counts with confidence
+│   │   ├── RuleViolations.vue # Display violations
+│   │   └── DataUpload.vue     # CSV upload / paste
+│   ├── composables/
+│   │   └── useWaveEngine.ts
+│   └── assets/
+│       └── css/
+│           └── main.css
+├── nuxt.config.ts
+└── package.json
+```
+
+### ۵.۲ کد کلیدی
+
+**`composables/useWaveEngine.ts`:**
+```typescript
+export const useWaveEngine = () => {
+  const counts = ref<WaveCount[]>([])
+  const loading = ref(false)
+  const error = ref<string | null>(null)
+
+  const count = async (data: OHLCV[], minConfidence = 0.3) => {
+    loading.value = true
+    error.value = null
+    try {
+      const res = await $fetch<CountResponse>('/api/v1/waves/count', {
+        method: 'POST',
+        body: { data, min_confidence: minConfidence }
+      })
+      counts.value = res.counts
+    } catch (e: any) {
+      error.value = e.data?.detail || 'Analysis failed'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return { counts, loading, error, count }
+}
+```
+
+**`components/WaveChart.vue`:**
+```vue
+<template>
+  <div class="relative h-[600px] bg-default rounded-lg border border-muted p-4">
+    <ClientOnly>
+      <apexchart
+        type="candlestick"
+        height="100%"
+        :options="chartOptions"
+        :series="series"
+      />
+    </ClientOnly>
+  </div>
+</template>
+
+<script setup lang="ts">
+const props = defineProps<{
+  data: OHLCV[]
+  counts: WaveCount[]
+}>()
+
+const series = computed(() => [{
+  data: props.data.map(d => ({
+    x: new Date(d.timestamp).getTime(),
+    y: [d.open, d.high, d.low, d.close]
+  }))
+}])
+
+const chartOptions = computed(() => ({
+  chart: { type: 'candlestick', background: 'transparent' },
+  xaxis: { type: 'datetime' },
+  plotOptions: {
+    candlestick: { colors: { upward: '#10b981', downward: '#ef4444' } }
+  },
+  annotations: {
+    points: props.counts[0]?.points.map(p => ({
+      x: new Date(props.data[p.index].timestamp).getTime(),
+      y: p.price,
+      marker: { size: 4, fillColor: '#3b82f6' },
+      label: { text: p.label, style: { background: '#3b82f6', color: '#fff' } }
+    })) || []
+  }
+}))
+</script>
+```
+
+**`pages/index.vue`:**
+```vue
+<template>
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold text-primary">Elliott Wave Analyzer</h1>
+      <UButton icon="i-lucide-refresh-cw" :loading="loading" @click="analyze">
+        Analyze
+      </UButton>
+    </header>
+
+    <UAlert v-if="error" color="error" :title="error" icon="i-lucide-alert-circle" />
+
+    <DataUpload v-model="rawData" @parsed="analyze" />
+
+    <template v-if="counts.length">
+      <WaveChart :data="rawData" :counts="counts" />
+      
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <UCard>
+          <template #header>
+            <h2 class="font-semibold">Wave Counts ({{ counts.length }})</h2>
+          </template>
+          <CountTable :counts="counts" />
+        </UCard>
+
+        <UCard>
+          <template #header>
+            <h2 class="font-semibold">Rule Violations</h2>
+          </template>
+          <RuleViolations :violations="counts[0]?.violations || []" />
+        </UCard>
+      </div>
+    </template>
+
+    <div v-else-if="!loading" class="text-center py-12 text-muted">
+      <UIcon name="i-lucide-chart-candlestick" class="w-12 h-12 mx-auto mb-4 opacity-50" />
+      <p>Upload CSV data or paste prices to begin analysis</p>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+const rawData = ref<OHLCV[]>([])
+const { counts, loading, error, count } = useWaveEngine()
+
+const analyze = () => {
+  if (rawData.value.length >= 10) {
+    count(rawData.value)
+  }
+}
+</script>
+```
+
+### ۵.۳ اصول UI/UX (متناسب با Nuxt UI v4)
+
+| اصل | پیاده‌سازی |
+|-----|-----------|
+| **Semantic Tokens** | استفاده از `text-primary`, `bg-default`, `border-muted` — هرگز رنگ هاردکد |
+| **Dark Mode** | خودکار از طریق Nuxt UI؛ نیازی به `dark:` نیست |
+| **Loading States** | `UButton :loading`, skeleton components |
+| **Error Handling** | `UAlert` با `color="error"` و آیکون |
+| **Responsive** | Grid با `grid-cols-1 lg:grid-cols-2` |
+| **Accessibility** | تمام دکمه‌ها با `aria-label`؛ کنتراست کافی |
+| **Component Reuse** | `UCard`, `UButton`, `UAlert`, `UIcon` از Nuxt UI v4 |
+
+---
+
+## ۶. جمع‌بندی
+
+این سند شامل سه بخش اصلی است:
+
+1. **استخراج مفاهیم جلسه ۲** و ارتباط آن‌ها با سایر جلسات (فرکتال، قوانین، الگوها).
+2. **مشخصات SDD کامل** بر اساس spec-kit: User Stories، Functional Requirements، Edge Cases، Constitution Check، و Project Structure.
+3. **پیاده‌سازی مرجع** شامل FastAPI backend (با Pydantic schemas، service layer، و API endpoints) و Nuxt 4 frontend (با composables، کامپوننت‌های قابل استفاده مجدد، و UI/UX بر اساس Nuxt UI v4).
+
+**نکته مهم برای LLM:** هنگام پیاده‌سازی، ابتدا **تست‌های contract** (CLI ورودی/خروجی JSON) را بنویسید، سپس تست‌های integration با داده‌های synthetic (زیگزاگ تمیز، فلت تمیز، ترمینال)، و در نهایت تست‌های unit برای قوانین و الگوها. **هیچ کد implementation قبل از تست نوشته نشود.**

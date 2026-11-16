@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -116,6 +116,75 @@ export const SddAndCodeViewer: React.FC = () => {
 - [N10] تفکیک سیکل ۵ موجی از ۸ موجی: ایمپالس ۵ موجی و اصلاح ۳ موجی به عنوان دو موجودیت مکمل با هم سیکل ۸ موجی را می‌سازند.
 - [N11] آنتی‌سیکل و پوشش ۱۰۰٪: فاز دوم پنج‌موجی باید به طور کامل سقف/کف آخرین موج فاز اول سه‌موجی را رد کند.
 - [N12] تست‌های T-4.31 و T-4.32: تست T-4.31 برای رفع نقض قانون ۳ با ممتد کردن موج ۳ و تست T-4.32 برای اعتبار موج ۴ روی ۵۰٪ موج ۳ ممتد پیاده‌سازی شده‌اند.
+`;
+
+  const session2Markdown = `# مفاهیم استخراج‌شده جلسه ۲ و مشخصات 001-elliott-wave-engine
+
+## ۱. مفاهیم اصلی جلسه ۲ (۲-۱ تا ۲-۱۰)
+- [۲-۱] سه روند اصلی بازار: Impulse (حرکتی)، Correction (اصلاحی)، Side (خنثی / تراکم).
+- [۲-۲] روند Impulse: حرکت هدفمند از مبدأ به سمت تارگت (صعودی یا نزولی) با بازدهی جهتی بالا.
+- [۲-۳] روند Correction: استراحت‌های قیمت در مسیر رسیدن به هدف؛ خلاف جهت روند درجه بالاتر.
+- [۲-۴] روند Side: حرکت افقی و بی‌هدف با کندل‌های هم‌اندازه در محدوده بسته (پیش/پس از ایمپالس یا اصلاح).
+- [۲-۵] سیکل ایده‌آل ۸ موجی: ۵ موج Impulse (۱-۲-۳-۴-۵) + ۳ موج Correction (A-B-C).
+- [۲-۶] امواج اصلی (Motive) در سیکل: ۱، ۳، ۵، A، C.
+- [۲-۷] امواج اصلاحی (Corrective) در سیکل: ۲، ۴، B.
+- [۲-۸] هم‌جهتی با روند درجه بالاتر: ملاک اصلی/اصلاحی بودن جهت نسبی به درجه بالاتر است، نه صرفاً صعودی/نزولی بودن.
+- [۲-۹] قانون ساختار ۵-۳: امواج اصلی ساختار ۵ موجی (یا شتابدار فرض ۵) و امواج اصلاحی ساختار ۳ موجی (یا شتابدار فرض ۳) دارند.
+- [۲-۱۰] قانون آخرین موج روند (C17): آخرین موج هر روند (۵ یا C) اصلاح هم‌درجه ندارد.
+
+## ۲. شرایط مرزی و قوانین پیاده‌سازی‌شده در موتور (Sections 2.1 – 2.10)
+- طبقه‌بند سه روند بازار (classifyMarketTrend): تفکیک زنده IMPULSE / CORRECTION / SIDE بر اساس Efficiency Ratio و نسبت دامنه به ATR.
+- حرکت‌شناسی و استثنای شدو (۲.۶): بررسی حداقل ۳ کندل در هر موج و پذیرش استثنای شدو تحت فشار روند (فاصله از SMA-14 >= 1.25 ATR + شدوی بزرگ‌تر از ۱.۸x بدنه).
+- هم‌خوانی درجات (C13): هشدار خودکار هنگام اختلاف زمانی شدید بین امواج هم‌درجه (> ۶.۵x).
+- الگوهای ترکیبی و موج رابط X (۲.۱۰): اولویت الگوهای ساده بر ترکیبی و الزام حداقل ۳ کندل برای موج X.
+
+## ۳. خلاصه SDD کتابخانه (001-elliott-wave-engine)
+- User Story 1 (P1): شمارش امواج روی سری قیمتی OHLCV با امتیاز اطمینان و برچسب‌های ۱-۵ و A-C.
+- User Story 2 (P1): اعتبارسنجی قوانین سه‌گانه بنیادین و پیشنهاد الگوهای جایگزین (Anti-Cycle / Terminal).
+- User Story 3 (P2): تفکیک Zigzag (5-3-5)، Flat (3-3-5 با B > 61.8% A) و Triangle (3-3-3-3-3).
+- Edge Cases: داده خالی، کمتر از ۱۰ کندل، تک‌کندل با شدوی افراطی، خط صاف بدون نوسان، NaN، کوتاه‌شدگی موج ۵ (TMV) و موج X کمتر از ۳ کندل.
+`;
+
+  const sessions3to8Markdown = `# مفاهیم استخراج‌شده جلسات ۳ تا ۸ و شاخه‌های SDD (002..007)
+
+## ۱. جلسه ۳ و ۵: درجات، ارتقاء درجه و امواج شتابدار در برابر فرکتالی (002 / 004)
+- [۳-۱..۳-۴] نگاشت ۴ درجه بهاری: درجه ۱ (Super Cycle = V)، درجه ۲ (Cycle = W)، درجه ۳ (Primary = اعداد بولد)، درجه ۴ (Intermediate = اعداد ساده).
+- [۳-۵ & ۵-۱۱] تفکیک امواج شتابدار (IMPULSIVE_MOMENTUM با فرض ساختار ۵/۳) از فرکتالی (FRACTAL_EXTENDED با پیوت‌های استراحتی).
+- [۳-۶] ارتقاء درجه خودکار (Degree Promotion): با عبور قیمت از سقف/کف سیکل تکمیل‌شده، لیبل‌ها یک پله ارتقاء می‌یابند (ساده ← بولد ← W ← V).
+- [۳-۸ & ۵-۱۲] سقف درجات تایم‌فریم و مرز توقف بورس ایران:
+  * 1M: حداکثر ۲ درجه | 1W: حداکثر ۳ درجه | 1D: حداکثر ۴ درجه | بورس ایران: توقف اکید در درجه ۴ (بدون شمارش زیر 4H).
+
+## ۲. جلسه ۴ و ۶: قوانین بنیادین، کشیدگی، ترمینال و کف مطلق (003 / 005)
+- [۴-۱] قوانین سه‌گانه غیرقابل نقض (R1: موج ۲ < ۱۰۰٪ ۱، R2: موج ۳ کوتاه‌ترین نیست، R3: عدم هم‌پوشانی ۴ و ۱).
+- [۴-۲] فیلتر دوجی در قانون حداقل ۳ کندل (MIN_3_CANDLES) و تشخیص خودکار آنتی‌سیکل (۳-۵)، ترمینال و آنتی‌ترمینال (CB-Wave ≥ 100% W4).
+- [۴-۳] کشیدگی امواج و رفع نقض قانون ۳: بررسی شرط موج ۳ ممتد (T-4.31 / T-4.32) و هشدار کشیدگی موج ۱، ۳ یا ۵.
+- [۵-۴] تفکیک برچسب‌گذاری نادرست (MISLABELING) از الگوی جایگزین معتبر (VALID_ALTERNATIVE).
+- [۶-۱] کف مطلق (یک بار در آغاز تاریخچه) در برابر کف‌های معتبر؛ ابطال کف معتبر در صورت شکست توسط موج ۲ بعدی.
+
+## ۳. جلسه ۷ و ۸: رتریسمنت S/R، سه‌گانه TMV و تلاقی PRZ/TMV (006 / 007)
+- [۷-۱] اهمیت سطوح رتریسمنت در حمایت/مقاومت (S/R) و شناسایی ساختار (ID): از 23.6% (ضعیف) و 38.2% تا 61.8% (بسیار قوی) و 78.6% (شتاب بازگشت).
+- [۷-۲] ممنوعیت رتریسمنت برای موج ۵: اهداف موج ۵ تنها با اکستنشن و سطوح TMV محاسبه می‌شوند.
+- [۸-۱] چهار سطح TMV (Prime، Short 0.618، Ideal 1.000، Alternate 1.618) و اثر کاهش ضرایب در کشیدگی موج ۳.
+- [۸-۲] سنجش هم‌پوشانی TMV و PRZ: دسته‌بندی تلاقی به FULL / PARTIAL / NONE همراه با درصد اطمینان.
+`;
+
+  const sessions9to19Markdown = `# مفاهیم استخراج‌شده جلسات ۹ تا ۱۹، شاخه‌های SDD (008..018) و پایپ‌لاین گام ۰ تا ۱۱
+
+## ۱. جلسات ۹ تا ۱۴: الگوهای تخصصی (008..013)
+- [جلسه ۹ — 008] الگوهای قطر (۳-۳-۳-۳-۳): قطر پیشرو (ایده‌آل/آنتی)، ایمپالس قطر، آنتی‌قطر و قطر پایانی؛ تأیید با پوشش ۱۰۰٪ موج ۲ و هدف اصلاح ۵۰ تا >۶۱.۸٪.
+- [جلسه ۱۰ — 009] زیگزاگ‌ها: ایده‌آل (۵-۳-۵)، ساده (۳-۳-۳) و آنتی (۳-۵-۵)؛ الزام پوشش ۱۰۰٪ B، رده C (کوتاه/متعارف/کشیده)، تطبیق AB=CD و هدف پسازیگزاگ.
+- [جلسه ۱۱ — 010] استراتژی ورود: حداقل اصلاح ۵۰٪، ورود بهینه ۶۱.۸٪ و ۷۸.۶٪ (با شتاب)، Fallback روی ۵۰٪، امتیازدهی W2 در برابر A و برنامه ۲ مرحله‌ای ۵۰٪/۵۰٪.
+- [جلسه ۱۲ و ۱۳ — 011/012] فلت‌ها (۳-۳-۵ با شرط B > ۶۱.۸٪ A): ۸ زیرگونه (متعارف، ناقص B/C/دوگانه، نامنظم، نامنظم ناقص/کشیده، رانینگ منسوخ) + گره‌گشایی زیرموج‌ها (Knot-Untangler).
+- [جلسه ۱۴ و ۱۵ — 013/014] مثلث‌ها (A-B-C-D-E): همگرا (۹۰٪) و واگرا (۱۰٪)؛ محدود به جایگاه ۲، ۴ یا B؛ قانون ۵۰٪ اصلاح پیش از Box 3 و مثلث پایانی.
+
+## ۲. جلسات ۱۶ تا ۱۹: ترکیبی، اولویت شمارش، Trailing و ۸ موج (015..018)
+- [جلسه ۱۶ و ۱۷ — 015/016] ۹ ترکیب استاندارد اصلاحی (Z-X-Z..T-X-T) و ترکیب‌های اصلی (I-X-Z, G-X-F, I-X-I, G-X-G, T-X-T)؛ موج X با حداقل ۳ کندل؛ رتبه‌بندی اولویت ۱ تا ۷ (ساده پیش از ترکیبی) و پرهیز از ترکیبی پیچیده در انتهای باز بازار.
+- [جلسه ۱۸ — 017] کشیدگی امواج ۱/۳/۵ و حد ضرر متحرک پلکانی TMV: زیر موج ۲ ← تاچ Prime ← زیر ۶۱.۸٪ رتریسمنت (تاچ Ideal) ← زیر ۱۰۰٪ پروجکشن (تاچ Alternate)؛ هشدار چرخش فوری در موج ۵ > ۲۰۰٪ موج ۳.
+- [جلسه ۱۹ — 018] شخصیت‌شناسی ۸ موج (۱..۵، A..C): ویژگی حجم، تعداد ریز‌موج، هشدار تشخیص دشوار موج A و چک‌لیست ۴ ماده‌ای مدیریت سرمایه، حد ضرر و ریسک به ریوارد.
+
+## ۳. خلاصه حدود ۲۶۰ Edge Case و پایپ‌لاین ۱۱ گام از بالا به پایین (Steps 0..11)
+- **گام ۰ (Pre-Flight Check)**: کنترل خالی بودن، حداقل ۱۰ کندل، NaN/Inf، قیمت منفی، High < Low، ترتیب زمانی، حرکت صفر، نرخ دوجی > ۵۰٪ و انتخاب تایم‌فریم آغازین (1D / 1W / 1M).
+- **گام‌های ۱ تا ۱۱**: ارزیابی حدود تایم‌فریم ← کف مطلق و کف‌های معتبر ← شمارش درجات کلان تا میانی (توقف درجه ۴) ← اعمال قوانین سه‌گانه و فیلتر دوجی ← تشخیص کشیدگی/ترمینال/قطر/زیگزاگ/فلت/مثلث/ترکیبی ← نگاشت TMV/PRZ/TMW و پلن ورود ← تحلیل شخصیت ۸ موج و پایش حد ضرر متحرک.
 `;
 
   const sddMarkdown = `# SPEC-DRIVEN DEVELOPMENT (SDD) - GITHUB SPEC-KIT COMPLIANT
@@ -686,6 +755,42 @@ onMounted(() => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION2')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION2'
+                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۲ (001)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('SESSIONS_3_8')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSIONS_3_8'
+                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسات ۳ تا ۸ (002..007)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('SESSIONS_9_19')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSIONS_9_19'
+                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسات ۹ تا ۱۹ (008..018)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SDD')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SDD'
@@ -725,12 +830,18 @@ onMounted(() => {
         {/* Copy Button */}
         <button
           onClick={() => {
-            const currentText = activeTab === 'CATALOG' 
-              ? catalogMarkdown 
-              : activeTab === 'SDD' 
-              ? sddMarkdown 
-              : activeTab === 'FASTAPI' 
-              ? fastApiCode 
+            const currentText = activeTab === 'CATALOG'
+              ? catalogMarkdown
+              : activeTab === 'SESSION2'
+              ? session2Markdown
+              : activeTab === 'SESSIONS_3_8'
+              ? sessions3to8Markdown
+              : activeTab === 'SESSIONS_9_19'
+              ? sessions9to19Markdown
+              : activeTab === 'SDD'
+              ? sddMarkdown
+              : activeTab === 'FASTAPI'
+              ? fastApiCode
               : nuxt4Code;
             copyCode(currentText);
           }}
@@ -742,11 +853,21 @@ onMounted(() => {
       </div>
 
       {/* Code / Markdown Container */}
-      <div 
-        dir="ltr"
-        className="max-h-[520px] overflow-y-auto rounded-xl bg-slate-950 p-4 border border-slate-800 text-xs font-mono text-slate-300 leading-relaxed whitespace-pre select-text"
+      <div
+        dir={
+          activeTab === 'CATALOG' ||
+          activeTab === 'SESSION2' ||
+          activeTab === 'SESSIONS_3_8' ||
+          activeTab === 'SESSIONS_9_19'
+            ? 'rtl'
+            : 'ltr'
+        }
+        className="max-h-[520px] overflow-y-auto rounded-xl bg-slate-950 p-4 border border-slate-800 text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text"
       >
         {activeTab === 'CATALOG' && catalogMarkdown}
+        {activeTab === 'SESSION2' && session2Markdown}
+        {activeTab === 'SESSIONS_3_8' && sessions3to8Markdown}
+        {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}
         {activeTab === 'NUXT4' && nuxt4Code}

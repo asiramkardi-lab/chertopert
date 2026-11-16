@@ -67,6 +67,8 @@ interface SleekSidebarProps {
   } | null;
   onExitDrill?: () => void;
   candles?: Candle[];
+  marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
+  onPromoteDegree?: (scenarioId?: string) => void;
 }
 
 export const SleekSidebar: React.FC<SleekSidebarProps> = ({
@@ -92,7 +94,9 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   onChangeInteractionMode,
   drillContext,
   onExitDrill,
-  candles = []
+  candles = [],
+  marketType = 'CRYPTO',
+  onPromoteDegree
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
 
@@ -194,6 +198,9 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onSelectDegree={onSelectDegree}
               activeScenario={activeScenario}
               onBranchScenario={onBranchScenario}
+              candles={candles}
+              marketType={marketType}
+              onPromoteDegree={onPromoteDegree}
             />
           </div>
         )}
@@ -289,7 +296,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           قوانین بنیادین الیوت بهاری
         </span>
-        <span className="font-mono text-slate-500">v1.0.0-PROD</span>
+        <span className="font-mono text-slate-400">موتور قطعی الیوت</span>
       </div>
     </aside>
   );

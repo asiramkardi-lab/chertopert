@@ -15,6 +15,7 @@ import {
 } from '../types/elliott';
 import { PATTERN_LABELS_FA } from '../engine/rulesEngine';
 import { TargetProjectionEngine } from '../engine/targetProjectionEngine';
+import { PatternEngines } from '../engine/patternEngines';
 import {
   Target,
   Clock,
@@ -26,7 +27,10 @@ import {
   EyeOff,
   CheckCircle2,
   GitBranch,
-  ArrowUpLeft
+  ArrowUpLeft,
+  ShieldCheck,
+  Zap,
+  Crosshair
 } from 'lucide-react';
 
 export interface TargetProjectionBranchItem {
@@ -194,6 +198,27 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
           const primaryPrz = report.przZones.find(z => z.isPrimary) || report.przZones[0];
           const primaryTmw = report.tmwZones.find(z => z.isPrimary) || report.tmwZones[0];
           const isNextBull = report.nextDirection === 'BULLISH';
+
+          const tmvTrailing = PatternEngines.analyzeExtensionAndTrailing(
+            scenario,
+            item.candlesForBranch,
+            report.tmvSummary?.prime,
+            report.tmvSummary?.ideal100,
+            report.tmvSummary?.alternate1618
+          );
+          const entryPlan = PatternEngines.analyzeEntryStrategy(scenario, item.candlesForBranch);
+          const isDiagonalPattern =
+            scenario.patternType === 'LEADING_DIAGONAL' ||
+            scenario.patternType === 'ANTI_LEADING_DIAGONAL' ||
+            scenario.patternType === 'ENDING_DIAGONAL' ||
+            scenario.patternType === 'ANTI_DIAGONAL';
+          const diagonalInfo = isDiagonalPattern
+            ? PatternEngines.analyzeDiagonal(scenario, item.candlesForBranch)
+            : null;
+          const zigzagInfo =
+            scenario.patternType === 'ZIGZAG'
+              ? PatternEngines.analyzeZigzag(scenario, item.candlesForBranch)
+              : null;
 
           return (
             <div
@@ -440,6 +465,166 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {/* Sessions 8 & 18: TMV Tiers, TMV/PRZ Overlap & Trailing Stop Progression */}
+              {report.tmvSummary && (
+                <div className="p-2.5 rounded-lg bg-slate-950/85 border border-slate-800 space-y-2 text-[10.5px]">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 shrink-0" />
+                      <span>سه‌گانه TMV و هم‌پوشانی PRZ (جلسات ۸ و ۱۸)</span>
+                    </span>
+                    {report.overlapReport && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded font-mono text-[9.5px] font-bold border ${
+                          report.overlapReport.type === 'FULL'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : report.overlapReport.type === 'PARTIAL'
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                            : 'bg-slate-800 border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        تلاقی {report.overlapReport.type === 'FULL' ? 'کامل' : report.overlapReport.type === 'PARTIAL' ? 'جزئی' : 'مجزا'} ({report.overlapReport.confidence}%)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 font-mono tabular-nums text-[10px]">
+                    <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
+                      <div className="font-sans text-slate-400">Prime</div>
+                      <div className="font-bold text-white">{report.tmvSummary.prime.toLocaleString()}</div>
+                    </div>
+                    <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
+                      <div className="font-sans text-slate-400">Short 0.618</div>
+                      <div className="font-bold text-cyan-300">{report.tmvSummary.short0618.toLocaleString()}</div>
+                    </div>
+                    <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
+                      <div className="font-sans text-slate-400">Ideal 1.000</div>
+                      <div className="font-bold text-emerald-300">{report.tmvSummary.ideal100.toLocaleString()}</div>
+                    </div>
+                    <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
+                      <div className="font-sans text-slate-400">Alt 1.618</div>
+                      <div className="font-bold text-amber-300">{report.tmvSummary.alternate1618.toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  {report.wave3ExtensionEffectFa && (
+                    <div className="text-[10px] text-amber-200 bg-amber-950/30 border border-amber-500/30 rounded px-2 py-1">
+                      {report.wave3ExtensionEffectFa}
+                    </div>
+                  )}
+
+                  {/* Session 18 Trailing Stop & Wave 5 Warning */}
+                  <div className="p-2 rounded bg-slate-900/90 border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-emerald-300 flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span>حد ضرر متحرک (TMV Trailing): {tmvTrailing.trailingStopLabelFa}</span>
+                      </span>
+                      {tmvTrailing.extendedWave && (
+                        <span className="font-mono text-[9.5px] text-amber-300">
+                          کشیدگی {tmvTrailing.extendedWave}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">{tmvTrailing.trailingStopDescFa}</p>
+                    {tmvTrailing.warnings.map((w, idx) => (
+                      <div key={idx} className="text-[10px] text-rose-300 font-semibold">
+                        {w}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Session 7: Retracement S/R Importance & Wave 5 Retracement Ban */}
+              {(report.retracementTable?.length || report.forbidWave5RetracementFa) && (
+                <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 space-y-1.5 text-[10px]">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-cyan-300">اهمیت سطوح رتریسمنت در S/R و ID (جلسه ۷)</span>
+                    <span className="text-slate-400 font-mono">۲۳.۶٪ تا ۷۸.۶٪</span>
+                  </div>
+                  {report.retracementTable && (
+                    <div className="flex flex-wrap gap-1 font-mono tabular-nums">
+                      {report.retracementTable.map(lvl => (
+                        <span
+                          key={lvl.ratioLabel}
+                          className={`px-1.5 py-0.5 rounded border ${
+                            lvl.srImportance === 'very_strong'
+                              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                              : lvl.srImportance === 'strong'
+                              ? 'bg-cyan-950/35 border-cyan-500/35 text-cyan-200'
+                              : 'bg-slate-900 border-slate-800 text-slate-300'
+                          }`}
+                          title={lvl.descriptionFa}
+                        >
+                          {lvl.ratioLabel}: {lvl.price.toLocaleString()} ({lvl.srImportanceFa})
+                          {lvl.acceleration ? ' ⚡' : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {report.forbidWave5RetracementFa && (
+                    <div className="text-amber-200/90 leading-relaxed">{report.forbidWave5RetracementFa}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Session 11: Multi-Step Entry Strategy & W2 vs A Classifier */}
+              <div className="p-2.5 rounded-lg bg-slate-950/85 border border-slate-800 space-y-1.5 text-[10.5px]">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                    <Crosshair className="w-3.5 h-3.5 shrink-0" />
+                    <span>استراتژی ورود و تفکیک W2 از A (جلسه ۱۱)</span>
+                  </span>
+                  <span className="font-mono tabular-nums text-[10px] text-cyan-300">
+                    {entryPlan.w2VsALabelFa} ({entryPlan.scenarioConfidence}%)
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-300">
+                  ناحیه: <strong className="text-white">{entryPlan.entryZoneLabelFa}</strong> · اصلاح فعلی:{' '}
+                  <span className="font-mono tabular-nums">{entryPlan.retracementPct}%</span> · حداقل ۵۰٪:{' '}
+                  <span className={entryPlan.meetsMin50 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                    {entryPlan.meetsMin50 ? 'محقق ✓' : 'ناکافی ✕'}
+                  </span>
+                </div>
+                {entryPlan.steps.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
+                    {entryPlan.steps.map(st => (
+                      <div key={st.stepNumber} className="p-1.5 rounded bg-slate-900 border border-slate-800 text-[10px]">
+                        <div className="flex items-center justify-between font-bold text-white">
+                          <span>{st.labelFa}</span>
+                          <span className="font-mono tabular-nums text-emerald-300">
+                            {st.sizePct}% @ {st.price.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="text-slate-400 truncate mt-0.5">{st.reasonFa}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Sessions 9 & 10: Post-Diagonal & Post-Zigzag Target Context */}
+              {(diagonalInfo || zigzagInfo) && (
+                <div className="p-2 rounded-lg bg-indigo-950/25 border border-indigo-500/30 text-[10px] text-indigo-100 space-y-0.5">
+                  {diagonalInfo && (
+                    <div>
+                      <strong>هدف پساقطر (جلسه ۹):</strong> {diagonalInfo.correctionTargetRangeFa} —{' '}
+                      {diagonalInfo.correctionDepthFa}
+                    </div>
+                  )}
+                  {zigzagInfo && (
+                    <div>
+                      <strong>هدف پسازیگزاگ (جلسه ۱۰):</strong> {zigzagInfo.postPatternBasisFa} (تارگت{' '}
+                      <span className="font-mono font-bold text-cyan-300">
+                        {zigzagInfo.postPatternTargetPrice.toLocaleString()}
+                      </span>
+                      )
+                    </div>
+                  )}
                 </div>
               )}
             </div>
