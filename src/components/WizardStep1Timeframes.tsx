@@ -21,7 +21,9 @@ import {
   RotateCcw,
   Layers,
   Crosshair,
-  ShieldAlert
+  ShieldAlert,
+  ChevronRight,
+  ChevronLeft
 } from 'lucide-react';
 
 interface WizardStep1TimeframesProps {
@@ -40,6 +42,7 @@ interface WizardStep1TimeframesProps {
   isPickingBottom: boolean;
   onTogglePickBottom: () => void;
   onResetAutoBottom: () => void;
+  onSelectStartCandleIndex?: (candleIndex: number) => void;
   onInspectLowerTfWindow: () => void;
   isInspectingLowerWindow: boolean;
   onProceedToStep2: () => void;
@@ -63,6 +66,7 @@ export const WizardStep1Timeframes: React.FC<WizardStep1TimeframesProps> = ({
   isPickingBottom,
   onTogglePickBottom,
   onResetAutoBottom,
+  onSelectStartCandleIndex,
   onInspectLowerTfWindow,
   isInspectingLowerWindow,
   onProceedToStep2
@@ -222,54 +226,97 @@ export const WizardStep1Timeframes: React.FC<WizardStep1TimeframesProps> = ({
           </div>
         </div>
 
-        {/* Absolute Bottom Refinement & Lower-TF Correspondence Inspection */}
+        {/* Starting Candle & Horizontal Absolute Bottom Refinement */}
         <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
               <Anchor className="w-3.5 h-3.5 text-amber-400" />
-              <span>اصلاح کف مطلق (نقطه شروع شمارش)</span>
+              <span>کندل شروع و خط افقی کف مطلق</span>
             </h3>
             <span className="text-[11px] font-mono text-amber-300 tabular-nums">
               {absoluteBottom.price.toLocaleString()}
             </span>
           </div>
 
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            با انتخاب <strong>کندل شروع</strong> روی نمودار (یا تغییر شماره کندل)، خط <strong className="text-amber-300">افقی کف مطلق</strong> و خط <strong className="text-amber-300">عمودی کندل شروع</strong> هم‌زمان تنظیم می‌شوند.
+          </p>
+
           <div className="grid grid-cols-3 gap-2 text-center bg-slate-950/80 border border-slate-800/80 rounded-lg p-2">
             <div>
-              <span className="text-[10px] text-slate-500 block">شاخص کندل</span>
+              <span className="text-[10px] text-slate-500 block">کندل شروع (عمودی)</span>
               <span className="text-xs font-mono font-bold text-white tabular-nums">
                 #{absoluteBottom.candleIndex + 1}
               </span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-500 block">کندل‌های پیش‌رو</span>
+              <span className="text-[10px] text-slate-500 block">تراز کف (افقی)</span>
+              <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
+                {absoluteBottom.price.toLocaleString()}
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-500 block">پیش‌رو / {lowerTF || 'پایین'}</span>
               <span
                 className={`text-xs font-mono font-bold tabular-nums ${
                   hasMinCandlesFromBottom ? 'text-emerald-400' : 'text-rose-400'
                 }`}
               >
-                {remainingCandlesAfterBottom} کندل
-              </span>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block">متناظر در {lowerTF || 'پایین'}</span>
-              <span className="text-xs font-mono font-bold text-cyan-400 tabular-nums">
-                {lowerTfCorrespondingCount} کندل
+                {remainingCandlesAfterBottom} / {lowerTfCorrespondingCount}
               </span>
             </div>
           </div>
 
+          {onSelectStartCandleIndex && highestTfCandles.length > 0 && (
+            <div className="flex items-center justify-between gap-2 bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-1.5">
+              <span className="text-[11px] text-slate-300">انتخاب سریع کندل شروع:</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onSelectStartCandleIndex(Math.max(0, absoluteBottom.candleIndex - 1))}
+                  disabled={absoluteBottom.candleIndex <= 0}
+                  title="کندل قبلی"
+                  className="p-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white disabled:opacity-35"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={highestTfCandles.length}
+                  value={absoluteBottom.candleIndex + 1}
+                  onChange={e => {
+                    const num = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(num)) {
+                      onSelectStartCandleIndex(Math.max(0, Math.min(highestTfCandles.length - 1, num - 1)));
+                    }
+                  }}
+                  className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-center text-xs font-mono font-bold text-amber-300 tabular-nums focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  onClick={() =>
+                    onSelectStartCandleIndex(Math.min(highestTfCandles.length - 1, absoluteBottom.candleIndex + 1))
+                  }
+                  disabled={absoluteBottom.candleIndex >= highestTfCandles.length - 1}
+                  title="کندل بعدی"
+                  className="p-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white disabled:opacity-35"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {!hasMinCandlesFromBottom && (
             <div className="text-[11px] text-rose-400 flex items-center gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-              <span>تعداد کندل پس از کف مطلق کمتر از حد مجاز (۸ کندل) است؛ نقطه شروع را به چپ منتقل کنید.</span>
+              <span>تعداد کندل پس از کندل شروع کمتر از حد مجاز (۸ کندل) است؛ کندل شروع را به چپ منتقل کنید.</span>
             </div>
           )}
 
           {brokenLowerLow && (
             <div className="text-[11px] text-amber-300 flex items-start gap-1.5 leading-relaxed">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
-              <span>هشدار (C14): پس از این نقطه کف پایین‌تری ثبت شده است؛ مگر آنکه موج ۲ نامنظم یا آنتی‌سیکل مدنظر باشد.</span>
+              <span>هشدار (C14): پس از این کندل کف پایین‌تری ثبت شده است؛ مگر آنکه موج ۲ نامنظم یا آنتی‌سیکل مدنظر باشد.</span>
             </div>
           )}
 
@@ -283,13 +330,13 @@ export const WizardStep1Timeframes: React.FC<WizardStep1TimeframesProps> = ({
               }`}
             >
               <Crosshair className="w-3.5 h-3.5" />
-              <span>{isPickingBottom ? 'در حال انتخاب روی نمودار...' : 'اصلاح کف مطلق روی نمودار'}</span>
+              <span>{isPickingBottom ? 'روی کندل شروع کلیک کنید...' : 'انتخاب کندل شروع روی نمودار'}</span>
             </button>
 
             <button
               onClick={onResetAutoBottom}
               className="flex items-center justify-center gap-1 py-2 px-2.5 rounded-lg text-xs bg-slate-950 border border-slate-800 text-slate-400 hover:text-white"
-              title="بازگردانی به کف مطلق خودکار"
+              title="بازگردانی به کندل کف مطلق خودکار"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>

@@ -90,6 +90,91 @@ export interface TargetItem {
   isInvalidation?: boolean;
 }
 
+export interface PrzZone {
+  id: string;
+  labelFa: string;
+  lowPrice: number;
+  highPrice: number;
+  midPrice: number;
+  contributingRatios: string[];
+  direction: WaveDirection;
+  confidence: number;
+  isPrimary: boolean;
+}
+
+export interface TmwZone {
+  id: string;
+  labelFa: string;
+  startCandleIndex: number;
+  endCandleIndex: number;
+  ratioLabel: string;
+  durationCandles: number;
+  confidence: number;
+  isPrimary: boolean;
+}
+
+export interface ProjectedTargetItem extends TargetItem {
+  basisFa: string;
+  wavePhaseFa: string;
+  distancePct: number;
+  probabilityScore: number;
+}
+
+export type StructureClass = 'IMPULSE' | 'CORRECTIVE' | 'DIAGONAL' | 'TERMINAL' | 'TRIANGLE';
+
+export type ExtensionLayerTier = 'PRIMARY' | 'SECONDARY' | 'EXTREME' | 'TMV';
+
+export interface CompletedStructureAnalysis {
+  structureClass: StructureClass;
+  structureLabelFa: string;
+  completedPhaseFa: string;
+  startVertex: WaveVertex;
+  endVertex: WaveVertex;
+  launchVertex: WaveVertex;
+  completedVertexCount: number;
+  amplitude: number;
+  impulseBaseSpan: number;
+  netCycleSpan: number;
+  durationCandles: number;
+  direction: WaveDirection;
+  projectionDirection: WaveDirection;
+  isLastLegDeveloping: boolean;
+  anchorCandleIndex: number;
+  anchorPrice: number;
+}
+
+export interface FibonacciExtensionLayer {
+  id: string;
+  ratio: number;
+  ratioLabel: string;
+  price: number;
+  bandLow: number;
+  bandHigh: number;
+  titleFa: string;
+  basisFa: string;
+  formulaFa: string;
+  tier: ExtensionLayerTier;
+  confidence: number;
+  distancePct: number;
+  anchorCandleIndex: number;
+  anchorPrice: number;
+  direction: WaveDirection;
+}
+
+export interface ScenarioProjectionReport {
+  scenarioId: string;
+  lastLegLabel: string;
+  lastLegPatternPhaseFa: string;
+  expectedNextMoveFa: string;
+  nextDirection: WaveDirection;
+  invalidationPrice: number;
+  targets: ProjectedTargetItem[];
+  przZones: PrzZone[];
+  tmwZones: TmwZone[];
+  completedStructure?: CompletedStructureAnalysis | null;
+  extensionLayers?: FibonacciExtensionLayer[];
+}
+
 export interface WaveScenario {
   id: string;
   name: string;
@@ -146,7 +231,7 @@ export interface FractalNode {
   timeframe: string;
   degree: WaveDegree;
   patternType: PatternFamily;
-  waveLabel: string; // "کل ساختار" or "موج 1", "موج 2", ...
+  waveLabel: string; // "ساختار کلان" or "موج 1", "موج 2", ...
   role: WaveRole;
   startTimestamp: number;
   endTimestamp: number;
@@ -155,6 +240,10 @@ export interface FractalNode {
   vertices: WaveVertex[];
   validityScore: number;
   isValid: boolean;
+  parentNodeId?: string;
+  legIndex?: number;
+  drillKey?: string;
+  drillStackPath?: DrillDownContext[];
   children: FractalNode[];
 }
 
@@ -172,4 +261,5 @@ export interface DrillDownContext {
   startPrice: number;
   endPrice: number;
   degree: WaveDegree;
+  legIndex?: number;
 }

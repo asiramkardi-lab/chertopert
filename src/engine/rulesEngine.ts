@@ -14,10 +14,12 @@ import {
   Candle,
   WaveScenario,
   WaveDegree,
-  WaveRole
+  WaveRole,
+  ScenarioProjectionReport
 } from '../types/elliott';
 import { PivotDetector } from './pivotDetector';
 import { FractalEngine } from './fractalEngine';
+import { TargetProjectionEngine } from './targetProjectionEngine';
 
 export interface ValidationSummary {
   patternType: PatternFamily;
@@ -31,6 +33,18 @@ export interface ValidationSummary {
   alternativeReason?: string;
   targets: TargetItem[];
   invalidationPrice: number;
+}
+
+export interface WaveFixSuggestion {
+  id: string;
+  ruleId: string;
+  kind: 'MORPH_PATTERN' | 'ADJUST_VERTICES';
+  titleFa: string;
+  descriptionFa: string;
+  previewDiffFa: string;
+  impactBadgeFa: string;
+  targetPattern?: PatternFamily;
+  updatedVertices?: WaveVertex[];
 }
 
 export const SCENARIO_COLORS = [
@@ -855,5 +869,335 @@ export class RulesEngine {
       if (!a.isPrimary && b.isPrimary) return 1;
       return b.validityScore - a.validityScore;
     });
+  }
+
+  /**
+   * Generate actionable 1-click pattern morphs and candle-snapped geometric vertex fixes
+   * for any rule violations or warnings in the current wave count.
+   */
+  public static generateFixSuggestions(
+    pattern: PatternFamily,
+    vertices: WaveVertex[],
+    direction: WaveDirection,
+    candles: Candle[],
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = ''
+  ): WaveFixSuggestion[] {
+    const summary = this.validateStructure(pattern, vertices, direction, parentRole, parentWaveLabel);
+    const suggestions: WaveFixSuggestion[] = [];
+    const failedIds = new Set(summary.rules.filter(r => !r.passed).map(r => r.ruleId));
+
+    if (vertices.length < 2 || candles.length === 0) {
+      return suggestions;
+    }
+
+    const isBull = direction === 'BULLISH';
+
+    const clampIdx = (idx: number) => Math.max(0, Math.min(candles.length - 1, idx));
+    const snapPrice = (idx: number, extreme: 'HIGH' | 'LOW') => {
+      const c = candles[clampIdx(idx)];
+      return extreme === 'HIGH' ? c.high : c.low;
+    };
+
+    // 1. Fractal Consistency Mismatch (C04)
+    if (failedIds.has('FRACTAL_CONSISTENCY') && parentRole !== 'ROOT') {
+      const recommendedPattern: PatternFamily = parentRole === 'MOTIVE' ? 'IDEAL_CYCLE' : 'ZIGZAG';
+      suggestions.push({
+        id: 'fix_fractal_consistency',
+        ruleId: 'FRACTAL_CONSISTENCY',
+        kind: 'MORPH_PATTERN',
+        titleFa: `تطبیق با نقش فرکتالی موج مادر (${parentWaveLabel})`,
+        descriptionFa:
+          parentRole === 'MOTIVE'
+            ? 'موج مادر نقش پیشرو (اصلی) دارد و ساختار درونی آن باید ۵ موجی یا قطر باشد.'
+            : 'موج مادر نقش اصلاحی دارد و ساختار درونی آن باید ۳ موجی (زیگزاگ/فلت) یا مثلث باشد.',
+        previewDiffFa: `تغییر الگو: ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← ${PATTERN_LABELS_FA[recommendedPattern].split('(')[0].trim()}`,
+        impactBadgeFa: 'رفع خطای فرکتالی C04',
+        targetPattern: recommendedPattern
+      });
+    }
+
+    // Helper: find best candle extreme in [minIdx, maxIdx] satisfying predicate & closest to targetPrice
+    const findBestCandleVertex = (
+      minIdx: number,
+      maxIdx: number,
+      extreme: 'HIGH' | 'LOW',
+      targetPrice: number,
+      predicate: (price: number, idx: number) => boolean
+    ): { candleIndex: number; price: number; timestamp: number } | null => {
+      const start = Math.max(0, minIdx);
+      const end = Math.min(candles.length - 1, maxIdx);
+      if (start > end) return null;
+
+      let best: { candleIndex: number; price: number; timestamp: number; dist: number } | null = null;
+      for (let i = start; i <= end; i++) {
+        const price = snapPrice(i, extreme);
+        if (!predicate(price, i)) continue;
+        const dist = Math.abs(price - targetPrice);
+        if (!best || dist < best.dist) {
+          best = { candleIndex: i, price, timestamp: candles[i].timestamp, dist };
+        }
+      }
+      return best ? { candleIndex: best.candleIndex, price: best.price, timestamp: best.timestamp } : null;
+    };
+
+    // 2. Cardinal Rule 1 Failure (Wave 2 breaks Wave 1 origin p0)
+    if (failedIds.has('CARDINAL_RULE_1') && vertices.length >= 3) {
+      const v0 = vertices[0];
+      const v1 = vertices[1];
+      const v2 = vertices[2];
+      const v3 = vertices[3];
+
+      // Option A: Pattern morph to Anti-Cycle (3-5)
+      suggestions.push({
+        id: 'fix_r1_morph_anticycle',
+        ruleId: 'CARDINAL_RULE_1',
+        kind: 'MORPH_PATTERN',
+        titleFa: 'تبدیل به ساختار آنتی‌سیکل (Anti-Cycle 3-5)',
+        descriptionFa: 'در اصول بهاری وقتی اصلاح از مبدأ موج ۱ عبور کند، ساختار می‌تواند یک الگوی آنتی‌سیکل باشد.',
+        previewDiffFa: `الگو: ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← آنتی‌سیکل ۳-۵`,
+        impactBadgeFa: 'جایگزین ساختاری C21',
+        targetPattern: 'ANTI_CYCLE'
+      });
+
+      // Option B: Snap Wave 2 to nearest valid candle extreme above p0 (~50% retrace)
+      const idealW2 = (v0.price + v1.price) / 2;
+      const maxSearch = v3 ? v3.candleIndex - 1 : candles.length - 1;
+      const candidate = findBestCandleVertex(
+        v1.candleIndex + 1,
+        maxSearch,
+        isBull ? 'LOW' : 'HIGH',
+        idealW2,
+        price => (isBull ? price > v0.price && price < v1.price : price < v0.price && price > v1.price)
+      );
+      if (candidate) {
+        const updated = vertices.map((v, i) => (i === 2 ? { ...v, ...candidate } : v));
+        suggestions.push({
+          id: 'fix_r1_snap_w2',
+          ruleId: 'CARDINAL_RULE_1',
+          kind: 'ADJUST_VERTICES',
+          titleFa: `انتقال پیوت ${v2.label} به معتبرترین کندل مجاز`,
+          descriptionFa: `نقطه ${v2.label} را بدون شکستن مبدأ (${v0.price.toLocaleString()}) روی اکسترمم کندل #${candidate.candleIndex + 1} تثبیت می‌کند.`,
+          previewDiffFa: `موج ${v2.label}: ${v2.price.toLocaleString()} ← ${candidate.price.toLocaleString()} (کندل #${candidate.candleIndex + 1})`,
+          impactBadgeFa: 'اصلاح هندسی قانون ۱',
+          updatedVertices: updated
+        });
+      }
+    }
+
+    // 3. Cardinal Rule 3 Failure (Wave 4 overlaps Wave 1 in IDEAL_CYCLE)
+    if (failedIds.has('CARDINAL_RULE_3') && vertices.length >= 5) {
+      const v1 = vertices[1];
+      const v3 = vertices[3];
+      const v4 = vertices[4];
+      const v5 = vertices[5];
+      const len3 = Math.abs(v3.price - vertices[2].price);
+      const len5 = v5 ? Math.abs(v5.price - v4.price) : 0;
+      const altPattern: PatternFamily = v5 && len5 > len3 ? 'ANTI_TERMINAL' : 'TERMINAL';
+
+      // Option A: Morph to Terminal / Anti-Terminal
+      suggestions.push({
+        id: 'fix_r3_morph_terminal',
+        ruleId: 'CARDINAL_RULE_3',
+        kind: 'MORPH_PATTERN',
+        titleFa: `تبدیل الگو به ${PATTERN_LABELS_FA[altPattern].split('(')[0].trim()}`,
+        descriptionFa: 'هم‌پوشانی موج ۴ و ۱ در سیکل‌های ترمینال و قطر مجاز است و بدون تغییر نقاط پیوت شمارش را معتبر می‌کند.',
+        previewDiffFa: `الگو: سیکل ایده‌آل ← ${PATTERN_LABELS_FA[altPattern].split('(')[0].trim()}`,
+        impactBadgeFa: 'رفع نقض قانون ۳ (C19)',
+        targetPattern: altPattern
+      });
+
+      // Option B: Move Wave 4 to valid non-overlapping candle extreme (~38.2% of Wave 3)
+      const targetW4 = isBull ? v3.price - len3 * 0.382 : v3.price + len3 * 0.382;
+      const maxIdx = v5 ? v5.candleIndex - 1 : candles.length - 1;
+      const candidate = findBestCandleVertex(
+        v3.candleIndex + 1,
+        maxIdx,
+        isBull ? 'LOW' : 'HIGH',
+        targetW4,
+        price => (isBull ? price > v1.price && price < v3.price : price < v1.price && price > v3.price)
+      );
+      if (candidate) {
+        const updated = vertices.map((v, i) => (i === 4 ? { ...v, ...candidate } : v));
+        suggestions.push({
+          id: 'fix_r3_snap_w4',
+          ruleId: 'CARDINAL_RULE_3',
+          kind: 'ADJUST_VERTICES',
+          titleFa: `خروج پیوت ${v4.label} از حریم موج ۱`,
+          descriptionFa: `نقطه ${v4.label} را به کندل #${candidate.candleIndex + 1} خارج از محدوده موج ۱ (${v1.price.toLocaleString()}) منتقل می‌کند.`,
+          previewDiffFa: `موج ${v4.label}: ${v4.price.toLocaleString()} ← ${candidate.price.toLocaleString()} (کندل #${candidate.candleIndex + 1})`,
+          impactBadgeFa: 'اصلاح هندسی قانون ۳',
+          updatedVertices: updated
+        });
+      }
+    }
+
+    // 4. Cardinal Rule 2 Failure (Wave 3 is the shortest among Waves 1, 3, 5)
+    if (failedIds.has('CARDINAL_RULE_2') && vertices.length >= 6) {
+      const v0 = vertices[0];
+      const v1 = vertices[1];
+      const v2 = vertices[2];
+      const v3 = vertices[3];
+      const v4 = vertices[4];
+      const v5 = vertices[5];
+      const len1 = Math.abs(v1.price - v0.price);
+      const len3 = Math.abs(v3.price - v2.price);
+      const len5 = Math.abs(v5.price - v4.price);
+
+      // Try extending Wave 3 on candle extremes within [v2+2, v4-1]
+      const minNeededLen3 = Math.min(len1, len5) * 1.05;
+      const targetW3 = isBull ? v2.price + Math.max(len1 * 1.382, minNeededLen3) : v2.price - Math.max(len1 * 1.382, minNeededLen3);
+      const candW3 = findBestCandleVertex(
+        v2.candleIndex + 2,
+        Math.max(v2.candleIndex + 2, v4.candleIndex - 1),
+        isBull ? 'HIGH' : 'LOW',
+        targetW3,
+        price => Math.abs(price - v2.price) >= minNeededLen3
+      );
+
+      if (candW3) {
+        const updated = vertices.map((v, i) => (i === 3 ? { ...v, ...candW3 } : v));
+        suggestions.push({
+          id: 'fix_r2_extend_w3',
+          ruleId: 'CARDINAL_RULE_2',
+          kind: 'ADJUST_VERTICES',
+          titleFa: `تنظیم پیوت ${v3.label} روی کندل بلندتر`,
+          descriptionFa: `موج ۳ نباید کوتاه‌ترین موج باشد. با انتقال ${v3.label} به کندل #${candW3.candleIndex + 1}، طول موج ۳ معتبر می‌شود.`,
+          previewDiffFa: `موج ${v3.label}: ${v3.price.toLocaleString()} ← ${candW3.price.toLocaleString()} (کندل #${candW3.candleIndex + 1})`,
+          impactBadgeFa: 'رفع نقض قانون ۲',
+          updatedVertices: updated
+        });
+      } else {
+        // Otherwise try capping Wave 5 shorter than Wave 3
+        const targetW5 = isBull ? v4.price + len3 * 0.786 : v4.price - len3 * 0.786;
+        const candW5 = findBestCandleVertex(
+          v4.candleIndex + 1,
+          candles.length - 1,
+          isBull ? 'HIGH' : 'LOW',
+          targetW5,
+          price => Math.abs(price - v4.price) < len3 && (isBull ? price > v4.price : price < v4.price)
+        );
+        if (candW5) {
+          const updated = vertices.map((v, i) => (i === 5 ? { ...v, ...candW5 } : v));
+          suggestions.push({
+            id: 'fix_r2_cap_w5',
+            ruleId: 'CARDINAL_RULE_2',
+            kind: 'ADJUST_VERTICES',
+            titleFa: `تنظیم پیوت ${v5.label} کوتاه‌تر از موج ۳`,
+            descriptionFa: `انتقال ${v5.label} به کندل #${candW5.candleIndex + 1} باعث می‌شود موج ۳ کوتاه‌ترین موج نباشد.`,
+            previewDiffFa: `موج ${v5.label}: ${v5.price.toLocaleString()} ← ${candW5.price.toLocaleString()} (کندل #${candW5.candleIndex + 1})`,
+            impactBadgeFa: 'رفع نقض قانون ۲',
+            updatedVertices: updated
+          });
+        }
+      }
+    }
+
+    // 5. Terminal / Anti-Terminal mismatch
+    if (failedIds.has('TERMINAL_W5_TRUNCATION')) {
+      suggestions.push({
+        id: 'fix_terminal_to_anti',
+        ruleId: 'TERMINAL_W5_TRUNCATION',
+        kind: 'MORPH_PATTERN',
+        titleFa: 'تغییر الگو به آنتی‌ترمینال (موج ۵ کشیده)',
+        descriptionFa: 'موج ۵ بلندتر از موج ۳ است؛ این ویژگی با الگوی آنتی‌ترمینال مطابقت کامل دارد.',
+        previewDiffFa: 'الگو: ترمینال ← آنتی‌ترمینال',
+        impactBadgeFa: 'تطبیق ساختار C19',
+        targetPattern: 'ANTI_TERMINAL'
+      });
+    }
+    if (failedIds.has('ANTI_TERMINAL_W5_EXT')) {
+      suggestions.push({
+        id: 'fix_anti_to_terminal',
+        ruleId: 'ANTI_TERMINAL_W5_EXT',
+        kind: 'MORPH_PATTERN',
+        titleFa: 'تغییر الگو به ترمینال (موج ۵ کوتاه)',
+        descriptionFa: 'موج ۵ کوتاه‌تر از موج ۳ است؛ تبدیل به ترمینال شمارش را استاندارد می‌کند.',
+        previewDiffFa: 'الگو: آنتی‌ترمینال ← ترمینال',
+        impactBadgeFa: 'تطبیق ساختار C19',
+        targetPattern: 'TERMINAL'
+      });
+    }
+
+    // 6. Corrective Pattern Fixes (Zigzag / Flat)
+    if (failedIds.has('ZIGZAG_B_RETRACE')) {
+      suggestions.push({
+        id: 'fix_zz_to_flat',
+        ruleId: 'ZIGZAG_B_RETRACE',
+        kind: 'MORPH_PATTERN',
+        titleFa: 'تبدیل زیگزاگ به فلت گسترش‌یافته (Expanded Flat)',
+        descriptionFa: 'اصلاح موج B از ۱۰۰٪ موج A فراتر رفته که مشخصه کلاسیک فلت گسترش‌یافته است.',
+        previewDiffFa: 'الگو: زیگزاگ ← فلت گسترش‌یافته',
+        impactBadgeFa: 'تطبیق اصلاحی C23',
+        targetPattern: 'FLAT_EXPANDED'
+      });
+    }
+    if (failedIds.has('ZIGZAG_C_COVERS_B') && vertices.length >= 4) {
+      const v1 = vertices[1];
+      const v2 = vertices[2];
+      const v3 = vertices[3];
+      const targetC = isBull ? v1.price * 1.03 : v1.price * 0.97;
+      const candC = findBestCandleVertex(
+        v2.candleIndex + 2,
+        candles.length - 1,
+        isBull ? 'HIGH' : 'LOW',
+        targetC,
+        price => (isBull ? price > v1.price : price < v1.price)
+      );
+      if (candC) {
+        const updated = vertices.map((v, i) => (i === 3 ? { ...v, ...candC } : v));
+        suggestions.push({
+          id: 'fix_zz_c_cover',
+          ruleId: 'ZIGZAG_C_COVERS_B',
+          kind: 'ADJUST_VERTICES',
+          titleFa: `امتداد پیوت ${v3.label} برای پوشش ۱۰۰٪ موج ${v2.label}`,
+          descriptionFa: `نقطه ${v3.label} را به کندل #${candC.candleIndex + 1} فراتر از انتهای موج ${v1.label} منتقل می‌کند.`,
+          previewDiffFa: `موج ${v3.label}: ${v3.price.toLocaleString()} ← ${candC.price.toLocaleString()}`,
+          impactBadgeFa: 'تکمیل شرط زیگزاگ C22',
+          updatedVertices: updated
+        });
+      }
+    }
+    if (failedIds.has('FLAT_B_MIN')) {
+      suggestions.push({
+        id: 'fix_flat_to_zz',
+        ruleId: 'FLAT_B_MIN',
+        kind: 'MORPH_PATTERN',
+        titleFa: 'تبدیل فلت به زیگزاگ اصلاحی (Zigzag)',
+        descriptionFa: 'موج B کمتر از ۶۱.۸٪ موج A اصلاح کرده که با ساختار زیگزاگ منطبق است.',
+        previewDiffFa: 'الگو: فلت ← زیگزاگ',
+        impactBadgeFa: 'تطبیق اصلاحی C22',
+        targetPattern: 'ZIGZAG'
+      });
+    }
+
+    // 7. Generic Fallback Suggestion if a HARD error remains without a specific proposal
+    if (!summary.isValid && suggestions.length === 0 && summary.suggestedAlternative) {
+      suggestions.push({
+        id: 'fix_generic_alt',
+        ruleId: 'GENERAL',
+        kind: 'MORPH_PATTERN',
+        titleFa: `تبدیل الگو به ${PATTERN_LABELS_FA[summary.suggestedAlternative].split('(')[0].trim()}`,
+        descriptionFa: summary.alternativeReason || 'الگوی جایگزین پیشنهادی موتور قوانین بهاری.',
+        previewDiffFa: `الگو ← ${PATTERN_LABELS_FA[summary.suggestedAlternative].split('(')[0].trim()}`,
+        impactBadgeFa: 'پیشنهاد جایگزین',
+        targetPattern: summary.suggestedAlternative
+      });
+    }
+
+    return suggestions;
+  }
+
+  /**
+   * Predicts PRZ (Potential Reversal Zones), TMW (Time Windows), completed-structure Fibonacci extension layers,
+   * and probable last-leg price targets via TargetProjectionEngine.
+   */
+  public static predictScenarioProjections(
+    scenario: WaveScenario,
+    candles: Candle[],
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = ''
+  ): ScenarioProjectionReport {
+    return TargetProjectionEngine.projectScenario(scenario, candles, parentRole, parentWaveLabel);
   }
 }

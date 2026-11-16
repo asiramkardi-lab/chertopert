@@ -7,9 +7,14 @@
  */
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { Candle, WaveScenario, WaveVertex, PatternFamily } from '../types/elliott';
+import { Candle, WaveScenario, WaveVertex, PatternFamily, WaveRole, FibonacciExtensionLayer, RuleValidationItem } from '../types/elliott';
 import { DEGREE_CONFIGS } from '../engine/fractalEngine';
-import { PATTERN_LABELS_FA } from '../engine/rulesEngine';
+import { PATTERN_LABELS_FA, RulesEngine, ValidationSummary } from '../engine/rulesEngine';
+import { TargetProjectionEngine } from '../engine/targetProjectionEngine';
+import { TrendStrengthIndicator, TrendSignalLevel } from '../engine/trendStrengthIndicator';
+import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
+import { PatternValidator } from './PatternValidator';
+import { RuleViolationToast, ActiveViolationToast, ValidWaveSnapshot } from './RuleViolationToast';
 import {
   Lock,
   Unlock,
@@ -27,7 +32,9 @@ import {
   X,
   GitBranch,
   ChevronLeft,
-  CornerDownLeft
+  CornerDownLeft,
+  ShieldCheck,
+  Activity
 } from 'lucide-react';
 
 export type ChartInteractionMode = 'EDIT' | 'ADD_VERTEX' | 'DRAW_SCRATCH' | 'PICK_BOTTOM';
@@ -63,6 +70,15 @@ interface ChartStudioProps {
   onJumpDrillLevel?: (levelIndex: number) => void;
   onSwitchDrillTimeframe?: (tf: string) => void;
   hoveredScenario?: WaveScenario | null;
+  parentRole?: WaveRole;
+  parentWaveLabel?: string;
+  onValidateActiveScenario?: (scenarioId: string, summary: ValidationSummary) => void;
+  showPRZ?: boolean;
+  onToggleShowPRZ?: () => void;
+  showTMW?: boolean;
+  onToggleShowTMW?: () => void;
+  hideZoneControls?: boolean;
+  highlightedLegIndex?: number | null;
 }
 
 const QUICK_LABELS = ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C', 'D', 'E', 'W', 'X', 'Y'];
@@ -90,7 +106,16 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   drillTrail,
   onJumpDrillLevel,
   onSwitchDrillTimeframe,
-  hoveredScenario = null
+  hoveredScenario = null,
+  parentRole = 'ROOT',
+  parentWaveLabel = '',
+  onValidateActiveScenario,
+  showPRZ: controlledShowPRZ,
+  onToggleShowPRZ,
+  showTMW: controlledShowTMW,
+  onToggleShowTMW,
+  hideZoneControls = false,
+  highlightedLegIndex = null
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -105,10 +130,48 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(null);
   const [customLabelInput, setCustomLabelInput] = useState<string>('');
   const [showTargets, setShowTargets] = useState<boolean>(true);
+  const [showFibLayers, setShowFibLayers] = useState<boolean>(true);
+  const [hoveredExtLayerId, setHoveredExtLayerId] = useState<string | null>(null);
+  const [internalShowPRZ, setInternalShowPRZ] = useState<boolean>(true);
+  const [internalShowTMW, setInternalShowTMW] = useState<boolean>(true);
   const [showVolume, setShowVolume] = useState<boolean>(true);
+  const [showTrendStrength, setShowTrendStrength] = useState<boolean>(true);
   const [snapToCandleExtreme, setSnapToCandleExtreme] = useState<boolean>(true);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const [drillNotice, setDrillNotice] = useState<string | null>(null);
+  const [diagnosticOpenById, setDiagnosticOpenById] = useState<Record<string, boolean>>({});
+  const [diagnosticSummaryById, setDiagnosticSummaryById] = useState<Record<string, ValidationSummary>>({});
+  const [validatorOpenById, setValidatorOpenById] = useState<Record<string, boolean>>({});
+  const [validatorHighlightLeg, setValidatorHighlightLeg] = useState<number | null>(null);
+  const [violationToast, setViolationToast] = useState<ActiveViolationToast | null>(null);
+  const [revertedToastMsg, setRevertedToastMsg] = useState<string | null>(null);
+  const validSnapshotByKeyRef = useRef<Record<string, ValidWaveSnapshot>>({});
+  const preEditFallbackByKeyRef = useRef<Record<string, ValidWaveSnapshot>>({});
+  const prevWaveTrackRef = useRef<{
+    key: string;
+    geomSig: string;
+    hadHardFail: boolean;
+    vertices: WaveVertex[];
+    patternType: PatternFamily;
+    validityScore: number;
+  } | null>(null);
+  const suppressNextViolationToastRef = useRef<boolean>(false);
+
+  const effectiveShowPRZ = !hideZoneControls && (controlledShowPRZ ?? internalShowPRZ);
+  const effectiveShowTMW = !hideZoneControls && (controlledShowTMW ?? internalShowTMW);
+  const effectiveShowFibLayers = !hideZoneControls && showFibLayers;
+  const togglePRZ = () => {
+    if (onToggleShowPRZ) onToggleShowPRZ();
+    else setInternalShowPRZ(p => !p);
+  };
+  const toggleTMW = () => {
+    if (onToggleShowTMW) onToggleShowTMW();
+    else setInternalShowTMW(p => !p);
+  };
+
+  const diagnosticOpen = Boolean(diagnosticOpenById[activeScenario.id]);
+  const diagnosticSummary = diagnosticSummaryById[activeScenario.id] || null;
+  const validatorOpen = Boolean(validatorOpenById[activeScenario.id]);
 
   const [dimensions, setDimensions] = useState({ width: 900, height: 600 });
 
@@ -138,10 +201,271 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   useEffect(() => {
     setSelectedVertexIndex(null);
     setHoveredLeg(null);
+    setHoveredExtLayerId(null);
     setDrillNotice(null);
     dragMovedRef.current = false;
     setDragMoved(false);
   }, [activeScenario.id, interactionMode, timeframe]);
+
+  // Reset open states when timeframe changes
+  useEffect(() => {
+    setDiagnosticOpenById({});
+    setDiagnosticSummaryById({});
+    setValidatorOpenById({});
+    setValidatorHighlightLeg(null);
+  }, [timeframe]);
+
+  // Keep active scenario's open diagnostic summary live whenever vertices or pattern change
+  useEffect(() => {
+    if (!diagnosticOpen) return;
+    const liveSummary = RulesEngine.validateStructure(
+      activeScenario.patternType,
+      activeScenario.vertices,
+      activeScenario.direction,
+      parentRole,
+      parentWaveLabel
+    );
+    setDiagnosticSummaryById(prev => ({ ...prev, [activeScenario.id]: liveSummary }));
+  }, [
+    diagnosticOpen,
+    activeScenario.id,
+    activeScenario.patternType,
+    activeScenario.vertices,
+    activeScenario.direction,
+    parentRole,
+    parentWaveLabel
+  ]);
+
+  // Real-time Elliott Core Rule Violation Toast & Last-Valid Snapshot Tracker
+  const scenarioToastKey = `${timeframe}::${parentWaveLabel || 'ROOT'}::${activeScenario.id}`;
+
+  useEffect(() => {
+    if (hideZoneControls) {
+      setViolationToast(null);
+      prevWaveTrackRef.current = null;
+      return;
+    }
+
+    const verts = activeScenario.vertices;
+    const summary = RulesEngine.validateStructure(
+      activeScenario.patternType,
+      verts,
+      activeScenario.direction,
+      parentRole,
+      parentWaveLabel
+    );
+
+    const hardFails: RuleValidationItem[] = summary.rules.filter(r => r.type === 'HARD' && !r.passed);
+    if (verts.length >= 2) {
+      for (let i = 1; i < verts.length; i++) {
+        if (verts[i].candleIndex <= verts[i - 1].candleIndex) {
+          hardFails.unshift({
+            ruleId: 'CHRONOLOGY_ORDER',
+            name: 'Chronological Pivot Order',
+            nameFa: `ترتیب زمانی پیوت‌ها (${verts[i - 1].label} ← ${verts[i].label})`,
+            type: 'HARD',
+            passed: false,
+            score: 0,
+            conceptId: 'C06',
+            messageFa: `نقطه ${verts[i].label} (کندل #${verts[i].candleIndex + 1}) باید بعد از نقطه ${verts[i - 1].label} (کندل #${verts[i - 1].candleIndex + 1}) قرار بگیرد.`
+          });
+          break;
+        }
+      }
+    }
+
+    const curGeomSig = `${activeScenario.patternType}::${verts
+      .map(v => `${v.label}@${v.candleIndex}:${v.price}`)
+      .join('|')}`;
+    const hadHardFail = hardFails.length > 0;
+    const cloneVerts = (list: WaveVertex[]) => list.map(v => ({ ...v }));
+    const prev = prevWaveTrackRef.current;
+
+    // Initial mount or switched scenario/timeframe: seed snapshots quietly without firing toast
+    if (!prev || prev.key !== scenarioToastKey) {
+      setViolationToast(null);
+      if (!hadHardFail && verts.length >= 2) {
+        validSnapshotByKeyRef.current[scenarioToastKey] = {
+          vertices: cloneVerts(verts),
+          patternType: activeScenario.patternType,
+          validityScore: summary.validityScore,
+          capturedAt: Date.now()
+        };
+      }
+      preEditFallbackByKeyRef.current[scenarioToastKey] = {
+        vertices: cloneVerts(verts),
+        patternType: activeScenario.patternType,
+        validityScore: summary.validityScore,
+        capturedAt: Date.now()
+      };
+      prevWaveTrackRef.current = {
+        key: scenarioToastKey,
+        geomSig: curGeomSig,
+        hadHardFail,
+        vertices: cloneVerts(verts),
+        patternType: activeScenario.patternType,
+        validityScore: summary.validityScore
+      };
+      return;
+    }
+
+    // Geometry unchanged (e.g. only draggingVertexIndex changed on mouseup): update drag state on toast
+    if (prev.geomSig === curGeomSig) {
+      setViolationToast(curr =>
+        curr && curr.scenarioId === activeScenario.id
+          ? { ...curr, isDragging: draggingVertexIndex !== null }
+          : curr
+      );
+      return;
+    }
+
+    // Geometry or pattern changed on the active scenario!
+    if (suppressNextViolationToastRef.current) {
+      suppressNextViolationToastRef.current = false;
+      if (!hadHardFail && verts.length >= 2) {
+        validSnapshotByKeyRef.current[scenarioToastKey] = {
+          vertices: cloneVerts(verts),
+          patternType: activeScenario.patternType,
+          validityScore: summary.validityScore,
+          capturedAt: Date.now()
+        };
+      }
+      prevWaveTrackRef.current = {
+        key: scenarioToastKey,
+        geomSig: curGeomSig,
+        hadHardFail,
+        vertices: cloneVerts(verts),
+        patternType: activeScenario.patternType,
+        validityScore: summary.validityScore
+      };
+      return;
+    }
+
+    if (!hadHardFail) {
+      // Valid edit or resolved violation: refresh last valid snapshot & clear violation toast
+      if (verts.length >= 2) {
+        validSnapshotByKeyRef.current[scenarioToastKey] = {
+          vertices: cloneVerts(verts),
+          patternType: activeScenario.patternType,
+          validityScore: summary.validityScore,
+          capturedAt: Date.now()
+        };
+      }
+      preEditFallbackByKeyRef.current[scenarioToastKey] = {
+        vertices: cloneVerts(verts),
+        patternType: activeScenario.patternType,
+        validityScore: summary.validityScore,
+        capturedAt: Date.now()
+      };
+      setViolationToast(null);
+    } else {
+      // Violation detected! Preserve prior valid snapshot before updating tracker
+      if (!prev.hadHardFail && prev.vertices.length >= 2) {
+        validSnapshotByKeyRef.current[scenarioToastKey] = {
+          vertices: cloneVerts(prev.vertices),
+          patternType: prev.patternType,
+          validityScore: prev.validityScore,
+          capturedAt: Date.now()
+        };
+      }
+      if (!prev.hadHardFail || !preEditFallbackByKeyRef.current[scenarioToastKey]) {
+        preEditFallbackByKeyRef.current[scenarioToastKey] = {
+          vertices: cloneVerts(prev.vertices),
+          patternType: prev.patternType,
+          validityScore: prev.validityScore,
+          capturedAt: Date.now()
+        };
+      }
+
+      const skipInitialScratchPoint = interactionMode === 'DRAW_SCRATCH' && verts.length < 2;
+      if (!skipInitialScratchPoint) {
+        const validSnap = validSnapshotByKeyRef.current[scenarioToastKey];
+        const fallbackSnap = preEditFallbackByKeyRef.current[scenarioToastKey];
+        const activeSnap = validSnap || fallbackSnap;
+        const snapshotSummaryFa = activeSnap
+          ? `${activeSnap.vertices.length} نقطه${validSnap ? ` · اعتبار ${activeSnap.validityScore}٪` : ''}`
+          : '';
+
+        setRevertedToastMsg(null);
+        setViolationToast(curr => ({
+          id: curr && curr.scenarioId === activeScenario.id ? curr.id : `viol_${Date.now()}`,
+          scenarioId: activeScenario.id,
+          scenarioName: activeScenario.name,
+          violatedRules: hardFails,
+          hasValidSnapshot: Boolean(validSnap),
+          snapshotSummaryFa,
+          triggeredAt: Date.now(),
+          isDragging: draggingVertexIndex !== null
+        }));
+      }
+    }
+
+    prevWaveTrackRef.current = {
+      key: scenarioToastKey,
+      geomSig: curGeomSig,
+      hadHardFail,
+      vertices: cloneVerts(verts),
+      patternType: activeScenario.patternType,
+      validityScore: summary.validityScore
+    };
+  }, [
+    hideZoneControls,
+    scenarioToastKey,
+    activeScenario.id,
+    activeScenario.name,
+    activeScenario.patternType,
+    activeScenario.vertices,
+    activeScenario.direction,
+    parentRole,
+    parentWaveLabel,
+    interactionMode,
+    draggingVertexIndex
+  ]);
+
+  const handleRevertToLastValidState = () => {
+    const targetSnap =
+      validSnapshotByKeyRef.current[scenarioToastKey] ||
+      preEditFallbackByKeyRef.current[scenarioToastKey];
+    if (!targetSnap) return;
+
+    const restoredVerts = targetSnap.vertices.map(v => ({ ...v }));
+    suppressNextViolationToastRef.current = true;
+    setViolationToast(null);
+    onUpdateVertices(restoredVerts);
+    if (targetSnap.patternType !== activeScenario.patternType) {
+      onPatternChange(targetSnap.patternType);
+    }
+    setRevertedToastMsg(
+      validSnapshotByKeyRef.current[scenarioToastKey]
+        ? 'موج‌شماری به آخرین حالت معتبر بازگردانی شد ✓'
+        : 'تغییرات به وضعیت قبلی بازگردانی شد ✓'
+    );
+  };
+
+  useEffect(() => {
+    if (!revertedToastMsg) return;
+    const t = window.setTimeout(() => setRevertedToastMsg(null), 2400);
+    return () => window.clearTimeout(t);
+  }, [revertedToastMsg]);
+
+  const evaluateCurrentCount = () => {
+    if ((interactionMode === 'DRAW_SCRATCH' || interactionMode === 'ADD_VERTEX') && onChangeInteractionMode) {
+      onChangeInteractionMode('EDIT');
+    }
+    const summary = RulesEngine.validateStructure(
+      activeScenario.patternType,
+      activeScenario.vertices,
+      activeScenario.direction,
+      parentRole,
+      parentWaveLabel
+    );
+    setDiagnosticSummaryById(prev => ({ ...prev, [activeScenario.id]: summary }));
+    setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: true }));
+    onValidateActiveScenario?.(activeScenario.id, summary);
+  };
+
+  const activeHardFailsCount = activeScenario.rulesResults.filter(r => r.type === 'HARD' && !r.passed).length;
+  const isUserModifiedCount = activeScenario.source === 'USER_EDITED' || activeScenario.source === 'MANUAL_DRAW';
 
   // Compute next valid lower timeframe for Fractal Drill-Down
   const nextLowerValidTF = useMemo(() => {
@@ -168,27 +492,74 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const padding = { top: 48, right: 86, bottom: showVolume ? 74 : 40, left: 22 };
   const volumeHeight = showVolume ? 58 : 0;
 
-  // Price bounds including overlays, targets, and absolute bottom
+  // Dynamic completed-structure Fibonacci extensions, PRZ, TMW & Targets via TargetProjectionEngine
+  const projectionReport = useMemo(() => {
+    if (hideZoneControls || activeScenario.vertices.length < 2) return null;
+    return TargetProjectionEngine.projectScenario(activeScenario, candles, parentRole, parentWaveLabel);
+  }, [hideZoneControls, activeScenario, candles, parentRole, parentWaveLabel]);
+
+  // RSI Divergence & Volume-Weighted Momentum per segment and vertex via TrendStrengthIndicator
+  const trendStrengthReport = useMemo(() => {
+    return TrendStrengthIndicator.analyzeScenario(activeScenario, candles);
+  }, [activeScenario, candles]);
+
+  // Extra future candle slots on the right edge when TMW time-window extends beyond last candle
+  const maxPlotIndex = useMemo(() => {
+    const baseMax = Math.max(1, candles.length - 1);
+    if (!effectiveShowTMW || !projectionReport || projectionReport.tmwZones.length === 0) {
+      return baseMax;
+    }
+    const maxTmwEnd = Math.max(...projectionReport.tmwZones.map(z => z.endCandleIndex));
+    const tail = Math.min(28, Math.max(0, maxTmwEnd - (candles.length - 1) + 2));
+    return baseMax + tail;
+  }, [candles.length, effectiveShowTMW, projectionReport]);
+
+  // Price bounds including overlays, bounded PRZ/targets, and absolute bottom
   const { minPrice, maxPrice, priceRange, maxVolume } = useMemo(() => {
     if (candles.length === 0) return { minPrice: 0, maxPrice: 100, priceRange: 100, maxVolume: 1000 };
-    let min = Infinity;
-    let max = -Infinity;
+    let candleMin = Infinity;
+    let candleMax = -Infinity;
     let maxVol = 0;
 
     candles.forEach(c => {
-      if (c.low < min) min = c.low;
-      if (c.high > max) max = c.high;
+      if (c.low < candleMin) candleMin = c.low;
+      if (c.high > candleMax) candleMax = c.high;
       if (c.volume > maxVol) maxVol = c.volume;
     });
+
+    let min = candleMin;
+    let max = candleMax;
+    const candleSpan = Math.max(1, candleMax - candleMin);
+    const guardLow = candleMin - candleSpan * 0.45;
+    const guardHigh = candleMax + candleSpan * 0.45;
 
     activeScenario.vertices.forEach(v => {
       if (v.price < min) min = v.price;
       if (v.price > max) max = v.price;
     });
-    if (showTargets) {
-      activeScenario.targets.forEach(t => {
-        if (t.price < min) min = t.price;
-        if (t.price > max) max = t.price;
+    if (showTargets && !hideZoneControls) {
+      const targetPool = projectionReport?.targets.length ? projectionReport.targets : activeScenario.targets;
+      targetPool.forEach(t => {
+        if (t.price >= guardLow && t.price <= guardHigh) {
+          if (t.price < min) min = t.price;
+          if (t.price > max) max = t.price;
+        }
+      });
+    }
+    if (effectiveShowFibLayers && projectionReport?.extensionLayers) {
+      projectionReport.extensionLayers.forEach(layer => {
+        if (layer.bandLow >= guardLow && layer.bandHigh <= guardHigh) {
+          if (layer.bandLow < min) min = layer.bandLow;
+          if (layer.bandHigh > max) max = layer.bandHigh;
+        }
+      });
+    }
+    if (effectiveShowPRZ && projectionReport) {
+      projectionReport.przZones.forEach(z => {
+        if (z.lowPrice >= guardLow && z.highPrice <= guardHigh) {
+          if (z.lowPrice < min) min = z.lowPrice;
+          if (z.highPrice > max) max = z.highPrice;
+        }
       });
     }
     if (absoluteBottom) {
@@ -203,11 +574,11 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       priceRange: range * 1.15,
       maxVolume: maxVol || 1
     };
-  }, [candles, activeScenario, showTargets, absoluteBottom]);
+  }, [candles, activeScenario, showTargets, hideZoneControls, effectiveShowPRZ, effectiveShowFibLayers, projectionReport, absoluteBottom]);
 
   const getX = (index: number) => {
     const usableWidth = width - padding.left - padding.right;
-    const step = usableWidth / Math.max(1, candles.length - 1);
+    const step = usableWidth / Math.max(1, maxPlotIndex);
     return padding.left + index * step;
   };
 
@@ -219,7 +590,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
   const getIndexAndPriceFromCoords = (mouseX: number, mouseY: number, forceLowSnap = false) => {
     const usableWidth = width - padding.left - padding.right;
-    const step = usableWidth / Math.max(1, candles.length - 1);
+    const step = usableWidth / Math.max(1, maxPlotIndex);
     const rawIndex = Math.round((mouseX - padding.left) / step);
     const candleIndex = Math.max(0, Math.min(candles.length - 1, rawIndex));
     const usableHeight = Math.max(1, height - padding.top - padding.bottom - volumeHeight);
@@ -659,16 +1030,54 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             آهنربا
           </button>
 
-          <button
-            onClick={() => setShowTargets(!showTargets)}
-            className={`px-2 py-1 text-[11px] rounded-lg border transition-colors ${
-              showTargets
-                ? 'bg-slate-800 border-slate-700 text-slate-200'
-                : 'bg-slate-900 border-slate-800 text-slate-500'
-            }`}
-          >
-            اهداف
-          </button>
+          {!hideZoneControls && (
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+              <button
+                onClick={togglePRZ}
+                title="نمایش یا مخفی کردن ناحیه پتانسیل بازگشت قیمتی (PRZ)"
+                className={`px-2 py-1 text-[11px] font-mono font-bold rounded-md transition-colors ${
+                  effectiveShowPRZ
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                PRZ
+              </button>
+              <button
+                onClick={toggleTMW}
+                title="نمایش یا مخفی کردن پنجره زمانی بازگشت (TMW)"
+                className={`px-2 py-1 text-[11px] font-mono font-bold rounded-md transition-colors ${
+                  effectiveShowTMW
+                    ? 'bg-cyan-500/20 text-cyan-300'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                TMW
+              </button>
+              <button
+                onClick={() => setShowFibLayers(prev => !prev)}
+                title="نمایش یا مخفی کردن لایه‌های افقی اکستنشن فیبوناچی بر اساس آخرین ساختار تکمیل‌شده"
+                className={`px-2 py-1 text-[11px] rounded-md transition-colors ${
+                  effectiveShowFibLayers
+                    ? 'bg-emerald-500/20 text-emerald-200 font-semibold'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                لایه‌های فیبو
+              </button>
+              <button
+                onClick={() => setShowTargets(!showTargets)}
+                title="نمایش یا مخفی کردن خطوط تارگت و سطح ابطال"
+                className={`px-2 py-1 text-[11px] rounded-md transition-colors ${
+                  showTargets
+                    ? 'bg-indigo-500/25 text-indigo-200 font-semibold'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                اهداف
+              </button>
+            </div>
+          )}
 
           <button
             onClick={() => setShowVolume(!showVolume)}
@@ -681,8 +1090,57 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             حجم
           </button>
 
+          <button
+            onClick={() => setShowTrendStrength(prev => !prev)}
+            title="نمایش یا مخفی کردن آیکون قدرت روند (واگرایی RSI و مومنتوم وزنی حجم) کنار هر رأس موج"
+            className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded-lg border transition-colors ${
+              showTrendStrength
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 font-medium'
+                : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <Activity className="w-3 h-3" />
+            <span>قدرت روند</span>
+          </button>
+
           {!hideToolbarLockAndReset && (
             <>
+              <button
+                onClick={evaluateCurrentCount}
+                title="ارزیابی موج‌شماری فعلی با قوانین بهاری و نمایش پیشنهادهای اصلاح"
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all ${
+                  activeHardFailsCount > 0
+                    ? 'bg-rose-600/20 hover:bg-rose-600/35 border-rose-500/50 text-rose-200'
+                    : isUserModifiedCount
+                    ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-sm shadow-emerald-950/50'
+                    : 'bg-indigo-600/20 hover:bg-indigo-600/35 border-indigo-500/45 text-indigo-200'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>ارزیابی قوانین</span>
+                {activeHardFailsCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9.5px] font-mono tabular-nums">
+                    {activeHardFailsCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                  setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: !prev[activeScenario.id] }));
+                }}
+                title="اعتبارسنجی سخت‌گیرانه گام‌به‌گام (PatternValidator)"
+                className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors ${
+                  validatorOpen
+                    ? 'bg-cyan-600 text-white border-cyan-500'
+                    : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-cyan-300'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>ممیزی الگو</span>
+              </button>
+
               <button
                 onClick={onToggleLock}
                 className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors ${
@@ -769,7 +1227,9 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         ref={containerRef}
         onClick={handleSvgClick}
         className={`flex-1 w-full h-full min-h-[380px] relative overflow-hidden ${
-          interactionMode === 'ADD_VERTEX' || interactionMode === 'DRAW_SCRATCH' || interactionMode === 'PICK_BOTTOM'
+          draggingVertexIndex !== null || draggingBottom
+            ? 'cursor-grabbing'
+            : interactionMode === 'ADD_VERTEX' || interactionMode === 'DRAW_SCRATCH' || interactionMode === 'PICK_BOTTOM'
             ? 'cursor-crosshair'
             : 'cursor-default'
         }`}
@@ -783,6 +1243,41 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             <linearGradient id="bearVol" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
               <stop offset="100%" stopColor="#ef4444" stopOpacity="0.05" />
+            </linearGradient>
+            <linearGradient id="tmwCorridorGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.16" />
+              <stop offset="50%" stopColor="#6366f1" stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.14" />
+            </linearGradient>
+            <linearGradient id="przBullGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.18" />
+              <stop offset="50%" stopColor="#10b981" stopOpacity="0.10" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.20" />
+            </linearGradient>
+            <linearGradient id="przBearGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.18" />
+              <stop offset="50%" stopColor="#f43f5e" stopOpacity="0.11" />
+              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.22" />
+            </linearGradient>
+            <linearGradient id="fibLayerPrimary" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.26" />
+              <stop offset="45%" stopColor="#06b6d4" stopOpacity="0.13" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.22" />
+            </linearGradient>
+            <linearGradient id="fibLayerSecondary" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.18" />
+              <stop offset="55%" stopColor="#6366f1" stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.15" />
+            </linearGradient>
+            <linearGradient id="fibLayerExtreme" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#a855f7" stopOpacity="0.16" />
+              <stop offset="55%" stopColor="#ec4899" stopOpacity="0.07" />
+              <stop offset="100%" stopColor="#a855f7" stopOpacity="0.14" />
+            </linearGradient>
+            <linearGradient id="fibLayerTmv" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.24" />
+              <stop offset="55%" stopColor="#eab308" stopOpacity="0.11" />
+              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.20" />
             </linearGradient>
             <filter id="elliott-wave-glow" x="-30%" y="-30%" width="160%" height="160%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blurInner" />
@@ -822,35 +1317,60 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
 
-          {/* Absolute Bottom Post-Anchor Zone Shading */}
+          {/* Absolute Bottom (Horizontal Price Floor) + Starting Candle (Vertical Anchor) */}
           {absoluteBottom && (
             <g>
+              {/* Dim pre-start history left of Starting Candle */}
               <rect
                 x={padding.left}
                 y={padding.top}
                 width={Math.max(0, getX(absoluteBottom.candleIndex) - padding.left)}
                 height={height - padding.top - padding.bottom - volumeHeight}
                 fill="#020617"
-                fillOpacity="0.48"
+                fillOpacity="0.44"
               />
+              {/* Primary Horizontal Price Floor Line across entire chart (کف مطلق افقی) */}
+              <line
+                x1={padding.left}
+                y1={getY(absoluteBottom.price)}
+                x2={width - padding.right}
+                y2={getY(absoluteBottom.price)}
+                stroke="#f59e0b"
+                strokeWidth="1.75"
+                strokeDasharray="6 4"
+                opacity="0.92"
+              />
+              {/* Right Price-Axis Pill for Horizontal Absolute Bottom */}
+              <rect
+                x={width - padding.right + 2}
+                y={getY(absoluteBottom.price) - 9}
+                width="80"
+                height="18"
+                rx="4"
+                fill="#451a03"
+                stroke="#f59e0b"
+                strokeWidth="1"
+              />
+              <text
+                x={width - padding.right + 6}
+                y={getY(absoluteBottom.price) + 3.5}
+                fill="#fde68a"
+                fontSize="9.5"
+                fontWeight="bold"
+                fontFamily="JetBrains Mono, monospace"
+              >
+                {absoluteBottom.price.toLocaleString()}
+              </text>
+              {/* Vertical Marker for Selected Starting Candle (کندل شروع) */}
               <line
                 x1={getX(absoluteBottom.candleIndex)}
                 y1={padding.top}
                 x2={getX(absoluteBottom.candleIndex)}
                 y2={height - padding.bottom}
                 stroke="#f59e0b"
-                strokeWidth="1.5"
-                strokeDasharray="5 4"
-              />
-              <line
-                x1={getX(absoluteBottom.candleIndex)}
-                y1={getY(absoluteBottom.price)}
-                x2={width - padding.right}
-                y2={getY(absoluteBottom.price)}
-                stroke="#f59e0b"
-                strokeWidth="1"
-                strokeDasharray="3 3"
-                opacity="0.6"
+                strokeWidth="1.2"
+                strokeDasharray="3 4"
+                opacity="0.65"
               />
             </g>
           )}
@@ -896,7 +1416,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             candles.map((candle, i) => {
               const x = getX(i);
               const isUp = candle.close >= candle.open;
-              const barWidth = Math.max(2, ((width - padding.left - padding.right) / candles.length) * 0.65);
+              const barWidth = Math.max(2, ((width - padding.left - padding.right) / Math.max(1, maxPlotIndex)) * 0.62);
               const vHeight = (candle.volume / maxVolume) * (volumeHeight - 10);
               const y = height - padding.bottom - vHeight;
 
@@ -913,6 +1433,94 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               );
             })}
 
+          {/* TMW Vertical Time Window Corridors & Future Projection Divider */}
+          {maxPlotIndex > candles.length - 1 && candles.length > 0 && (
+            <g pointerEvents="none">
+              <rect
+                x={getX(candles.length - 1)}
+                y={padding.top}
+                width={Math.max(0, width - padding.right - getX(candles.length - 1))}
+                height={Math.max(0, height - padding.top - padding.bottom - volumeHeight)}
+                fill="#020617"
+                fillOpacity="0.28"
+              />
+              <line
+                x1={getX(candles.length - 1)}
+                y1={padding.top}
+                x2={getX(candles.length - 1)}
+                y2={height - padding.bottom - volumeHeight}
+                stroke="#475569"
+                strokeWidth="1"
+                strokeDasharray="3 4"
+              />
+            </g>
+          )}
+
+          {effectiveShowTMW &&
+            projectionReport?.tmwZones.map(tmw => {
+              const xStart = Math.max(padding.left, getX(tmw.startCandleIndex));
+              const xEnd = Math.min(width - padding.right, getX(tmw.endCandleIndex));
+              const zoneW = Math.max(12, xEnd - xStart);
+              const plotHeight = Math.max(0, height - padding.top - padding.bottom - volumeHeight);
+              const cx = xStart + zoneW / 2;
+
+              return (
+                <g key={tmw.id} pointerEvents="none">
+                  <rect
+                    x={xStart}
+                    y={padding.top}
+                    width={zoneW}
+                    height={plotHeight}
+                    fill="url(#tmwCorridorGrad)"
+                  />
+                  <line
+                    x1={xStart}
+                    y1={padding.top}
+                    x2={xStart}
+                    y2={padding.top + plotHeight}
+                    stroke="#22d3ee"
+                    strokeOpacity="0.55"
+                    strokeWidth="1.2"
+                    strokeDasharray="4 4"
+                  />
+                  <line
+                    x1={xStart + zoneW}
+                    y1={padding.top}
+                    x2={xStart + zoneW}
+                    y2={padding.top + plotHeight}
+                    stroke="#22d3ee"
+                    strokeOpacity="0.55"
+                    strokeWidth="1.2"
+                    strokeDasharray="4 4"
+                  />
+                  {/* Crisp unboxed top time label */}
+                  <rect
+                    x={Math.max(padding.left + 2, Math.min(width - padding.right - 132, cx - 65))}
+                    y={padding.top + 6}
+                    width="130"
+                    height="20"
+                    rx="4"
+                    fill="#082f49"
+                    fillOpacity="0.92"
+                    stroke="#22d3ee"
+                    strokeOpacity="0.6"
+                    strokeWidth="0.9"
+                  />
+                  <text
+                    x={Math.max(padding.left + 67, Math.min(width - padding.right - 67, cx))}
+                    y={padding.top + 19}
+                    textAnchor="middle"
+                    fill="#cffafe"
+                    fontSize="9.5"
+                    fontWeight="700"
+                    fontFamily="JetBrains Mono, monospace"
+                  >
+                    TMW #{tmw.startCandleIndex + 1}–#{tmw.endCandleIndex + 1}
+                  </text>
+                </g>
+              );
+            })}
+
           {/* Candlesticks */}
           {candles.map((candle, i) => {
             const x = getX(i);
@@ -924,12 +1532,54 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             const bodyColor = isUp ? '#10b981' : '#f43f5e';
             const bodyTop = Math.min(openY, closeY);
             const bodyHeight = Math.max(1.5, Math.abs(openY - closeY));
-            const barWidth = Math.max(2.5, ((width - padding.left - padding.right) / candles.length) * 0.65);
+            const barWidth = Math.max(2.5, ((width - padding.left - padding.right) / Math.max(1, maxPlotIndex)) * 0.62);
+            const slotWidth = Math.max(6, (width - padding.left - padding.right) / Math.max(1, maxPlotIndex));
+            const isStartCandle = Boolean(absoluteBottom && absoluteBottom.candleIndex === i);
 
             return (
-              <g key={`candle-${i}`}>
+              <g
+                key={`candle-${i}`}
+                onClick={
+                  onUpdateAbsoluteBottom
+                    ? e => {
+                        if (dragMovedRef.current) return;
+                        e.stopPropagation();
+                        onUpdateAbsoluteBottom({
+                          label: '0 (کف مطلق)',
+                          candleIndex: i,
+                          price: candle.low,
+                          timestamp: candle.timestamp,
+                          isConfirmed: true
+                        });
+                      }
+                    : undefined
+                }
+                className={onUpdateAbsoluteBottom ? 'cursor-pointer' : undefined}
+              >
+                {isStartCandle && (
+                  <rect
+                    x={x - barWidth / 2 - 3}
+                    y={highY - 3}
+                    width={barWidth + 6}
+                    height={Math.max(8, lowY - highY + 6)}
+                    rx="3"
+                    fill="#f59e0b"
+                    fillOpacity="0.16"
+                    stroke="#f59e0b"
+                    strokeWidth="1.2"
+                  />
+                )}
                 <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.15" />
                 <rect x={x - barWidth / 2} y={bodyTop} width={barWidth} height={bodyHeight} fill={bodyColor} rx="0.8" />
+                {onUpdateAbsoluteBottom && (
+                  <rect
+                    x={x - slotWidth / 2}
+                    y={padding.top}
+                    width={slotWidth}
+                    height={Math.max(20, height - padding.top - padding.bottom - volumeHeight)}
+                    fill="transparent"
+                  />
+                )}
               </g>
             );
           })}
@@ -961,13 +1611,346 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
 
+          {/* PRZ (Potential Reversal Zones) & Time-Price Confluence Box */}
+          {effectiveShowPRZ &&
+            projectionReport?.przZones.map(prz => {
+              const plotTop = padding.top;
+              const plotBottom = height - padding.bottom - volumeHeight;
+              const rawYTop = getY(prz.highPrice);
+              const rawYBot = getY(prz.lowPrice);
+              if (rawYBot < plotTop || rawYTop > plotBottom) return null;
+              const yTop = Math.max(plotTop, rawYTop);
+              const yBot = Math.min(plotBottom, rawYBot);
+              const bandH = Math.max(10, yBot - yTop);
+              const isBullZone = prz.direction === 'BULLISH';
+              const strokeCol = isBullZone ? '#10b981' : '#f59e0b';
+              const fillUrl = isBullZone ? 'url(#przBullGrad)' : 'url(#przBearGrad)';
+              const primaryTmw = effectiveShowTMW ? projectionReport.tmwZones[0] : null;
+              const tmwX1 = primaryTmw ? Math.max(padding.left, getX(primaryTmw.startCandleIndex)) : 0;
+              const tmwX2 = primaryTmw ? Math.min(width - padding.right, getX(primaryTmw.endCandleIndex)) : 0;
+
+              return (
+                <g key={prz.id} pointerEvents="none">
+                  <rect
+                    x={padding.left}
+                    y={yTop}
+                    width={Math.max(0, width - padding.right - padding.left)}
+                    height={bandH}
+                    fill={fillUrl}
+                  />
+                  <line
+                    x1={padding.left}
+                    y1={yTop}
+                    x2={width - padding.right}
+                    y2={yTop}
+                    stroke={strokeCol}
+                    strokeWidth="1.15"
+                    strokeDasharray="5 3"
+                    strokeOpacity="0.85"
+                  />
+                  <line
+                    x1={padding.left}
+                    y1={yTop + bandH}
+                    x2={width - padding.right}
+                    y2={yTop + bandH}
+                    stroke={strokeCol}
+                    strokeWidth="1.15"
+                    strokeDasharray="5 3"
+                    strokeOpacity="0.85"
+                  />
+
+                  {/* PRZ Label inside Left edge */}
+                  <rect
+                    x={padding.left + 8}
+                    y={yTop + 4}
+                    width="240"
+                    height="18"
+                    rx="4"
+                    fill="#020617"
+                    fillOpacity="0.82"
+                    stroke={strokeCol}
+                    strokeOpacity="0.55"
+                    strokeWidth="0.8"
+                  />
+                  <text
+                    x={padding.left + 14}
+                    y={yTop + 16}
+                    fill={isBullZone ? '#a7f3d0' : '#fde68a'}
+                    fontSize="9.5"
+                    fontWeight="700"
+                  >
+                    {prz.labelFa} · {prz.contributingRatios.join(' + ')}
+                  </text>
+
+                  {/* Right Axis PRZ Range Marker */}
+                  <rect
+                    x={width - padding.right + 2}
+                    y={yTop + bandH / 2 - 10}
+                    width="82"
+                    height="20"
+                    rx="4"
+                    fill={isBullZone ? '#064e3b' : '#451a03'}
+                    stroke={strokeCol}
+                    strokeWidth="0.9"
+                  />
+                  <text
+                    x={width - padding.right + 6}
+                    y={yTop + bandH / 2 + 3.5}
+                    fill={isBullZone ? '#6ee7b7' : '#fcd34d'}
+                    fontSize="9"
+                    fontWeight="bold"
+                    fontFamily="JetBrains Mono, monospace"
+                  >
+                    PRZ {prz.midPrice.toLocaleString()}
+                  </text>
+
+                  {/* Golden Time-Price Confluence Intersection Box (PRZ x TMW) */}
+                  {prz.isPrimary && primaryTmw && tmwX2 > tmwX1 && (
+                    <g>
+                      <rect
+                        x={tmwX1}
+                        y={yTop}
+                        width={tmwX2 - tmwX1}
+                        height={bandH}
+                        fill={strokeCol}
+                        fillOpacity="0.16"
+                        stroke="#f8fafc"
+                        strokeOpacity="0.75"
+                        strokeWidth="1.4"
+                        strokeDasharray="4 2"
+                      />
+                      <circle
+                        cx={(tmwX1 + tmwX2) / 2}
+                        cy={yTop + bandH / 2}
+                        r="4.5"
+                        fill={strokeCol}
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                      />
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+
+          {/* Dynamic Horizontal Fibonacci Extension Layers (TargetProjectionEngine) */}
+          {effectiveShowFibLayers &&
+            projectionReport?.extensionLayers &&
+            projectionReport.extensionLayers.length > 0 &&
+            (() => {
+              const plotTop = padding.top;
+              const plotBottom = height - padding.bottom - volumeHeight;
+              const endX = width - padding.right;
+              const usedAxisYs: number[] = [];
+              const visibleLayers = projectionReport.extensionLayers.filter(layer => {
+                const cy = getY(layer.price);
+                return cy >= plotTop + 4 && cy <= plotBottom - 4;
+              });
+              const hoveredLayer: FibonacciExtensionLayer | null =
+                visibleLayers.find(l => l.id === hoveredExtLayerId) || null;
+
+              const tierStyle = (tier: FibonacciExtensionLayer['tier']) => {
+                if (tier === 'PRIMARY') {
+                  return { stroke: '#10b981', fill: 'url(#fibLayerPrimary)', badgeBg: '#064e3b', badgeText: '#6ee7b7', dash: '8 3' };
+                }
+                if (tier === 'TMV') {
+                  return { stroke: '#f59e0b', fill: 'url(#fibLayerTmv)', badgeBg: '#451a03', badgeText: '#fde68a', dash: '6 3' };
+                }
+                if (tier === 'EXTREME') {
+                  return { stroke: '#c084fc', fill: 'url(#fibLayerExtreme)', badgeBg: '#3b0764', badgeText: '#e9d5ff', dash: '3 4' };
+                }
+                return { stroke: '#38bdf8', fill: 'url(#fibLayerSecondary)', badgeBg: '#0c4a6e', badgeText: '#bae6fd', dash: '5 4' };
+              };
+
+              return (
+                <g>
+                  {visibleLayers.map(layer => {
+                    const style = tierStyle(layer.tier);
+                    const centerY = getY(layer.price);
+                    const rawYTop = getY(layer.bandHigh);
+                    const rawYBot = getY(layer.bandLow);
+                    const yTop = Math.max(plotTop, Math.min(rawYTop, centerY - 3.5));
+                    const yBot = Math.min(plotBottom, Math.max(rawYBot, centerY + 3.5));
+                    const bandH = Math.max(7, yBot - yTop);
+                    const startX = Math.max(padding.left, Math.min(endX - 110, getX(layer.anchorCandleIndex)));
+                    const layerW = Math.max(40, endX - startX);
+                    const isHovered = hoveredExtLayerId === layer.id;
+
+                    const canPlaceAxisLabel =
+                      isHovered || usedAxisYs.every(prevY => Math.abs(prevY - centerY) >= 18);
+                    if (canPlaceAxisLabel && !isHovered) usedAxisYs.push(centerY);
+
+                    const signedPct = layer.distancePct > 0 ? `+${layer.distancePct}%` : `${layer.distancePct}%`;
+
+                    return (
+                      <g
+                        key={layer.id}
+                        onMouseEnter={() => setHoveredExtLayerId(layer.id)}
+                        onMouseLeave={() => setHoveredExtLayerId(null)}
+                        className="cursor-pointer"
+                        opacity={hoveredExtLayerId && !isHovered ? 0.36 : 1}
+                        style={{ transition: 'opacity 140ms ease' }}
+                      >
+                        {/* Invisible wide hit strip for effortless hover */}
+                        <rect
+                          x={startX}
+                          y={centerY - 7}
+                          width={layerW}
+                          height={14}
+                          fill="transparent"
+                        />
+
+                        {/* Shaded Dynamic Horizontal Extension Band */}
+                        <rect
+                          x={startX}
+                          y={yTop}
+                          width={layerW}
+                          height={bandH}
+                          fill={style.fill}
+                          fillOpacity={isHovered ? 0.95 : layer.tier === 'PRIMARY' || layer.tier === 'TMV' ? 0.8 : 0.55}
+                          stroke={isHovered ? style.stroke : 'none'}
+                          strokeWidth={isHovered ? 0.9 : 0}
+                          strokeOpacity={0.65}
+                        />
+
+                        {/* Extension Centerline */}
+                        <line
+                          x1={startX}
+                          y1={centerY}
+                          x2={endX}
+                          y2={centerY}
+                          stroke={style.stroke}
+                          strokeWidth={isHovered ? 2 : layer.tier === 'PRIMARY' || layer.tier === 'TMV' ? 1.35 : 1}
+                          strokeDasharray={isHovered ? undefined : style.dash}
+                          strokeOpacity={isHovered ? 1 : layer.tier === 'EXTREME' ? 0.65 : 0.85}
+                        />
+
+                        {/* Anchor Launch Node on Left Edge */}
+                        <circle
+                          cx={startX}
+                          cy={centerY}
+                          r={isHovered ? 4 : 2.8}
+                          fill={style.stroke}
+                          stroke="#080d1a"
+                          strokeWidth="1"
+                        />
+
+                        {/* Left Ratio & Confidence Tag on Layer Origin */}
+                        {(canPlaceAxisLabel || isHovered) && (
+                          <g pointerEvents="none">
+                            <rect
+                              x={startX + 6}
+                              y={centerY - 9}
+                              width={isHovered ? 148 : 112}
+                              height={17}
+                              rx="4"
+                              fill="#020617"
+                              fillOpacity={isHovered ? 0.94 : 0.8}
+                              stroke={style.stroke}
+                              strokeOpacity={isHovered ? 0.9 : 0.45}
+                              strokeWidth="0.8"
+                            />
+                            <text
+                              x={startX + 12}
+                              y={centerY + 3}
+                              fill={style.badgeText}
+                              fontSize="9.2"
+                              fontWeight="700"
+                              fontFamily="JetBrains Mono, monospace"
+                            >
+                              {layer.ratioLabel}
+                              {isHovered ? ` · ${signedPct}` : ` · ${layer.confidence}%`}
+                            </text>
+                          </g>
+                        )}
+
+                        {/* Right Price-Axis Layer Pill */}
+                        {canPlaceAxisLabel && (
+                          <g pointerEvents="none">
+                            <rect
+                              x={endX + 2}
+                              y={centerY - 9}
+                              width="82"
+                              height="18"
+                              rx="4"
+                              fill={style.badgeBg}
+                              stroke={style.stroke}
+                              strokeWidth={isHovered ? '1.3' : '0.85'}
+                            />
+                            <text
+                              x={endX + 6}
+                              y={centerY + 3.5}
+                              fill={style.badgeText}
+                              fontSize="9.2"
+                              fontWeight="bold"
+                              fontFamily="JetBrains Mono, monospace"
+                            >
+                              {layer.ratio}·{layer.price.toLocaleString()}
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                    );
+                  })}
+
+                  {/* Hovered Extension Layer Anchor-to-Target Bracket & Detail Pill */}
+                  {hoveredLayer &&
+                    (() => {
+                      const style = tierStyle(hoveredLayer.tier);
+                      const startX = Math.max(padding.left, Math.min(endX - 110, getX(hoveredLayer.anchorCandleIndex)));
+                      const yTarget = getY(hoveredLayer.price);
+                      const yAnchor = Math.max(plotTop, Math.min(plotBottom, getY(hoveredLayer.anchorPrice)));
+                      const bracketX = startX + 3;
+                      const infoX = Math.min(endX - 285, Math.max(padding.left + 8, startX + 162));
+                      const infoY = yTarget - 32 >= plotTop ? yTarget - 30 : Math.min(plotBottom - 26, yTarget + 10);
+                      return (
+                        <g pointerEvents="none">
+                          <line
+                            x1={bracketX}
+                            y1={yAnchor}
+                            x2={bracketX}
+                            y2={yTarget}
+                            stroke={style.stroke}
+                            strokeWidth="1.6"
+                            strokeDasharray="3 2"
+                          />
+                          <circle cx={bracketX} cy={yAnchor} r="3.5" fill="#080d1a" stroke={style.stroke} strokeWidth="1.5" />
+                          <circle cx={bracketX} cy={yTarget} r="4" fill={style.stroke} stroke="#ffffff" strokeWidth="1.2" />
+                          <rect
+                            x={infoX}
+                            y={infoY}
+                            width="276"
+                            height="22"
+                            rx="5"
+                            fill="#020617"
+                            fillOpacity="0.95"
+                            stroke={style.stroke}
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={infoX + 268}
+                            y={infoY + 14.5}
+                            textAnchor="end"
+                            fill="#f8fafc"
+                            fontSize="9.5"
+                            fontWeight="700"
+                          >
+                            {hoveredLayer.titleFa} ({hoveredLayer.formulaFa})
+                          </text>
+                        </g>
+                      );
+                    })()}
+                </g>
+              );
+            })()}
+
           {/* Targets & Invalidation */}
           {showTargets &&
-            activeScenario.targets.map(target => {
+            (projectionReport?.targets.length ? projectionReport.targets : activeScenario.targets).map(target => {
               const targetY = getY(target.price);
               if (targetY < padding.top || targetY > height - padding.bottom - volumeHeight) return null;
               const isInv = target.isInvalidation;
-              const color = isInv ? '#f43f5e' : '#38bdf8';
+              const color = isInv ? '#f43f5e' : target.type === 'TMV' ? '#f59e0b' : '#38bdf8';
 
               return (
                 <g key={target.id}>
@@ -984,7 +1967,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                   <rect
                     x={width - padding.right + 2}
                     y={targetY - 9}
-                    width="80"
+                    width="82"
                     height="18"
                     rx="4"
                     fill={isInv ? '#4c0519' : '#082f49'}
@@ -999,7 +1982,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                     fontWeight="bold"
                     fontFamily="JetBrains Mono, monospace"
                   >
-                    {isInv ? 'INV ' : 'TGT '}
+                    {isInv ? 'INV ' : target.type === 'TMV' ? 'TMV ' : 'TGT '}
                     {target.price.toLocaleString()}
                   </text>
                 </g>
@@ -1060,10 +2043,13 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               );
             })}
 
-          {/* Hovered Wave Leg Candle-Window Preview Band */}
-          {onDoubleClickWaveLeg && hoveredLeg !== null && activeScenario.vertices[hoveredLeg] && activeScenario.vertices[hoveredLeg + 1] && (() => {
-            const vA = activeScenario.vertices[hoveredLeg];
-            const vB = activeScenario.vertices[hoveredLeg + 1];
+          {/* Hovered / Externally Highlighted Wave Leg Candle-Window Preview Band */}
+          {(() => {
+            const activeLegIdx = hoveredLeg ?? highlightedLegIndex ?? validatorHighlightLeg;
+            if (activeLegIdx === null || activeLegIdx === undefined) return null;
+            const vA = activeScenario.vertices[activeLegIdx];
+            const vB = activeScenario.vertices[activeLegIdx + 1];
+            if (!vA || !vB) return null;
             const sIdx = Math.min(vA.candleIndex, vB.candleIndex);
             const eIdx = Math.max(vA.candleIndex, vB.candleIndex);
             const rx = getX(sIdx);
@@ -1075,10 +2061,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 width={rw}
                 height={Math.max(0, height - padding.top - padding.bottom - volumeHeight)}
                 fill={scenarioColor}
-                fillOpacity="0.07"
+                fillOpacity="0.09"
                 stroke={scenarioColor}
-                strokeOpacity="0.35"
-                strokeWidth="1"
+                strokeOpacity="0.45"
+                strokeWidth="1.2"
                 strokeDasharray="3 3"
                 pointerEvents="none"
               />
@@ -1093,7 +2079,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               const y1 = getY(vStart.price);
               const x2 = getX(vEnd.candleIndex);
               const y2 = getY(vEnd.price);
-              const isLegHovered = hoveredLeg === legIdx;
+              const isLegHovered =
+                hoveredLeg === legIdx ||
+                highlightedLegIndex === legIdx ||
+                validatorHighlightLeg === legIdx;
               const candleSpan = Math.abs(vEnd.candleIndex - vStart.candleIndex) + 1;
 
               return (
@@ -1116,6 +2105,20 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                   }}
                   className={onDoubleClickWaveLeg && interactionMode === 'EDIT' ? 'cursor-pointer' : ''}
                 >
+                  {(highlightedLegIndex === legIdx || validatorHighlightLeg === legIdx) && (
+                    <line
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      stroke={scenarioColor}
+                      strokeWidth="8.5"
+                      strokeOpacity="0.35"
+                      strokeLinecap="round"
+                      filter="url(#elliott-wave-glow)"
+                      pointerEvents="none"
+                    />
+                  )}
                   {/* Visible Wave Segment */}
                   <line
                     x1={x1}
@@ -1123,7 +2126,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                     x2={x2}
                     y2={y2}
                     stroke={scenarioColor}
-                    strokeWidth={isLegHovered ? '4.5' : '2.8'}
+                    strokeWidth={isLegHovered ? '4.8' : '2.8'}
                     strokeLinecap="round"
                     opacity={hoveredTraceData && hoveredTraceData.scenario.id !== activeScenario.id ? 0.32 : 1}
                     style={{ transition: 'opacity 180ms ease' }}
@@ -1137,7 +2140,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                     stroke="transparent"
                     strokeWidth="16"
                   />
-                  {onDoubleClickWaveLeg && interactionMode === 'EDIT' && isLegHovered && (
+                  {onDoubleClickWaveLeg && interactionMode === 'EDIT' && hoveredLeg === legIdx && (
                     <g transform={`translate(${(x1 + x2) / 2}, ${(y1 + y2) / 2 - 14})`} pointerEvents="none">
                       <rect x="-102" y="-11" width="204" height="20" rx="5" fill="#0f172a" stroke={scenarioColor} strokeWidth="1" />
                       <text x="0" y="3" textAnchor="middle" fill="#f8fafc" fontSize="9.5" fontWeight="600">
@@ -1151,13 +2154,29 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               );
             })}
 
-          {/* Active Scenario Vertices */}
+          {/* Active Scenario Vertices + TrendStrengthIndicator Color-Coded Signal Icons */}
           {activeScenario.vertices.map((vertex, idx) => {
             const vx = getX(vertex.candleIndex);
             const vy = getY(vertex.price);
             const isHovered = hoveredVertex === idx;
             const isDragging = draggingVertexIndex === idx;
             const isSelected = selectedVertexIndex === idx;
+            const vStrength = trendStrengthReport.vertices[idx];
+            const badgeY = Math.max(padding.top + 14, vy - 24);
+            const placeSignalOnLeft = vx + 40 > width - padding.right;
+            const signalOffsetX = placeSignalOnLeft ? -28 : 28;
+
+            const signalColors = (level: TrendSignalLevel) => {
+              if (level === 'GREEN') {
+                return { bg: '#052e16', border: '#10b981', glyph: '#34d399', text: '#a7f3d0' };
+              }
+              if (level === 'RED') {
+                return { bg: '#4c0519', border: '#f43f5e', glyph: '#fb7185', text: '#fecdd3' };
+              }
+              return { bg: '#451a03', border: '#f59e0b', glyph: '#fbbf24', text: '#fde68a' };
+            };
+
+            const sStyle = vStrength ? signalColors(vStrength.signal) : null;
 
             return (
               <g
@@ -1186,7 +2205,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 />
 
                 {/* Label Badge */}
-                <g transform={`translate(${vx}, ${vy - 24})`}>
+                <g transform={`translate(${vx}, ${badgeY})`}>
                   <rect
                     x="-17"
                     y="-12"
@@ -1210,20 +2229,146 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                   </text>
                 </g>
 
+                {/* Color-Coded Trend Strength Signal Icon (Green / Yellow / Red) */}
+                {showTrendStrength && vStrength && sStyle && (
+                  <g transform={`translate(${vx + signalOffsetX}, ${badgeY})`}>
+                    <title>
+                      {`${vStrength.signalLabelFa} (${vStrength.strengthScore}٪) · RSI ${vStrength.rsi} · مومنتوم وزنی حجم ${vStrength.volumeWeightedMomentum}٪ · ${vStrength.divergenceLabelFa}`}
+                    </title>
+                    <line
+                      x1={placeSignalOnLeft ? 10 : -10}
+                      y1="-1"
+                      x2={placeSignalOnLeft ? 11 : -11}
+                      y2="-1"
+                      stroke={sStyle.border}
+                      strokeOpacity="0.65"
+                      strokeWidth="1.2"
+                    />
+                    <rect
+                      x="-9.5"
+                      y="-10.5"
+                      width="19"
+                      height="19"
+                      rx="5"
+                      fill={sStyle.bg}
+                      stroke={sStyle.border}
+                      strokeWidth={isHovered || isSelected ? '1.8' : '1.25'}
+                    />
+                    {vStrength.signal === 'GREEN' ? (
+                      /* Distinct Upward Strength Arrow Icon */
+                      <path
+                        d="M -3.8 1.2 L 0 -3.2 L 3.8 1.2 M 0 -2.8 L 0 3.4"
+                        transform="translate(0, -1)"
+                        fill="none"
+                        stroke={sStyle.glyph}
+                        strokeWidth="1.9"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    ) : vStrength.signal === 'RED' ? (
+                      /* Distinct Exhaustion / Divergence Warning Triangle Icon */
+                      <g transform="translate(0, -1)">
+                        <path
+                          d="M 0 -4.2 L 4.3 3.4 L -4.3 3.4 Z"
+                          fill="none"
+                          stroke={sStyle.glyph}
+                          strokeWidth="1.5"
+                          strokeLinejoin="round"
+                        />
+                        <line
+                          x1="0"
+                          y1="-1.2"
+                          x2="0"
+                          y2="1.3"
+                          stroke={sStyle.glyph}
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    ) : (
+                      /* Distinct Moderate / Transitional Momentum Wave-Bar Icon */
+                      <g transform="translate(0, -1)">
+                        <path
+                          d="M -4 -1.4 Q -2 -3.6 0 -1.4 T 4 -1.4"
+                          fill="none"
+                          stroke={sStyle.glyph}
+                          strokeWidth="1.65"
+                          strokeLinecap="round"
+                        />
+                        <line
+                          x1="-3.2"
+                          y1="2.4"
+                          x2="3.2"
+                          y2="2.4"
+                          stroke={sStyle.glyph}
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    )}
+                  </g>
+                )}
+
                 {(isHovered || isDragging) && (
-                  <g transform={`translate(${vx}, ${vy + 24})`}>
-                    <rect x="-56" y="-11" width="112" height="20" rx="4" fill="#020617" stroke="#334155" strokeWidth="1" />
-                    <text
-                      x="0"
-                      y="3"
-                      textAnchor="middle"
-                      fill="#e2e8f0"
-                      fontSize="9.5"
-                      fontWeight="bold"
-                      fontFamily="JetBrains Mono, monospace"
-                    >
-                      {vertex.price.toLocaleString()} ({vertex.label})
-                    </text>
+                  <g
+                    transform={`translate(${Math.max(
+                      padding.left + 118,
+                      Math.min(width - padding.right - 118, vx)
+                    )}, ${vy + 28})`}
+                    pointerEvents="none"
+                  >
+                    {showTrendStrength && vStrength && sStyle ? (
+                      <>
+                        <rect
+                          x="-116"
+                          y="-12"
+                          width="232"
+                          height="38"
+                          rx="6"
+                          fill="#020617"
+                          fillOpacity="0.96"
+                          stroke={sStyle.border}
+                          strokeOpacity="0.75"
+                          strokeWidth="1"
+                        />
+                        <text
+                          x="0"
+                          y="2"
+                          textAnchor="middle"
+                          fill="#f8fafc"
+                          fontSize="9.5"
+                          fontWeight="bold"
+                          fontFamily="JetBrains Mono, monospace"
+                        >
+                          {vertex.price.toLocaleString()} ({vertex.label}) · RSI {vStrength.rsi} · VW {vStrength.volumeWeightedMomentum}%
+                        </text>
+                        <text
+                          x="0"
+                          y="17.5"
+                          textAnchor="middle"
+                          fill={sStyle.text}
+                          fontSize="9.2"
+                          fontWeight="700"
+                        >
+                          {vStrength.signalLabelFa} ({vStrength.strengthScore}٪) · {vStrength.divergenceLabelFa}
+                        </text>
+                      </>
+                    ) : (
+                      <>
+                        <rect x="-56" y="-11" width="112" height="20" rx="4" fill="#020617" stroke="#334155" strokeWidth="1" />
+                        <text
+                          x="0"
+                          y="3"
+                          textAnchor="middle"
+                          fill="#e2e8f0"
+                          fontSize="9.5"
+                          fontWeight="bold"
+                          fontFamily="JetBrains Mono, monospace"
+                        >
+                          {vertex.price.toLocaleString()} ({vertex.label})
+                        </text>
+                      </>
+                    )}
                   </g>
                 )}
               </g>
@@ -1345,24 +2490,31 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
 
-          {/* Absolute Bottom Draggable Anchor Handle */}
+          {/* Starting Candle & Horizontal Absolute Bottom Draggable Anchor Handle */}
           {absoluteBottom && (
             <g
               onMouseDown={handleBottomMouseDown}
-              className="cursor-ew-resize"
+              className="cursor-grab active:cursor-grabbing"
             >
               <circle
                 cx={getX(absoluteBottom.candleIndex)}
                 cy={getY(absoluteBottom.price)}
-                r="7"
+                r="11"
+                fill="#f59e0b"
+                fillOpacity="0.18"
+              />
+              <circle
+                cx={getX(absoluteBottom.candleIndex)}
+                cy={getY(absoluteBottom.price)}
+                r="6.5"
                 fill="#f59e0b"
                 stroke="#020617"
                 strokeWidth="2"
               />
-              <g transform={`translate(${getX(absoluteBottom.candleIndex)}, ${getY(absoluteBottom.price) + 22})`}>
-                <rect x="-48" y="-11" width="96" height="20" rx="4" fill="#451a03" stroke="#f59e0b" strokeWidth="1.2" />
-                <text x="0" y="3" textAnchor="middle" fill="#fde68a" fontSize="10" fontWeight="700">
-                  کف مطلق: {absoluteBottom.price.toLocaleString()}
+              <g transform={`translate(${getX(absoluteBottom.candleIndex)}, ${getY(absoluteBottom.price) + 24})`}>
+                <rect x="-78" y="-11" width="156" height="20" rx="5" fill="#451a03" stroke="#f59e0b" strokeWidth="1.2" />
+                <text x="0" y="3" textAnchor="middle" fill="#fde68a" fontSize="9.5" fontWeight="700" fontFamily="JetBrains Mono, monospace">
+                  کندل شروع #{absoluteBottom.candleIndex + 1} · کف {absoluteBottom.price.toLocaleString()}
                 </text>
               </g>
             </g>
@@ -1413,6 +2565,34 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <span>قیمت: {selectedVertex.price.toLocaleString()}</span>
               <span>کندل: #{selectedVertex.candleIndex + 1}</span>
             </div>
+
+            {(() => {
+              const selStrength = trendStrengthReport.vertices[selectedVertexIndex];
+              if (!selStrength) return null;
+              const badgeCls =
+                selStrength.signal === 'GREEN'
+                  ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200'
+                  : selStrength.signal === 'RED'
+                  ? 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+                  : 'bg-amber-950/60 border-amber-500/40 text-amber-200';
+              return (
+                <div className={`rounded-lg border px-2.5 py-2 space-y-1 text-[10.5px] ${badgeCls}`}>
+                  <div className="flex items-center justify-between gap-2 font-bold">
+                    <span className="flex items-center gap-1">
+                      <Activity className="w-3 h-3 shrink-0" />
+                      <span>{selStrength.signalLabelFa}</span>
+                    </span>
+                    <span className="font-mono tabular-nums">{selStrength.strengthScore}٪</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] opacity-90 font-mono tabular-nums">
+                    <span>RSI: {selStrength.rsi}</span>
+                    <span>VW-Mom: {selStrength.volumeWeightedMomentum}%</span>
+                    <span>حجم: {selStrength.volumeRatio}x</span>
+                  </div>
+                  <div className="text-[10px] opacity-90">{selStrength.divergenceLabelFa}</div>
+                </div>
+              );
+            })()}
 
             {!activeScenario.isLocked && (
               <>
@@ -1516,24 +2696,81 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </div>
         )}
 
+        {/* Interactive Rule Diagnostic & Auto-Fix Overlay Panel */}
+        {diagnosticOpen && diagnosticSummary && (
+          <div
+            onClick={e => e.stopPropagation()}
+            className="absolute top-3 left-3 bottom-14 z-30 w-[calc(100%-1.5rem)] sm:w-[430px] max-w-full flex flex-col justify-start pointer-events-auto"
+          >
+            <RuleDiagnosticsPanel
+              scenario={activeScenario}
+              summary={diagnosticSummary}
+              candles={candles}
+              parentRole={parentRole}
+              parentWaveLabel={parentWaveLabel}
+              onApplyPattern={onPatternChange}
+              onApplyVertices={onUpdateVertices}
+              onRevalidate={evaluateCurrentCount}
+              onClose={() => setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }))}
+              variant="overlay"
+            />
+          </div>
+        )}
+
+        {/* Strict Step-by-Step PatternValidator Overlay Panel */}
+        {validatorOpen && (
+          <div
+            onClick={e => e.stopPropagation()}
+            className="absolute top-3 left-3 bottom-14 z-30 w-[calc(100%-1.5rem)] sm:w-[445px] max-w-full flex flex-col justify-start pointer-events-auto"
+          >
+            <PatternValidator
+              scenario={activeScenario}
+              candles={candles}
+              parentRole={parentRole}
+              parentWaveLabel={parentWaveLabel}
+              onApplyPattern={onPatternChange}
+              onApplyVertices={onUpdateVertices}
+              onValidationComplete={summary => onValidateActiveScenario?.(activeScenario.id, summary)}
+              onHighlightLeg={setValidatorHighlightLeg}
+              onClose={() => {
+                setValidatorHighlightLeg(null);
+                setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+              }}
+              variant="overlay"
+            />
+          </div>
+        )}
+
         {/* Active Mode Instruction Strip */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-3 py-1.5 rounded-lg text-[11px] text-slate-300">
+        <div className="absolute bottom-3 right-3 flex items-center gap-2 bg-slate-950/95 border border-slate-800 px-3 py-1.5 rounded-lg text-[11px] text-slate-300 shadow-lg">
           {interactionMode === 'PICK_BOTTOM' ? (
             <>
               <Crosshair className="w-3.5 h-3.5 text-amber-400" />
-              <span>حالت انتخاب کف مطلق: روی کندل کف در نمودار کلیک کنید یا نشانگر را بکشید.</span>
+              <span>انتخاب کندل شروع: روی هر کندل کلیک کنید تا خط افقی کف مطلق و خط عمودی کندل شروع هم‌زمان تنظیم شوند.</span>
             </>
           ) : interactionMode === 'ADD_VERTEX' ? (
             <>
               <Plus className="w-3.5 h-3.5 text-cyan-400" />
-              <span>حالت افزودن نقطه: روی هر نقطه از نمودار کلیک کنید تا پیوت جدید درج شود.</span>
+              <span>حالت افزودن نقطه: روی هر کندل در نمودار کلیک کنید تا پیوت جدید درج شود.</span>
+              {!hideToolbarLockAndReset && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    evaluateCurrentCount();
+                  }}
+                  className="mr-1.5 flex items-center gap-1 px-2.5 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10.5px] font-bold transition-colors"
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>اتمام و ارزیابی قوانین</span>
+                </button>
+              )}
               {onChangeInteractionMode && (
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     onChangeInteractionMode('EDIT');
                   }}
-                  className="mr-2 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-[10px]"
+                  className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-[10px]"
                 >
                   اتمام
                 </button>
@@ -1543,15 +2780,27 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             <>
               <PenTool className="w-3.5 h-3.5 text-emerald-400" />
               <span>حالت ترسیم از صفر: به ترتیب روی نقاط پیوت کلیک کنید ({activeScenario.vertices.length} نقطه ثبت شده).</span>
+              {!hideToolbarLockAndReset && activeScenario.vertices.length >= 2 && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    evaluateCurrentCount();
+                  }}
+                  className="mr-1.5 flex items-center gap-1 px-2.5 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10.5px] font-bold transition-colors"
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>پایان و ارزیابی قوانین</span>
+                </button>
+              )}
               {onChangeInteractionMode && (
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     onChangeInteractionMode('EDIT');
                   }}
-                  className="mr-2 px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-medium"
+                  className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-[10px] font-medium"
                 >
-                  پایان ترسیم
+                  انصراف/ویرایش
                 </button>
               )}
             </>
@@ -1567,9 +2816,62 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                   ? `در پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe}) هستید؛ نقاط را بکشید یا کلیک کنید.`
                   : 'نقاط پیوت را بکشید یا برای تغییر لیبل و حذف روی هر نقطه کلیک کنید.'}
               </span>
+              {!hideToolbarLockAndReset && isUserModifiedCount && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    evaluateCurrentCount();
+                  }}
+                  className={`mr-1.5 flex items-center gap-1 px-2.5 py-0.5 rounded text-[10.5px] font-bold transition-colors ${
+                    activeHardFailsCount > 0
+                      ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>{activeHardFailsCount > 0 ? 'بررسی خطا و اصلاح' : 'ارزیابی تغییرات'}</span>
+                </button>
+              )}
             </>
           )}
         </div>
+
+        {/* Completed Structure Fibonacci Basis Chip */}
+        {effectiveShowFibLayers && projectionReport?.completedStructure && (
+          <div className="hidden lg:flex absolute bottom-3 left-3 items-center gap-2 bg-slate-950/90 border border-emerald-500/35 px-2.5 py-1.5 rounded-lg text-[10.5px] text-slate-200 shadow-lg pointer-events-none">
+            <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="text-slate-400">مبنای اکستنشن:</span>
+            <strong className="text-emerald-300 font-semibold">
+              {projectionReport.completedStructure.structureLabelFa}
+            </strong>
+            <span className="text-slate-600">·</span>
+            <span className="font-mono tabular-nums text-cyan-300">
+              {projectionReport.extensionLayers?.length || 0} لایه
+            </span>
+          </div>
+        )}
+
+        {/* Non-Intrusive Real-Time Hard Rule Violation Toast Notification */}
+        {(violationToast || revertedToastMsg) && !hideZoneControls && (
+          <div className="absolute bottom-14 right-[96px] left-4 sm:left-auto sm:w-[420px] z-40 pointer-events-none">
+            <RuleViolationToast
+              toast={violationToast}
+              revertedMessage={revertedToastMsg}
+              onRevertToLastValid={handleRevertToLastValidState}
+              onOpenValidator={
+                !hideToolbarLockAndReset
+                  ? () => {
+                      setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                      setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: true }));
+                      setViolationToast(null);
+                    }
+                  : undefined
+              }
+              onDismiss={() => setViolationToast(null)}
+              onClearReverted={() => setRevertedToastMsg(null)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

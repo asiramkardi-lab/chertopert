@@ -6,9 +6,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { WaveScenario, PatternFamily, WaveVertex } from '../types/elliott';
+import { Candle, WaveScenario, PatternFamily, WaveVertex } from '../types/elliott';
 import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA } from '../engine/rulesEngine';
 import { ChartInteractionMode } from './ChartStudio';
+import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
+import { PatternValidator } from './PatternValidator';
 import {
   Eye,
   EyeOff,
@@ -24,7 +26,9 @@ import {
   Sparkles,
   Check,
   X,
-  ShieldCheck
+  ShieldCheck,
+  Clock,
+  Target
 } from 'lucide-react';
 
 interface WizardStep2ScenariosProps {
@@ -36,9 +40,9 @@ interface WizardStep2ScenariosProps {
   onToggleOverlay: (id: string) => void;
   onToggleKeepForTree: (id: string) => void;
   onToggleDiscard: (id: string) => void;
-  onPatternChange: (newPattern: PatternFamily) => void;
-  onApplySuggestedAlternative: (newPattern: PatternFamily) => void;
-  onUpdateVertices: (vertices: WaveVertex[]) => void;
+  onPatternChange: (newPattern: PatternFamily, targetScenarioId?: string) => void;
+  onApplySuggestedAlternative: (newPattern: PatternFamily, targetScenarioId?: string) => void;
+  onUpdateVertices: (vertices: WaveVertex[], targetScenarioId?: string) => void;
   interactionMode: ChartInteractionMode;
   onChangeInteractionMode: (mode: ChartInteractionMode) => void;
   onCreateScratchScenario: () => void;
@@ -48,6 +52,11 @@ interface WizardStep2ScenariosProps {
   onHoverScenario?: (id: string | null) => void;
   stepTitle?: string;
   proceedLabel?: string;
+  candles?: Candle[];
+  showPRZ?: boolean;
+  onToggleShowPRZ?: () => void;
+  showTMW?: boolean;
+  onToggleShowTMW?: () => void;
 }
 
 export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
@@ -70,140 +79,78 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
   onValidateScenario,
   onHoverScenario,
   stepTitle,
-  proceedLabel
+  proceedLabel,
+  candles = [],
+  showPRZ = true,
+  onToggleShowPRZ,
+  showTMW = true,
+  onToggleShowTMW
 }) => {
   const [innerTab, setInnerTab] = useState<'LIST' | 'EDIT_VERTICES' | 'RULES'>('LIST');
-  const [validationBanner, setValidationBanner] = useState<{
-    scenarioId: string;
-    scenarioName: string;
-    summary: ValidationSummary;
-  } | null>(null);
+  const [validationReportsById, setValidationReportsById] = useState<Record<string, ValidationSummary>>({});
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
+  const activeProjection = React.useMemo(() => {
+    if (!activeScenario || activeScenario.vertices.length < 2) return null;
+    return RulesEngine.predictScenarioProjections(activeScenario, candles);
+  }, [activeScenario, candles]);
+
   useEffect(() => {
-    setValidationBanner(null);
-  }, [activeScenario?.id]);
+    const validIds = new Set(scenarios.map(s => s.id));
+    setValidationReportsById(prev => {
+      const entries = Object.entries(prev).filter(([id]) => validIds.has(id));
+      if (entries.length === Object.keys(prev).length) return prev;
+      return Object.fromEntries(entries);
+    });
+  }, [scenarios]);
+
+  const handleValidateScenario = (sc: WaveScenario) => {
+    const summary = RulesEngine.validateStructure(sc.patternType, sc.vertices, sc.direction);
+    setValidationReportsById(prev => ({ ...prev, [sc.id]: summary }));
+    if (onValidateScenario) {
+      onValidateScenario(sc.id, summary);
+    }
+  };
 
   const handleValidateActive = () => {
-    if (!activeScenario) return;
-    const summary = RulesEngine.validateStructure(
-      activeScenario.patternType,
-      activeScenario.vertices,
-      activeScenario.direction
-    );
-    setValidationBanner({
-      scenarioId: activeScenario.id,
-      scenarioName: activeScenario.name,
-      summary
-    });
-    if (onValidateScenario) {
-      onValidateScenario(activeScenario.id, summary);
-    }
+    if (activeScenario) handleValidateScenario(activeScenario);
   };
 
   const keptScenarios = scenarios.filter(s => s.isSelectedForTree && !s.isDiscarded);
   const failedHardRules = activeScenario?.rulesResults.filter(r => r.type === 'HARD' && !r.passed) || [];
   const solvableAlt = failedHardRules.find(r => r.canBeSolvedByAlternate)?.canBeSolvedByAlternate;
 
-  const bannerHardFails = validationBanner
-    ? validationBanner.summary.rules.filter(r => r.type === 'HARD' && !r.passed)
-    : [];
-  const isBannerValid = Boolean(validationBanner?.summary.isValid && bannerHardFails.length === 0);
-
   const renderValidationBanner = () => {
-    if (!validationBanner || validationBanner.scenarioId !== activeScenario?.id) return null;
+    if (!activeScenario) return null;
+    const summary = validationReportsById[activeScenario.id];
+    if (!summary) return null;
     return (
-      <div
-        className={`p-3.5 rounded-xl border space-y-2.5 transition-colors ${
-          isBannerValid
-            ? 'bg-emerald-950/35 border-emerald-500/50'
-            : 'bg-rose-950/35 border-rose-500/50'
-        }`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            {isBannerValid ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            ) : (
-              <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
-            )}
-            <div>
-              <h4 className={`text-xs font-bold ${isBannerValid ? 'text-emerald-300' : 'text-rose-300'}`}>
-                {isBannerValid
-                  ? `تأیید معتبر: «${validationBanner.scenarioName}» مطابق قوانین است`
-                  : `خطا در اعتبارسنجی «${validationBanner.scenarioName}» (${bannerHardFails.length} نقض قانون)`}
-              </h4>
-              <p className="text-[11px] text-slate-300 mt-0.5">
-                الگو: {PATTERN_LABELS_FA[validationBanner.summary.patternType]}
-              </p>
-            </div>
-          </div>
-          <span
-            className={`px-2 py-0.5 rounded font-mono tabular-nums text-[11px] font-bold border shrink-0 ${
-              isBannerValid
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-            }`}
-          >
-            {validationBanner.summary.validityScore}%
-          </span>
-        </div>
-
-        <div className="space-y-1.5 max-h-48 overflow-y-auto">
-          {validationBanner.summary.rules.map(rule => (
-            <div
-              key={rule.ruleId}
-              className={`p-2 rounded-lg border text-[11px] space-y-0.5 ${
-                rule.passed
-                  ? 'bg-emerald-950/25 border-emerald-500/30 text-emerald-200'
-                  : rule.type === 'HARD'
-                  ? 'bg-rose-950/45 border-rose-500/50 text-rose-200'
-                  : 'bg-amber-950/25 border-amber-500/30 text-amber-200'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2 font-bold">
-                <div className="flex items-center gap-1.5">
-                  {rule.passed ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  ) : rule.type === 'HARD' ? (
-                    <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  )}
-                  <span>{rule.nameFa}</span>
-                </div>
-                <span className="font-mono tabular-nums text-[10px] opacity-80">{rule.score}%</span>
-              </div>
-              <p className="text-[11px] opacity-90 leading-relaxed pr-5">{rule.messageFa}</p>
-            </div>
-          ))}
-        </div>
-
-        {!isBannerValid && validationBanner.summary.suggestedAlternative && (
-          <div className="pt-2 border-t border-rose-500/25 flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-[11px] text-amber-200">
-              پیشنهاد جایگزین: <strong>{PATTERN_LABELS_FA[validationBanner.summary.suggestedAlternative]}</strong>
-            </span>
-            <button
-              onClick={() => {
-                const alt = validationBanner.summary.suggestedAlternative!;
-                onApplySuggestedAlternative(alt);
-                if (activeScenario) {
-                  const updated = RulesEngine.validateStructure(alt, activeScenario.vertices, activeScenario.direction);
-                  setValidationBanner({
-                    scenarioId: activeScenario.id,
-                    scenarioName: activeScenario.name,
-                    summary: updated
-                  });
-                }
-              }}
-              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors"
-            >
-              تبدیل و اعتبارسنجی مجدد
-            </button>
-          </div>
-        )}
-      </div>
+      <RuleDiagnosticsPanel
+        scenario={activeScenario}
+        summary={summary}
+        candles={candles}
+        onApplyPattern={pattern => {
+          onApplySuggestedAlternative(pattern);
+          const updated = RulesEngine.validateStructure(pattern, activeScenario.vertices, activeScenario.direction);
+          setValidationReportsById(prev => ({ ...prev, [activeScenario.id]: updated }));
+          onValidateScenario?.(activeScenario.id, updated);
+        }}
+        onApplyVertices={verts => {
+          onUpdateVertices(verts);
+          const updated = RulesEngine.validateStructure(activeScenario.patternType, verts, activeScenario.direction);
+          setValidationReportsById(prev => ({ ...prev, [activeScenario.id]: updated }));
+          onValidateScenario?.(activeScenario.id, updated);
+        }}
+        onRevalidate={() => handleValidateScenario(activeScenario)}
+        onClose={() =>
+          setValidationReportsById(prev => {
+            const next = { ...prev };
+            delete next[activeScenario.id];
+            return next;
+          })
+        }
+        variant="inline"
+      />
     );
   };
 
@@ -283,148 +230,247 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
             قوانین ({failedHardRules.length > 0 ? `${failedHardRules.length} خطا` : 'سالم'})
           </button>
         </div>
+
+        {/* Independent PRZ & TMW Zone Controls + Active Scenario Live Readout */}
+        {(onToggleShowPRZ || onToggleShowTMW) && (
+          <div className="p-2 rounded-lg bg-slate-950/90 border border-slate-800 space-y-1.5">
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={onToggleShowPRZ}
+                className={`flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                  showPRZ
+                    ? 'bg-amber-500/15 border-amber-500/45 text-amber-200'
+                    : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <span className="flex items-center gap-1">
+                  <Target className="w-3 h-3 text-amber-400" />
+                  <span>ناحیه PRZ</span>
+                </span>
+                <span className="text-[10px] font-mono">{showPRZ ? 'روشن' : 'خاموش'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleShowTMW}
+                className={`flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                  showTMW
+                    ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200'
+                    : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-cyan-400" />
+                  <span>پنجره TMW</span>
+                </span>
+                <span className="text-[10px] font-mono">{showTMW ? 'روشن' : 'خاموش'}</span>
+              </button>
+            </div>
+
+            {activeProjection && (activeProjection.przZones[0] || activeProjection.tmwZones[0]) && (
+              <div className="flex items-center justify-between gap-2 px-1 text-[10px] font-mono tabular-nums text-slate-400">
+                <span className="truncate text-amber-300/90">
+                  PRZ:{' '}
+                  {activeProjection.przZones[0]
+                    ? `${activeProjection.przZones[0].lowPrice.toLocaleString()}–${activeProjection.przZones[0].highPrice.toLocaleString()}`
+                    : '—'}
+                </span>
+                <span className="truncate text-cyan-300/90">
+                  TMW:{' '}
+                  {activeProjection.tmwZones[0]
+                    ? `#${activeProjection.tmwZones[0].startCandleIndex + 1}–#${activeProjection.tmwZones[0].endCandleIndex + 1}`
+                    : '—'}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Scrollable Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {innerTab === 'LIST' && (
           <>
-            {/* Quick Draw from Scratch & Validate buttons */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onCreateScratchScenario}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition-colors"
-              >
-                <PenTool className="w-3.5 h-3.5" />
-                <span>ترسیم سناریوی دلخواه از صفر</span>
-              </button>
-              {activeScenario && (
-                <button
-                  onClick={handleValidateActive}
-                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shrink-0"
-                  title="ارسال سناریوی فعال به RulesEngine و بررسی قوانین"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>تأیید (Validate)</span>
-                </button>
-              )}
-            </div>
+            {/* Quick Draw from Scratch button */}
+            <button
+              onClick={onCreateScratchScenario}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition-colors"
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              <span>ترسیم سناریوی دلخواه از صفر</span>
+            </button>
 
-            {renderValidationBanner()}
-
-            {/* Candidate Scenario Cards (Distinct Color per Scenario) */}
+            {/* Candidate Scenario Cards (Per-Scenario Validate + Inline Diagnostics) */}
             <div
-              className="space-y-2"
+              className="space-y-2.5"
               onMouseLeave={() => onHoverScenario?.(null)}
             >
               {scenarios.map(sc => {
                 const isActive = sc.id === activeScenario?.id;
                 const isOverlay = overlayScenarioIds.includes(sc.id);
                 const hardFails = sc.rulesResults.filter(r => r.type === 'HARD' && !r.passed).length;
+                const scSummary = validationReportsById[sc.id];
+                const scValidatedValid = scSummary
+                  ? scSummary.isValid && scSummary.rules.filter(r => r.type === 'HARD' && !r.passed).length === 0
+                  : null;
 
                 return (
-                  <div
-                    key={sc.id}
-                    onClick={() => onSelectScenario(sc.id)}
-                    onMouseEnter={() => onHoverScenario?.(sc.id)}
-                    onMouseLeave={() => onHoverScenario?.(null)}
-                    className={`p-3 rounded-xl border transition-colors cursor-pointer space-y-2 ${
-                      sc.isDiscarded
-                        ? 'bg-slate-950/60 border-slate-900 opacity-55'
-                        : isActive
-                        ? 'bg-slate-900 border-slate-600'
-                        : 'bg-slate-900/50 border-slate-800/80 hover:border-indigo-500/50'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <span
-                          className="w-3 h-3 rounded-sm shrink-0 mt-1"
-                          style={{ backgroundColor: sc.color }}
-                        />
-                        <div className="min-w-0">
-                          <h4 className="text-xs font-bold text-white leading-snug truncate">
-                            {sc.name}
-                          </h4>
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5 flex-wrap">
-                            <span>{PATTERN_LABELS_FA[sc.patternType]}</span>
-                            {sc.isPartial && (
-                              <>
-                                <span className="text-slate-600">·</span>
-                                <span className="text-amber-300">ناقص / در حال تشکیل</span>
-                              </>
-                            )}
-                            {sc.source === 'MANUAL_DRAW' && (
-                              <>
-                                <span className="text-slate-600">·</span>
-                                <span className="text-emerald-400">دستی</span>
-                              </>
-                            )}
+                  <div key={sc.id} className="space-y-2">
+                    <div
+                      onClick={() => onSelectScenario(sc.id)}
+                      onMouseEnter={() => onHoverScenario?.(sc.id)}
+                      onMouseLeave={() => onHoverScenario?.(null)}
+                      className={`p-3 rounded-xl border transition-colors cursor-pointer space-y-2 ${
+                        sc.isDiscarded
+                          ? 'bg-slate-950/60 border-slate-900 opacity-55'
+                          : isActive
+                          ? 'bg-slate-900 border-slate-600'
+                          : 'bg-slate-900/50 border-slate-800/80 hover:border-indigo-500/50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <span
+                            className="w-3 h-3 rounded-sm shrink-0 mt-1"
+                            style={{ backgroundColor: sc.color }}
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="text-xs font-bold text-white leading-snug truncate">
+                                {sc.name}
+                              </h4>
+                              {scValidatedValid !== null && (
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold border ${
+                                    scValidatedValid
+                                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                      : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                                  }`}
+                                >
+                                  {scValidatedValid ? 'معتبر ✓' : 'خطا ✕'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5 flex-wrap">
+                              <span>{PATTERN_LABELS_FA[sc.patternType]}</span>
+                              {sc.isPartial && (
+                                <>
+                                  <span className="text-slate-600">·</span>
+                                  <span className="text-amber-300">ناقص / در حال تشکیل</span>
+                                </>
+                              )}
+                              {sc.source === 'MANUAL_DRAW' && (
+                                <>
+                                  <span className="text-slate-600">·</span>
+                                  <span className="text-emerald-400">دستی</span>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
+
+                        {/* Overlay Eye Toggle */}
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            onToggleOverlay(sc.id);
+                          }}
+                          title={isOverlay ? 'مخفی کردن روی چارت' : 'نمایش هم‌زمان با رنگ اختصاصی'}
+                          className={`p-1.5 rounded-lg border shrink-0 ${
+                            isOverlay || isActive
+                              ? 'bg-slate-800 border-slate-600 text-cyan-300'
+                              : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          {isOverlay || isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        </button>
                       </div>
 
-                      {/* Overlay Eye Toggle */}
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          onToggleOverlay(sc.id);
+                      {/* Metrics & Per-Scenario Validate + Keep / Discard Actions */}
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[11px] gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 font-mono tabular-nums">
+                          <span className={hardFails === 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                            اعتبار {sc.validityScore}%
+                          </span>
+                          <span className="text-slate-600">·</span>
+                          <span className="text-slate-400">{sc.vertices.length} نقطه</span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleValidateScenario(sc)}
+                            title="تأیید و ارزیابی مجزای این سناریو با RulesEngine"
+                            className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-semibold transition-colors ${
+                              scValidatedValid === true
+                                ? 'bg-emerald-600/25 border-emerald-500/60 text-emerald-200 hover:bg-emerald-600/40'
+                                : scValidatedValid === false
+                                ? 'bg-rose-600/20 border-rose-500/50 text-rose-200 hover:bg-rose-600/35'
+                                : 'bg-emerald-600/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30'
+                            }`}
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>تأیید</span>
+                          </button>
+
+                          <button
+                            onClick={() => onToggleKeepForTree(sc.id)}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-medium transition-colors ${
+                              sc.isSelectedForTree && !sc.isDiscarded
+                                ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>{sc.isSelectedForTree && !sc.isDiscarded ? 'انتخاب‌شده' : 'نگهداری'}</span>
+                          </button>
+
+                          <button
+                            onClick={() => onToggleDiscard(sc.id)}
+                            title="رد یا حذف از درخت"
+                            className={`p-1 rounded-md border transition-colors ${
+                              sc.isDiscarded
+                                ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                                : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-rose-400'
+                            }`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Per-Scenario Inline Diagnostic Card */}
+                    {scSummary && (
+                      <RuleDiagnosticsPanel
+                        scenario={sc}
+                        summary={scSummary}
+                        candles={candles}
+                        onApplyPattern={pattern => {
+                          if (!isActive) onSelectScenario(sc.id);
+                          onApplySuggestedAlternative(pattern, sc.id);
+                          const updated = RulesEngine.validateStructure(pattern, sc.vertices, sc.direction);
+                          setValidationReportsById(prev => ({ ...prev, [sc.id]: updated }));
+                          onValidateScenario?.(sc.id, updated);
                         }}
-                        title={isOverlay ? 'مخفی کردن روی چارت' : 'نمایش هم‌زمان با رنگ اختصاصی'}
-                        className={`p-1.5 rounded-lg border shrink-0 ${
-                          isOverlay || isActive
-                            ? 'bg-slate-800 border-slate-600 text-cyan-300'
-                            : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
-                        }`}
-                      >
-                        {isOverlay || isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-
-                    {/* Metrics & Keep / Discard Actions */}
-                    <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[11px]">
-                      <div className="flex items-center gap-2 font-mono tabular-nums">
-                        <span className={hardFails === 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                          اعتبار {sc.validityScore}%
-                        </span>
-                        <span className="text-slate-600">·</span>
-                        <span className="text-slate-400">ایده‌آل {sc.idealnessScore}%</span>
-                        <span className="text-slate-600">·</span>
-                        <span className="text-slate-400">{sc.vertices.length} نقطه</span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            onToggleKeepForTree(sc.id);
-                          }}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-medium transition-colors ${
-                            sc.isSelectedForTree && !sc.isDiscarded
-                              ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
-                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <Check className="w-3 h-3" />
-                          <span>{sc.isSelectedForTree && !sc.isDiscarded ? 'انتخاب‌شده' : 'نگهداری'}</span>
-                        </button>
-
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            onToggleDiscard(sc.id);
-                          }}
-                          title="رد یا حذف از درخت"
-                          className={`p-1 rounded-md border transition-colors ${
-                            sc.isDiscarded
-                              ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
-                              : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-rose-400'
-                          }`}
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
+                        onApplyVertices={verts => {
+                          if (!isActive) onSelectScenario(sc.id);
+                          onUpdateVertices(verts, sc.id);
+                          const updated = RulesEngine.validateStructure(sc.patternType, verts, sc.direction);
+                          setValidationReportsById(prev => ({ ...prev, [sc.id]: updated }));
+                          onValidateScenario?.(sc.id, updated);
+                        }}
+                        onRevalidate={() => handleValidateScenario(sc)}
+                        onClose={() =>
+                          setValidationReportsById(prev => {
+                            const next = { ...prev };
+                            delete next[sc.id];
+                            return next;
+                          })
+                        }
+                        variant="inline"
+                      />
+                    )}
                   </div>
                 );
               })}
@@ -552,7 +598,19 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
         )}
 
         {innerTab === 'RULES' && activeScenario && (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
+            <PatternValidator
+              scenario={activeScenario}
+              candles={candles}
+              onApplyPattern={pattern => onApplySuggestedAlternative(pattern, activeScenario.id)}
+              onApplyVertices={verts => onUpdateVertices(verts, activeScenario.id)}
+              onValidationComplete={summary => {
+                setValidationReportsById(prev => ({ ...prev, [activeScenario.id]: summary }));
+                onValidateScenario?.(activeScenario.id, summary);
+              }}
+              variant="panel"
+            />
+
             {solvableAlt && (
               <div className="p-3 rounded-xl bg-amber-950/35 border border-amber-500/35 space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">

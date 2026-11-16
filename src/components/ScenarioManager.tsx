@@ -6,9 +6,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { WaveScenario, PatternFamily, WaveVertex } from '../types/elliott';
+import { Candle, WaveScenario, PatternFamily, WaveRole, WaveVertex } from '../types/elliott';
 import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole } from '../engine/rulesEngine';
 import { ChartInteractionMode } from './ChartStudio';
+import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import {
   FolderGit2,
   Lock,
@@ -35,11 +36,14 @@ interface ScenarioManagerProps {
   onDeleteScenario: (id: string) => void;
   onNewScenario: () => void;
   onValidateScenario?: (id: string, summary: ValidationSummary) => void;
-  onApplyPattern?: (pattern: PatternFamily) => void;
+  onApplyPattern?: (pattern: PatternFamily, targetScenarioId?: string) => void;
   onHoverScenario?: (id: string | null) => void;
-  onUpdateVertices?: (vertices: WaveVertex[]) => void;
+  onUpdateVertices?: (vertices: WaveVertex[], targetScenarioId?: string) => void;
   interactionMode?: ChartInteractionMode;
   onChangeInteractionMode?: (mode: ChartInteractionMode) => void;
+  candles?: Candle[];
+  parentRole?: WaveRole;
+  parentWaveLabel?: string;
 }
 
 export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
@@ -55,50 +59,46 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
   onHoverScenario,
   onUpdateVertices,
   interactionMode = 'EDIT',
-  onChangeInteractionMode
+  onChangeInteractionMode,
+  candles = [],
+  parentRole = 'ROOT',
+  parentWaveLabel = ''
 }) => {
   const [showEditor, setShowEditor] = useState<boolean>(false);
-  const [validationReport, setValidationReport] = useState<{
-    scenarioId: string;
-    scenarioName: string;
-    summary: ValidationSummary;
-  } | null>(null);
+  const [validationReportsById, setValidationReportsById] = useState<Record<string, ValidationSummary>>({});
 
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
-  // Clear stale report if the validated scenario was deleted
+  // Clean up reports only for deleted scenarios
   useEffect(() => {
-    if (validationReport && !scenarios.some(s => s.id === validationReport.scenarioId)) {
-      setValidationReport(null);
-    }
-  }, [scenarios, validationReport]);
+    const validIds = new Set(scenarios.map(s => s.id));
+    setValidationReportsById(prev => {
+      const entries = Object.entries(prev).filter(([id]) => validIds.has(id));
+      if (entries.length === Object.keys(prev).length) return prev;
+      return Object.fromEntries(entries);
+    });
+  }, [scenarios]);
 
   const handleValidate = (sc: WaveScenario) => {
-    if (sc.id !== activeScenarioId) {
-      onSelectScenario(sc.id);
-    }
-    const parentRole = sc.parentLegLabel ? inferWaveRole(sc.parentLegLabel.split('→').pop() || sc.parentLegLabel) : 'ROOT';
+    const resolvedRole: WaveRole =
+      parentRole !== 'ROOT'
+        ? parentRole
+        : sc.parentLegLabel
+        ? inferWaveRole(sc.parentLegLabel.split('→').pop() || sc.parentLegLabel)
+        : 'ROOT';
+    const resolvedLabel = parentWaveLabel || sc.parentLegLabel || '';
     const summary = RulesEngine.validateStructure(
       sc.patternType,
       sc.vertices,
       sc.direction,
-      sc.parentNodeId ? parentRole : 'ROOT',
-      sc.parentLegLabel || ''
+      sc.parentNodeId || resolvedRole !== 'ROOT' ? resolvedRole : 'ROOT',
+      resolvedLabel
     );
-    setValidationReport({
-      scenarioId: sc.id,
-      scenarioName: sc.name,
-      summary
-    });
+    setValidationReportsById(prev => ({ ...prev, [sc.id]: summary }));
     if (onValidateScenario) {
       onValidateScenario(sc.id, summary);
     }
   };
-
-  const hardFails = validationReport
-    ? validationReport.summary.rules.filter(r => r.type === 'HARD' && !r.passed)
-    : [];
-  const isReportValid = Boolean(validationReport?.summary.isValid && hardFails.length === 0);
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
@@ -143,7 +143,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
         </div>
       </div>
 
-      {/* Scenario Cards */}
+      {/* Scenario Cards (with Per-Scenario Validate & Attached Diagnostic Card) */}
       <div
         className="flex flex-col gap-2.5"
         onMouseLeave={() => onHoverScenario?.(null)}
@@ -151,196 +151,173 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
         {scenarios.map(sc => {
           const isActive = sc.id === activeScenarioId;
           const scHardFails = sc.rulesResults.filter(r => r.type === 'HARD' && !r.passed).length;
+          const scSummary = validationReportsById[sc.id];
+          const scValidatedValid = scSummary ? scSummary.isValid && scSummary.rules.filter(r => r.type === 'HARD' && !r.passed).length === 0 : null;
+          const resolvedRole: WaveRole =
+            parentRole !== 'ROOT'
+              ? parentRole
+              : sc.parentLegLabel
+              ? inferWaveRole(sc.parentLegLabel.split('→').pop() || sc.parentLegLabel)
+              : 'ROOT';
+          const resolvedLabel = parentWaveLabel || sc.parentLegLabel || '';
 
           return (
-            <div
-              key={sc.id}
-              onClick={() => onSelectScenario(sc.id)}
-              onMouseEnter={() => onHoverScenario?.(sc.id)}
-              onMouseLeave={() => onHoverScenario?.(null)}
-              className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
-                isActive
-                  ? 'bg-indigo-950/40 border-indigo-500/60 ring-1 ring-indigo-500/30'
-                  : 'bg-slate-950/60 border-slate-800/80 hover:border-indigo-500/50'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div
-                  className="w-2.5 h-2.5 rounded-sm shrink-0"
-                  style={{ backgroundColor: sc.color || (isActive ? '#818cf8' : '#475569') }}
-                />
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-xs text-white truncate">{sc.name}</span>
-                    {sc.isPrimary && (
-                      <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold">
-                        شمارش اصلی
+            <div key={sc.id} className="space-y-2">
+              <div
+                onClick={() => onSelectScenario(sc.id)}
+                onMouseEnter={() => onHoverScenario?.(sc.id)}
+                onMouseLeave={() => onHoverScenario?.(null)}
+                className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                  isActive
+                    ? 'bg-indigo-950/40 border-indigo-500/60 ring-1 ring-indigo-500/30'
+                    : 'bg-slate-950/60 border-slate-800/80 hover:border-indigo-500/50'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-2.5 h-2.5 rounded-sm shrink-0"
+                    style={{ backgroundColor: sc.color || (isActive ? '#818cf8' : '#475569') }}
+                  />
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-xs text-white truncate">{sc.name}</span>
+                      {sc.isPrimary && (
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold">
+                          شمارش اصلی
+                        </span>
+                      )}
+                      {scValidatedValid !== null && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold border ${
+                            scValidatedValid
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                              : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                          }`}
+                        >
+                          {scValidatedValid ? 'تأیید معتبر' : 'نیازمند اصلاح'}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400 font-mono">({sc.patternType})</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-slate-400 flex-wrap">
+                      <span>موج فعلی: <strong className="text-slate-200">{sc.currentWave}</strong></span>
+                      <span className="font-mono tabular-nums">
+                        اعتبار:{' '}
+                        <strong className={scHardFails === 0 && sc.vertices.length >= 2 ? 'text-emerald-400' : 'text-rose-400'}>
+                          {sc.validityScore}%
+                        </strong>
                       </span>
-                    )}
-                    <span className="text-[10px] text-slate-400 font-mono">({sc.patternType})</span>
+                      <span>منبع: <strong className="text-slate-300">{sc.source === 'AI' ? 'هوش مصنوعی' : 'کاربر'}</strong></span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] text-slate-400 flex-wrap">
-                    <span>موج فعلی: <strong className="text-slate-200">{sc.currentWave}</strong></span>
-                    <span className="font-mono tabular-nums">
-                      اعتبار:{' '}
-                      <strong className={scHardFails === 0 && sc.vertices.length >= 2 ? 'text-emerald-400' : 'text-rose-400'}>
-                        {sc.validityScore}%
-                      </strong>
-                    </span>
-                    <span>منبع: <strong className="text-slate-300">{sc.source === 'AI' ? 'هوش مصنوعی' : 'کاربر'}</strong></span>
-                  </div>
+                </div>
+
+                {/* Per-Scenario Action buttons */}
+                <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                  <button
+                    onClick={() => handleValidate(sc)}
+                    title="تأیید و ارزیابی مجزای این سناریو با RulesEngine"
+                    className={`px-2 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition-colors ${
+                      scValidatedValid === true
+                        ? 'bg-emerald-600/25 border-emerald-500/60 text-emerald-200 hover:bg-emerald-600/40'
+                        : scValidatedValid === false
+                        ? 'bg-rose-600/20 border-rose-500/50 text-rose-200 hover:bg-rose-600/35'
+                        : 'bg-emerald-600/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>تأیید</span>
+                  </button>
+
+                  <button
+                    onClick={() => onToggleLock(sc.id)}
+                    title={sc.isLocked ? 'باز کردن قفل' : 'قفل کردن سناریو'}
+                    className={`p-1.5 rounded-lg border transition-colors ${
+                      sc.isLocked
+                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {sc.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                  </button>
+
+                  <button
+                    onClick={() => onDuplicateScenario(sc.id)}
+                    title="ایجاد نسخه کپی (انشعاب)"
+                    className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+
+                  {scenarios.length > 1 && (
+                    <button
+                      onClick={() => onDeleteScenario(sc.id)}
+                      title="حذف سناریو"
+                      className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-                <button
-                  onClick={() => handleValidate(sc)}
-                  title="تأیید و ارزیابی این سناریو با RulesEngine"
-                  className="px-2 py-1 rounded-lg border bg-emerald-600/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30 text-[11px] font-semibold flex items-center gap-1 transition-colors"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>تأیید</span>
-                </button>
-
-                <button
-                  onClick={() => onToggleLock(sc.id)}
-                  title={sc.isLocked ? 'باز کردن قفل' : 'قفل کردن سناریو'}
-                  className={`p-1.5 rounded-lg border transition-colors ${
-                    sc.isLocked
-                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {sc.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                </button>
-
-                <button
-                  onClick={() => onDuplicateScenario(sc.id)}
-                  title="ایجاد نسخه کپی (انشعاب)"
-                  className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-
-                {scenarios.length > 1 && (
-                  <button
-                    onClick={() => onDeleteScenario(sc.id)}
-                    title="حذف سناریو"
-                    className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
+              {/* Per-Scenario Inline Diagnostic & Repair Card */}
+              {scSummary && (
+                <RuleDiagnosticsPanel
+                  scenario={sc}
+                  summary={scSummary}
+                  candles={candles}
+                  parentRole={resolvedRole}
+                  parentWaveLabel={resolvedLabel}
+                  onApplyPattern={
+                    onApplyPattern
+                      ? pattern => {
+                          if (sc.id !== activeScenarioId) onSelectScenario(sc.id);
+                          onApplyPattern(pattern, sc.id);
+                          const updatedSummary = RulesEngine.validateStructure(
+                            pattern,
+                            sc.vertices,
+                            sc.direction,
+                            sc.parentNodeId || resolvedRole !== 'ROOT' ? resolvedRole : 'ROOT',
+                            resolvedLabel
+                          );
+                          setValidationReportsById(prev => ({ ...prev, [sc.id]: updatedSummary }));
+                          onValidateScenario?.(sc.id, updatedSummary);
+                        }
+                      : undefined
+                  }
+                  onApplyVertices={
+                    onUpdateVertices
+                      ? verts => {
+                          if (sc.id !== activeScenarioId) onSelectScenario(sc.id);
+                          onUpdateVertices(verts, sc.id);
+                          const updatedSummary = RulesEngine.validateStructure(
+                            sc.patternType,
+                            verts,
+                            sc.direction,
+                            sc.parentNodeId || resolvedRole !== 'ROOT' ? resolvedRole : 'ROOT',
+                            resolvedLabel
+                          );
+                          setValidationReportsById(prev => ({ ...prev, [sc.id]: updatedSummary }));
+                          onValidateScenario?.(sc.id, updatedSummary);
+                        }
+                      : undefined
+                  }
+                  onRevalidate={() => handleValidate(sc)}
+                  onClose={() =>
+                    setValidationReportsById(prev => {
+                      const next = { ...prev };
+                      delete next[sc.id];
+                      return next;
+                    })
+                  }
+                  variant="inline"
+                />
+              )}
             </div>
           );
         })}
       </div>
-
-      {/* RulesEngine Validation Result Card (Green = Valid, Red = Error) */}
-      {validationReport && (
-        <div
-          className={`p-4 rounded-xl border space-y-3 transition-colors ${
-            isReportValid
-              ? 'bg-emerald-950/35 border-emerald-500/50'
-              : 'bg-rose-950/35 border-rose-500/50'
-          }`}
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2">
-              {isReportValid ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-              ) : (
-                <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
-              )}
-              <div>
-                <h4 className={`text-xs font-bold ${isReportValid ? 'text-emerald-300' : 'text-rose-300'}`}>
-                  {isReportValid
-                    ? `تأیید معتبر: «${validationReport.scenarioName}» مطابق قوانین الیوت است`
-                    : `خطا در اعتبارسنجی «${validationReport.scenarioName}» (${hardFails.length} نقض قانون)`}
-                </h4>
-                <p className="text-[11px] text-slate-300 mt-0.5">
-                  الگو: {PATTERN_LABELS_FA[validationReport.summary.patternType]}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 font-mono tabular-nums text-xs shrink-0">
-              <span
-                className={`px-2 py-0.5 rounded font-bold border ${
-                  isReportValid
-                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                    : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                }`}
-              >
-                {validationReport.summary.validityScore}%
-              </span>
-            </div>
-          </div>
-
-          {/* Rule-by-rule color-coded list */}
-          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
-            {validationReport.summary.rules.map(rule => (
-              <div
-                key={rule.ruleId}
-                className={`p-2.5 rounded-lg border text-[11px] space-y-0.5 ${
-                  rule.passed
-                    ? 'bg-emerald-950/25 border-emerald-500/30 text-emerald-200'
-                    : rule.type === 'HARD'
-                    ? 'bg-rose-950/45 border-rose-500/50 text-rose-200'
-                    : 'bg-amber-950/25 border-amber-500/30 text-amber-200'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 font-bold">
-                  <div className="flex items-center gap-1.5">
-                    {rule.passed ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    ) : rule.type === 'HARD' ? (
-                      <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                    ) : (
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    )}
-                    <span>{rule.nameFa}</span>
-                  </div>
-                  <span className="font-mono tabular-nums text-[10px] opacity-80">{rule.score}%</span>
-                </div>
-                <p className="text-[11px] opacity-90 leading-relaxed pr-5">{rule.messageFa}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Optional Suggested Alternative Pattern if RulesEngine proposed one */}
-          {!isReportValid && validationReport.summary.suggestedAlternative && onApplyPattern && (
-            <div className="pt-2 border-t border-rose-500/25 flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 text-[11px] text-amber-200">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>
-                  پیشنهاد جایگزین: <strong>{PATTERN_LABELS_FA[validationReport.summary.suggestedAlternative]}</strong>
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  const alt = validationReport.summary.suggestedAlternative!;
-                  onApplyPattern(alt);
-                  const targetSc = scenarios.find(s => s.id === validationReport.scenarioId);
-                  if (targetSc) {
-                    const updatedSummary = RulesEngine.validateStructure(alt, targetSc.vertices, targetSc.direction);
-                    setValidationReport({
-                      scenarioId: targetSc.id,
-                      scenarioName: targetSc.name,
-                      summary: updatedSummary
-                    });
-                  }
-                }}
-                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors"
-              >
-                تبدیل و اعتبارسنجی مجدد
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Inline Active Scenario Vertex & Pattern Editor */}
       {showEditor && activeScenario && onUpdateVertices && (

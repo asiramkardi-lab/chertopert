@@ -1,13 +1,13 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * Wizard Step 3: Recursive Fractal Tree & Multi-Timeframe Drill-Down
- * Supports viewing Level 1..N Fractal Tree, inspecting wave legs, double-clicking chart legs,
- * validating parent-child consistency (C04), editing sub-scenarios, and saving subtrees recursively.
+ * Wizard Step 3: Recursive Fractal Tree, Bijective Leg-to-Subbranch Mapping,
+ * Multi-Timeframe Drill-Down, Independent Per-Scenario Validation, and Final-Step Target & PRZ/TMW Forecast.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
+  Candle,
   FractalNode,
   DrillDownContext,
   WaveScenario,
@@ -18,9 +18,13 @@ import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole } from
 import { DEGREE_CONFIGS } from '../engine/fractalEngine';
 import { getLowerTimeframe } from '../data/sampleMarketData';
 import { ChartInteractionMode } from './ChartStudio';
+import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
+import { PatternValidator } from './PatternValidator';
+import { TargetProjectionPanel, TargetProjectionBranchItem } from './TargetProjectionPanel';
 import {
   GitBranch,
   ChevronLeft,
+  ChevronDown,
   ArrowRight,
   Layers,
   Eye,
@@ -36,7 +40,12 @@ import {
   Trash2,
   Sparkles,
   CornerDownLeft,
-  ShieldCheck
+  ShieldCheck,
+  Target,
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpLeft
 } from 'lucide-react';
 
 const TF_ORDER = ['1M', '1W', '1D', '4H', '1H', '15M'];
@@ -51,9 +60,11 @@ interface WizardStep3DrillDownProps {
   onDrillIntoLeg: (
     parentNodeId: string,
     parentScenario: WaveScenario,
-    legIndex: number
+    legIndex: number,
+    baseDrillStack?: DrillDownContext[]
   ) => void;
   onJumpToBreadcrumb: (stackIndex: number) => void; // -1 returns to Level 1
+  onJumpToBranch?: (node: FractalNode, rootNodeId: string) => void;
   activeSubScenarios: WaveScenario[];
   activeSubScenarioId: string;
   overlayScenarioIds: string[];
@@ -61,15 +72,23 @@ interface WizardStep3DrillDownProps {
   onToggleOverlay: (id: string) => void;
   onToggleKeepSubScenario: (id: string) => void;
   onToggleDiscardSubScenario: (id: string) => void;
-  onPatternChange: (pattern: PatternFamily) => void;
-  onUpdateVertices: (vertices: WaveVertex[]) => void;
+  onPatternChange: (pattern: PatternFamily, targetScenarioId?: string) => void;
+  onUpdateVertices: (vertices: WaveVertex[], targetScenarioId?: string) => void;
   interactionMode: ChartInteractionMode;
   onChangeInteractionMode: (mode: ChartInteractionMode) => void;
   onCreateScratchScenario: () => void;
   onBackToStep2: () => void;
   activeLevelScenario: WaveScenario;
+  rootScenarios?: WaveScenario[];
+  allTreeBranchItems?: TargetProjectionBranchItem[];
   onValidateScenario?: (id: string, summary: ValidationSummary) => void;
   onHoverScenario?: (id: string | null) => void;
+  onHoverLeg?: (legIndex: number | null) => void;
+  candles?: Candle[];
+  showPRZ?: boolean;
+  onToggleShowPRZ?: () => void;
+  showTMW?: boolean;
+  onToggleShowTMW?: () => void;
 }
 
 export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
@@ -81,6 +100,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   drillStack,
   onDrillIntoLeg,
   onJumpToBreadcrumb,
+  onJumpToBranch,
   activeSubScenarios,
   activeSubScenarioId,
   overlayScenarioIds,
@@ -95,95 +115,329 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   onCreateScratchScenario,
   onBackToStep2,
   activeLevelScenario,
+  rootScenarios = [],
+  allTreeBranchItems = [],
   onValidateScenario,
-  onHoverScenario
+  onHoverScenario,
+  onHoverLeg,
+  candles = [],
+  showPRZ = true,
+  onToggleShowPRZ,
+  showTMW = true,
+  onToggleShowTMW
 }) => {
-  const [subTab, setSubTab] = useState<'SCENARIOS' | 'LEGS' | 'EDIT' | 'RULES'>('SCENARIOS');
-  const [validationBanner, setValidationBanner] = useState<{
-    scenarioId: string;
-    scenarioName: string;
-    summary: ValidationSummary;
-  } | null>(null);
+  const [subTab, setSubTab] = useState<'SCENARIOS' | 'LEGS' | 'TARGETS' | 'EDIT' | 'RULES'>('SCENARIOS');
+  const [validationReportsById, setValidationReportsById] = useState<Record<string, ValidationSummary>>({});
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Record<string, boolean>>({});
 
   const currentDrill = drillStack.length > 0 ? drillStack[drillStack.length - 1] : null;
 
   useEffect(() => {
-    setValidationBanner(null);
     if (currentDrill?.nodeId) {
       setSubTab('SCENARIOS');
     }
-  }, [activeLevelScenario.id, currentDrill?.nodeId]);
+  }, [currentDrill?.nodeId]);
 
-  const handleValidateActiveLevel = () => {
-    const summary = RulesEngine.validateStructure(
-      activeLevelScenario.patternType,
-      activeLevelScenario.vertices,
-      activeLevelScenario.direction,
+  const activeProjection = useMemo(() => {
+    if (activeLevelScenario.vertices.length < 2) return null;
+    return RulesEngine.predictScenarioProjections(
+      activeLevelScenario,
+      candles,
       currentDrill?.role || 'ROOT',
       currentDrill?.waveLabel || ''
     );
-    setValidationBanner({
-      scenarioId: activeLevelScenario.id,
-      scenarioName: activeLevelScenario.name,
-      summary
-    });
+  }, [activeLevelScenario, candles, currentDrill?.role, currentDrill?.waveLabel]);
+
+  const handleValidateScenario = (sc: WaveScenario) => {
+    const summary = RulesEngine.validateStructure(
+      sc.patternType,
+      sc.vertices,
+      sc.direction,
+      currentDrill?.role || 'ROOT',
+      currentDrill?.waveLabel || ''
+    );
+    setValidationReportsById(prev => ({ ...prev, [sc.id]: summary }));
     if (onValidateScenario) {
-      onValidateScenario(activeLevelScenario.id, summary);
+      onValidateScenario(sc.id, summary);
     }
   };
+
+  const handleValidateActiveLevel = () => {
+    handleValidateScenario(activeLevelScenario);
+  };
+
+  const getNextValidLowerTFFor = (tf: string, deg: WaveScenario['degree']) => {
+    const nxt = getLowerTimeframe(tf);
+    if (!nxt) return null;
+    const lowestIdx = TF_ORDER.indexOf(confirmedLowestTF);
+    const nxtIdx = TF_ORDER.indexOf(nxt);
+    const degLevel = DEGREE_CONFIGS[deg].level;
+    if (nxtIdx > lowestIdx || degLevel >= maxAllowedDegree) return null;
+    return nxt;
+  };
+
   const currentTF = activeLevelScenario.timeframe;
-  const nextLowerTF = getLowerTimeframe(currentTF);
-
-  const lowestIdx = TF_ORDER.indexOf(confirmedLowestTF);
-  const nextLowerIdx = nextLowerTF ? TF_ORDER.indexOf(nextLowerTF) : 99;
-  const currentDegreeLevel = DEGREE_CONFIGS[activeLevelScenario.degree].level;
-
-  const canDrillDeeper =
-    Boolean(nextLowerTF) &&
-    nextLowerIdx <= lowestIdx &&
-    currentDegreeLevel < maxAllowedDegree;
+  const nextLowerTF = getNextValidLowerTFFor(currentTF, activeLevelScenario.degree);
+  const canDrillDeeper = Boolean(nextLowerTF);
 
   const activeNode = fractalTreeNodes.find(n => n.id === activeRootNodeId) || fractalTreeNodes[0];
 
-  const renderTreeNodes = (nodes: FractalNode[], depth = 0) => {
+  const resolveScenarioForNode = (node: FractalNode): WaveScenario => {
+    const branchMatch = allTreeBranchItems.find(b => b.id === node.id)?.scenario;
+    if (branchMatch) return branchMatch;
+    const foundRoot = rootScenarios.find(s => s.id === node.scenarioId);
+    if (foundRoot) return foundRoot;
+    return {
+      ...activeLevelScenario,
+      id: node.scenarioId,
+      name: node.scenarioName,
+      color: node.color,
+      timeframe: node.timeframe,
+      degree: node.degree,
+      patternType: node.patternType,
+      vertices: node.vertices,
+      validityScore: node.validityScore
+    };
+  };
+
+  const toggleNodeExpanded = (nodeId: string) => {
+    setExpandedNodeIds(prev => ({ ...prev, [nodeId]: !(prev[nodeId] ?? true) }));
+  };
+
+  // Recursive Bijective Fractal Tree Renderer (Every Node + All Its Wave Legs + All Matching Child Sub-Branches)
+  const renderTreeNodes = (nodes: FractalNode[], rootNodeId: string, depth = 0) => {
     return nodes.map(node => {
-      const isSelected = depth === 0 && node.id === activeNode?.id && !currentDrill;
+      const nodeScenario = resolveScenarioForNode(node);
+      const isRoot = depth === 0;
+      const isSelected = isRoot
+        ? node.id === activeNode?.id && !currentDrill
+        : Boolean(currentDrill && currentDrill.nodeId === node.drillKey && activeSubScenarioId === node.scenarioId);
+      const isExpanded = expandedNodeIds[node.id] ?? (isRoot ? node.id === activeNode?.id || nodes.length === 1 : true);
+      const nodeNextTF = getNextValidLowerTFFor(node.timeframe, node.degree);
+      const nodeLegs = nodeScenario.vertices.slice(0, -1).map((vStart, legIdx) => {
+        const vEnd = nodeScenario.vertices[legIdx + 1];
+        const legLabel = `موج ${vStart.label}→${vEnd.label}`;
+        const role = inferWaveRole(vEnd.label);
+        const childBranches = node.children.filter(c =>
+          c.legIndex !== undefined ? c.legIndex === legIdx : c.waveLabel === legLabel
+        );
+        const pct = vStart.price > 0 ? Math.round(((vEnd.price - vStart.price) / vStart.price) * 1000) / 10 : 0;
+        return { legIdx, vStart, vEnd, legLabel, role, childBranches, pct };
+      });
+
+      const scSummary = isRoot ? validationReportsById[node.scenarioId] : undefined;
+      const scValidatedValid = scSummary
+        ? scSummary.isValid && scSummary.rules.filter(r => r.type === 'HARD' && !r.passed).length === 0
+        : null;
+
       return (
-        <div key={node.id} className={depth > 0 ? 'mr-3 pr-2.5 border-r border-slate-800 space-y-1.5' : 'space-y-1.5'}>
+        <div key={node.id} className={depth > 0 ? 'mr-3 pr-2.5 border-r border-indigo-500/30 space-y-1.5' : 'space-y-2'}>
           <div
             onClick={() => {
-              if (depth === 0) {
+              if (onJumpToBranch) {
+                onJumpToBranch(node, rootNodeId);
+              } else if (isRoot) {
                 onJumpToBreadcrumb(-1);
                 onSelectRootNode(node.id);
               }
             }}
             onMouseEnter={() => {
-              if (depth === 0) onHoverScenario?.(node.scenarioId);
+              if (isRoot) onHoverScenario?.(node.scenarioId);
             }}
             onMouseLeave={() => {
-              if (depth === 0) onHoverScenario?.(null);
+              if (isRoot) onHoverScenario?.(null);
             }}
-            className={`p-2.5 rounded-lg border transition-colors cursor-pointer ${
+            className={`p-2.5 rounded-xl border transition-colors cursor-pointer space-y-1.5 ${
               isSelected
-                ? 'bg-slate-800/80 border-cyan-500/50'
-                : 'bg-slate-900/60 border-slate-800 hover:border-indigo-500/50'
+                ? 'bg-[#101a32] border-cyan-500/60'
+                : 'bg-slate-900/65 border-slate-800 hover:border-indigo-500/50'
             }`}
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                {nodeLegs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleNodeExpanded(node.id);
+                    }}
+                    className="p-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white shrink-0"
+                    title={isExpanded ? 'بستن گام‌های متناظر' : 'باز کردن گام‌های متناظر'}
+                  >
+                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+                  </button>
+                )}
                 <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: node.color }} />
                 <span className="text-xs font-bold text-white truncate">{node.scenarioName}</span>
+                {scValidatedValid !== null && (
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold border ${
+                      scValidatedValid
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    {scValidatedValid ? 'معتبر ✓' : 'خطا ✕'}
+                  </span>
+                )}
               </div>
-              <span className="text-[11px] font-mono text-cyan-400 shrink-0">{node.timeframe}</span>
+
+              <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                {isRoot && (
+                  <button
+                    type="button"
+                    onClick={() => handleValidateScenario(nodeScenario)}
+                    title="تأیید و ارزیابی مجزای این سناریو"
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10.5px] font-semibold transition-colors ${
+                      scValidatedValid === true
+                        ? 'bg-emerald-600/25 border-emerald-500/60 text-emerald-200 hover:bg-emerald-600/40'
+                        : scValidatedValid === false
+                        ? 'bg-rose-600/20 border-rose-500/50 text-rose-200 hover:bg-rose-600/35'
+                        : 'bg-emerald-600/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3 h-3" />
+                    <span>تأیید</span>
+                  </button>
+                )}
+                <span className="text-[11px] font-mono text-cyan-400 shrink-0">{node.timeframe}</span>
+              </div>
             </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
-              <span>
+
+            <div className="flex items-center justify-between text-[10.5px] text-slate-400 gap-2">
+              <span className="truncate">
                 {node.waveLabel} · {PATTERN_LABELS_FA[node.patternType].split('(')[0].trim()}
               </span>
-              <span className="font-mono tabular-nums text-emerald-400">{node.validityScore}%</span>
+              <div className="flex items-center gap-2 shrink-0 font-mono tabular-nums">
+                <span className="text-slate-500">{node.children.length} زیرشاخه</span>
+                <span className={node.isValid ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                  {node.validityScore}%
+                </span>
+              </div>
             </div>
           </div>
-          {node.children.length > 0 && <div className="space-y-1.5">{renderTreeNodes(node.children, depth + 1)}</div>}
+
+          {isRoot && scSummary && (
+            <RuleDiagnosticsPanel
+              scenario={nodeScenario}
+              summary={scSummary}
+              candles={candles}
+              parentRole="ROOT"
+              parentWaveLabel=""
+              onApplyPattern={pattern => {
+                if (node.id !== activeRootNodeId) onSelectRootNode(node.id);
+                onPatternChange(pattern, nodeScenario.id);
+                const updated = RulesEngine.validateStructure(pattern, nodeScenario.vertices, nodeScenario.direction);
+                setValidationReportsById(prev => ({ ...prev, [nodeScenario.id]: updated }));
+                onValidateScenario?.(nodeScenario.id, updated);
+              }}
+              onApplyVertices={verts => {
+                if (node.id !== activeRootNodeId) onSelectRootNode(node.id);
+                onUpdateVertices(verts, nodeScenario.id);
+                const updated = RulesEngine.validateStructure(
+                  nodeScenario.patternType,
+                  verts,
+                  nodeScenario.direction
+                );
+                setValidationReportsById(prev => ({ ...prev, [nodeScenario.id]: updated }));
+                onValidateScenario?.(nodeScenario.id, updated);
+              }}
+              onRevalidate={() => handleValidateScenario(nodeScenario)}
+              onClose={() =>
+                setValidationReportsById(prev => {
+                  const next = { ...prev };
+                  delete next[nodeScenario.id];
+                  return next;
+                })
+              }
+              variant="inline"
+            />
+          )}
+
+          {/* 1-to-1 Wave Legs & Corresponding Sub-Branches inside Tree */}
+          {isExpanded && nodeLegs.length > 0 && (
+            <div className="mr-3 pr-2.5 border-r border-slate-800 space-y-1.5">
+              {nodeLegs.map(leg => {
+                const isUp = leg.vEnd.price >= leg.vStart.price;
+                const parentScopeId = node.drillKey || node.id;
+                const parentStackPath = node.drillStackPath || [];
+                const canHighlightOnChart = nodeScenario.id === activeLevelScenario.id;
+
+                return (
+                  <div key={`${node.id}-leg-${leg.legIdx}`} className="space-y-1.5">
+                    <div
+                      onMouseEnter={() => {
+                        if (canHighlightOnChart) onHoverLeg?.(leg.legIdx);
+                      }}
+                      onMouseLeave={() => {
+                        if (canHighlightOnChart) onHoverLeg?.(null);
+                      }}
+                      className="px-2.5 py-2 rounded-lg bg-slate-950/75 border border-slate-800/80 hover:border-slate-700 flex items-center justify-between gap-2 transition-colors"
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5 text-[11px] flex-wrap">
+                          {isUp ? (
+                            <TrendingUp className="w-3 h-3 text-emerald-400 shrink-0" />
+                          ) : (
+                            <TrendingDown className="w-3 h-3 text-rose-400 shrink-0" />
+                          )}
+                          <span className="font-mono font-bold text-slate-200">{leg.legLabel}</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[9.5px] font-semibold ${
+                              leg.role === 'MOTIVE'
+                                ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-amber-500/15 text-amber-300'
+                            }`}
+                          >
+                            {leg.role === 'MOTIVE' ? 'اصلی ۵ موجی' : 'اصلاحی ۳ موجی'}
+                          </span>
+                          <span
+                            className={`font-mono tabular-nums text-[10px] ${
+                              leg.pct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            {leg.pct > 0 ? `+${leg.pct}%` : `${leg.pct}%`}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono tabular-nums">
+                          {leg.vStart.price.toLocaleString()} ← {leg.vEnd.price.toLocaleString()} ·{' '}
+                          {Math.abs(leg.vEnd.candleIndex - leg.vStart.candleIndex) + 1} کندل
+                        </div>
+                      </div>
+
+                      {nodeNextTF ? (
+                        <button
+                          type="button"
+                          onClick={() => onDrillIntoLeg(parentScopeId, nodeScenario, leg.legIdx, parentStackPath)}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-semibold shrink-0 transition-colors border ${
+                            leg.childBranches.length > 0
+                              ? 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/45 text-cyan-200'
+                              : 'bg-indigo-600/20 hover:bg-indigo-600/35 border-indigo-500/45 text-indigo-200'
+                          }`}
+                        >
+                          <Layers className="w-3 h-3" />
+                          <span>
+                            {leg.childBranches.length > 0
+                              ? `مشاهده ${nodeNextTF} (${leg.childBranches.length})`
+                              : `متناظر ${nodeNextTF}`}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-600 shrink-0">کف تایم</span>
+                      )}
+                    </div>
+
+                    {leg.childBranches.length > 0 && (
+                      <div className="space-y-1.5">
+                        {renderTreeNodes(leg.childBranches, rootNodeId, depth + 1)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     });
@@ -193,137 +447,99 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   const waveLegs = activeLevelScenario.vertices.slice(0, -1).map((vStart, idx) => {
     const vEnd = activeLevelScenario.vertices[idx + 1];
     const role = inferWaveRole(vEnd.label);
+    const pctChange = vStart.price > 0 ? Math.round(((vEnd.price - vStart.price) / vStart.price) * 1000) / 10 : 0;
+    const legLabel = `موج ${vStart.label}→${vEnd.label}`;
+
+    // Find matching child nodes in fractalTreeNodes for exact 1-to-1 leg status
+    const findChildNodes = (list: FractalNode[]): FractalNode[] => {
+      for (const n of list) {
+        const matchesActive =
+          (!currentDrill && n.scenarioId === activeLevelScenario.id) ||
+          (currentDrill && n.drillKey === currentDrill.nodeId && n.scenarioId === activeLevelScenario.id);
+        if (matchesActive) {
+          return n.children.filter(c => (c.legIndex !== undefined ? c.legIndex === idx : c.waveLabel === legLabel));
+        }
+        const deep = findChildNodes(n.children);
+        if (deep.length > 0) return deep;
+      }
+      return [];
+    };
+    const syncedChildren = findChildNodes(fractalTreeNodes);
+
     return {
       idx,
       vStart,
       vEnd,
       legLabel: `${vStart.label} → ${vEnd.label}`,
+      pctChange,
       role,
-      candleSpan: Math.abs(vEnd.candleIndex - vStart.candleIndex)
+      candleSpan: Math.abs(vEnd.candleIndex - vStart.candleIndex) + 1,
+      syncedChildren
     };
   });
 
   const failedHardRules = activeLevelScenario.rulesResults.filter(r => r.type === 'HARD' && !r.passed);
   const solvableAlt = failedHardRules.find(r => r.canBeSolvedByAlternate)?.canBeSolvedByAlternate;
-
-  const bannerHardFails = validationBanner
-    ? validationBanner.summary.rules.filter(r => r.type === 'HARD' && !r.passed)
-    : [];
-  const isBannerValid = Boolean(validationBanner?.summary.isValid && bannerHardFails.length === 0);
+  const primaryPrz = activeProjection?.przZones.find(z => z.isPrimary) || activeProjection?.przZones[0];
+  const primaryTmw = activeProjection?.tmwZones.find(z => z.isPrimary) || activeProjection?.tmwZones[0];
 
   const renderValidationBanner = () => {
-    if (!validationBanner || validationBanner.scenarioId !== activeLevelScenario.id) return null;
+    const summary = validationReportsById[activeLevelScenario.id];
+    if (!summary) return null;
     return (
-      <div
-        className={`p-3.5 rounded-xl border space-y-2.5 transition-colors ${
-          isBannerValid
-            ? 'bg-emerald-950/35 border-emerald-500/50'
-            : 'bg-rose-950/35 border-rose-500/50'
-        }`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            {isBannerValid ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            ) : (
-              <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
-            )}
-            <div>
-              <h4 className={`text-xs font-bold ${isBannerValid ? 'text-emerald-300' : 'text-rose-300'}`}>
-                {isBannerValid
-                  ? `تأیید معتبر: «${validationBanner.scenarioName}» مطابق قوانین است`
-                  : `خطا در اعتبارسنجی «${validationBanner.scenarioName}» (${bannerHardFails.length} نقض قانون)`}
-              </h4>
-              <p className="text-[11px] text-slate-300 mt-0.5">
-                الگو: {PATTERN_LABELS_FA[validationBanner.summary.patternType]}
-              </p>
-            </div>
-          </div>
-          <span
-            className={`px-2 py-0.5 rounded font-mono tabular-nums text-[11px] font-bold border shrink-0 ${
-              isBannerValid
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-            }`}
-          >
-            {validationBanner.summary.validityScore}%
-          </span>
-        </div>
-
-        <div className="space-y-1.5 max-h-48 overflow-y-auto">
-          {validationBanner.summary.rules.map(rule => (
-            <div
-              key={rule.ruleId}
-              className={`p-2 rounded-lg border text-[11px] space-y-0.5 ${
-                rule.passed
-                  ? 'bg-emerald-950/25 border-emerald-500/30 text-emerald-200'
-                  : rule.type === 'HARD'
-                  ? 'bg-rose-950/45 border-rose-500/50 text-rose-200'
-                  : 'bg-amber-950/25 border-amber-500/30 text-amber-200'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2 font-bold">
-                <div className="flex items-center gap-1.5">
-                  {rule.passed ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  ) : rule.type === 'HARD' ? (
-                    <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  )}
-                  <span>{rule.nameFa}</span>
-                </div>
-                <span className="font-mono tabular-nums text-[10px] opacity-80">{rule.score}%</span>
-              </div>
-              <p className="text-[11px] opacity-90 leading-relaxed pr-5">{rule.messageFa}</p>
-            </div>
-          ))}
-        </div>
-
-        {!isBannerValid && validationBanner.summary.suggestedAlternative && (
-          <div className="pt-2 border-t border-rose-500/25 flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-[11px] text-amber-200">
-              پیشنهاد جایگزین: <strong>{PATTERN_LABELS_FA[validationBanner.summary.suggestedAlternative]}</strong>
-            </span>
-            <button
-              onClick={() => {
-                const alt = validationBanner.summary.suggestedAlternative!;
-                onPatternChange(alt);
-                const updated = RulesEngine.validateStructure(
-                  alt,
-                  activeLevelScenario.vertices,
-                  activeLevelScenario.direction,
-                  currentDrill?.role || 'ROOT',
-                  currentDrill?.waveLabel || ''
-                );
-                setValidationBanner({
-                  scenarioId: activeLevelScenario.id,
-                  scenarioName: activeLevelScenario.name,
-                  summary: updated
-                });
-              }}
-              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors"
-            >
-              تبدیل و اعتبارسنجی مجدد
-            </button>
-          </div>
-        )}
-      </div>
+      <RuleDiagnosticsPanel
+        scenario={activeLevelScenario}
+        summary={summary}
+        candles={candles}
+        parentRole={currentDrill?.role || 'ROOT'}
+        parentWaveLabel={currentDrill?.waveLabel || ''}
+        onApplyPattern={pattern => {
+          onPatternChange(pattern);
+          const updated = RulesEngine.validateStructure(
+            pattern,
+            activeLevelScenario.vertices,
+            activeLevelScenario.direction,
+            currentDrill?.role || 'ROOT',
+            currentDrill?.waveLabel || ''
+          );
+          setValidationReportsById(prev => ({ ...prev, [activeLevelScenario.id]: updated }));
+          onValidateScenario?.(activeLevelScenario.id, updated);
+        }}
+        onApplyVertices={verts => {
+          onUpdateVertices(verts);
+          const updated = RulesEngine.validateStructure(
+            activeLevelScenario.patternType,
+            verts,
+            activeLevelScenario.direction,
+            currentDrill?.role || 'ROOT',
+            currentDrill?.waveLabel || ''
+          );
+          setValidationReportsById(prev => ({ ...prev, [activeLevelScenario.id]: updated }));
+          onValidateScenario?.(activeLevelScenario.id, updated);
+        }}
+        onRevalidate={() => handleValidateScenario(activeLevelScenario)}
+        onClose={() =>
+          setValidationReportsById(prev => {
+            const next = { ...prev };
+            delete next[activeLevelScenario.id];
+            return next;
+          })
+        }
+        variant="inline"
+      />
     );
   };
 
   return (
     <div className="flex flex-col h-full">
-      {/* Breadcrumb & Header */}
+      {/* Breadcrumb, PRZ/TMW Bar & Navigation */}
       <div className="p-4 pb-3 border-b border-slate-800 space-y-2.5 shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-white flex items-center gap-2">
             <GitBranch className="w-4 h-4 text-indigo-400" />
-            <span>مرحله ۳: درخت فرکتالی و ریزش موج‌ها</span>
+            <span>مرحله ۳: درخت متناظر، تارگت و PRZ/TMW</span>
           </h2>
-          <span className="text-[11px] font-mono text-slate-400">
-            سقف: {confirmedLowestTF}
-          </span>
+          <span className="text-[11px] font-mono text-slate-400">سقف: {confirmedLowestTF}</span>
         </div>
 
         {/* Interactive Breadcrumb Trail */}
@@ -356,53 +572,98 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
         </div>
 
         {/* Context Banner when Drilled Down */}
-        {currentDrill ? (
-          <div className="p-2.5 rounded-lg bg-indigo-950/35 border border-indigo-500/30 text-[11px] text-slate-300 flex items-center justify-between gap-2">
-            <div>
+        {currentDrill && (
+          <div className="p-2 rounded-lg bg-indigo-950/35 border border-indigo-500/30 text-[11px] text-slate-300 flex items-center justify-between gap-2">
+            <div className="truncate">
               <span className="text-indigo-300 font-bold">موج مادر: {currentDrill.waveLabel}</span>
               <span className="text-slate-500 mx-1.5">·</span>
               <span>
-                انتظار فرکتالی:{' '}
+                تناظر:{' '}
                 <strong className={currentDrill.role === 'MOTIVE' ? 'text-emerald-300' : 'text-amber-300'}>
                   {currentDrill.role === 'MOTIVE' ? 'اصلی (۵ موجی / قطر)' : 'اصلاحی (۳ موجی / مثلث)'}
                 </strong>
               </span>
             </div>
-            <span className="font-mono text-cyan-400">{currentDrill.targetTimeframe}</span>
+            <span className="font-mono text-cyan-400 shrink-0">{currentDrill.targetTimeframe}</span>
           </div>
-        ) : (
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            برای مشاهده داده‌ها و سناریوهای تایم‌فریم پایین‌تر هر موج، مستقیماً روی خط موج در نمودار کلیک کنید یا از تب «یال‌ها» دکمه ریزش را بزنید.
-          </p>
         )}
 
-        {/* Sub-tabs when drilled down, or Root mode switcher */}
-        <div className="grid grid-cols-4 gap-1 bg-slate-950 border border-slate-800 rounded-lg p-1 text-[11px]">
+        {/* Independent PRZ & TMW Zone Controls */}
+        {(onToggleShowPRZ || onToggleShowTMW) && (
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              onClick={onToggleShowPRZ}
+              className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+                showPRZ
+                  ? 'bg-amber-500/15 border-amber-500/45 text-amber-200'
+                  : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <span className="flex items-center gap-1">
+                {showPRZ ? <Eye className="w-3.5 h-3.5 text-amber-400" /> : <EyeOff className="w-3.5 h-3.5" />}
+                <span>PRZ قیمتی</span>
+              </span>
+              <span className="font-mono text-[10px]">{showPRZ ? 'نمایش' : 'مخفی'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleShowTMW}
+              className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+                showTMW
+                  ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200'
+                  : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <span className="flex items-center gap-1">
+                {showTMW ? <Eye className="w-3.5 h-3.5 text-cyan-400" /> : <EyeOff className="w-3.5 h-3.5" />}
+                <span>TMW زمانی</span>
+              </span>
+              <span className="font-mono text-[10px]">{showTMW ? 'نمایش' : 'مخفی'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* 5 Clean Navigation Sub-Tabs */}
+        <div className="grid grid-cols-5 gap-1 bg-slate-950 border border-slate-800 rounded-lg p-1 text-[10.5px]">
           <button
             onClick={() => setSubTab('SCENARIOS')}
-            className={`py-1.5 rounded-md font-medium ${
+            className={`py-1.5 rounded-md font-semibold transition-colors ${
               subTab === 'SCENARIOS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
-            {currentDrill ? `زیرسناریوها (${activeSubScenarios.length})` : `درخت (${fractalTreeNodes.length})`}
+            {currentDrill ? `زیرها (${activeSubScenarios.length})` : `درخت (${fractalTreeNodes.length})`}
           </button>
           <button
             onClick={() => {
               setSubTab('LEGS');
               onHoverScenario?.(null);
             }}
-            className={`py-1.5 rounded-md font-medium ${
+            className={`py-1.5 rounded-md font-semibold transition-colors ${
               subTab === 'LEGS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
-            یال‌ها ({waveLegs.length})
+            گام‌ها ({waveLegs.length})
+          </button>
+          <button
+            onClick={() => {
+              setSubTab('TARGETS');
+              onHoverLeg?.(null);
+            }}
+            className={`py-1.5 rounded-md font-semibold transition-colors ${
+              subTab === 'TARGETS' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            تارگت‌ها
           </button>
           <button
             onClick={() => {
               setSubTab('EDIT');
               onHoverScenario?.(null);
+              onHoverLeg?.(null);
             }}
-            className={`py-1.5 rounded-md font-medium ${
+            className={`py-1.5 rounded-md font-semibold transition-colors ${
               subTab === 'EDIT' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -412,8 +673,9 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
             onClick={() => {
               setSubTab('RULES');
               onHoverScenario?.(null);
+              onHoverLeg?.(null);
             }}
-            className={`py-1.5 rounded-md font-medium ${
+            className={`py-1.5 rounded-md font-semibold transition-colors ${
               subTab === 'RULES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -424,124 +686,216 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
 
       {/* Scrollable Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Quick Active Forecast Preview Strip inside Tree / Scenarios view */}
+        {subTab === 'SCENARIOS' && activeProjection && (
+          <div
+            onClick={() => setSubTab('TARGETS')}
+            className="p-2.5 rounded-xl bg-[#091326] border border-cyan-500/35 hover:border-cyan-400/70 cursor-pointer transition-colors space-y-1.5"
+          >
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="flex items-center gap-1.5 font-bold text-cyan-300">
+                <Target className="w-3.5 h-3.5" />
+                <span>پیش‌بینی گام آخر ({activeProjection.lastLegLabel})</span>
+              </span>
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-300 font-semibold">
+                <span>جزئیات تارگت و PRZ/TMW</span>
+                <ArrowUpLeft className="w-3 h-3" />
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-[10.5px] font-mono tabular-nums text-slate-300">
+              <span className="truncate text-amber-300">
+                PRZ: {primaryPrz ? `${primaryPrz.lowPrice.toLocaleString()}–${primaryPrz.highPrice.toLocaleString()}` : '—'}
+              </span>
+              <span className="truncate text-cyan-300">
+                TMW: {primaryTmw ? `#${primaryTmw.startCandleIndex + 1}–#${primaryTmw.endCandleIndex + 1}` : '—'}
+              </span>
+              <span className="text-white font-bold">
+                {activeProjection.targets[0] ? activeProjection.targets[0].price.toLocaleString() : '—'}
+              </span>
+            </div>
+          </div>
+        )}
+
         {subTab === 'SCENARIOS' && !currentDrill && (
           <div className="space-y-2.5" onMouseLeave={() => onHoverScenario?.(null)}>
-            <div className="text-[11px] text-slate-400 flex items-center justify-between gap-2">
-              <span>درخت سناریوهای تأییدشده (کلیک برای نمایش روی چارت)</span>
-              <button
-                onClick={handleValidateActiveLevel}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition-colors shrink-0"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>تأیید (Validate)</span>
-              </button>
+            <div className="text-[11px] text-slate-400">
+              درخت فرکتالی زنده — هر شاخه و هر گام با چارت و تایم‌فریم متناظر خودش همگام است:
             </div>
-            {renderValidationBanner()}
-            {renderTreeNodes(fractalTreeNodes)}
+            {fractalTreeNodes.map(rootNode => (
+              <div key={rootNode.id} className="space-y-2">
+                {renderTreeNodes([rootNode], rootNode.id, 0)}
+              </div>
+            ))}
           </div>
         )}
 
         {subTab === 'SCENARIOS' && currentDrill && (
           <div className="space-y-2.5" onMouseLeave={() => onHoverScenario?.(null)}>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onCreateScratchScenario}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 text-xs font-semibold"
-              >
-                <PenTool className="w-3.5 h-3.5" />
-                <span>ترسیم زیرموج دلخواه از صفر</span>
-              </button>
-              <button
-                onClick={handleValidateActiveLevel}
-                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shrink-0"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>تأیید (Validate)</span>
-              </button>
-            </div>
-            {renderValidationBanner()}
+            <button
+              onClick={onCreateScratchScenario}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 text-xs font-semibold"
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              <span>ترسیم زیرموج دلخواه از صفر</span>
+            </button>
 
             {activeSubScenarios.map(sc => {
               const isActive = sc.id === activeSubScenarioId;
               const isOverlay = overlayScenarioIds.includes(sc.id);
               const hardFails = sc.rulesResults.filter(r => r.type === 'HARD' && !r.passed).length;
+              const scSummary = validationReportsById[sc.id];
+              const scValidatedValid = scSummary
+                ? scSummary.isValid && scSummary.rules.filter(r => r.type === 'HARD' && !r.passed).length === 0
+                : null;
 
               return (
-                <div
-                  key={sc.id}
-                  onClick={() => onSelectSubScenario(sc.id)}
-                  onMouseEnter={() => onHoverScenario?.(sc.id)}
-                  onMouseLeave={() => onHoverScenario?.(null)}
-                  className={`p-3 rounded-xl border transition-colors cursor-pointer space-y-2 ${
-                    sc.isDiscarded
-                      ? 'bg-slate-950/60 border-slate-900 opacity-55'
-                      : isActive
-                      ? 'bg-slate-900 border-slate-600'
-                      : 'bg-slate-900/50 border-slate-800/80 hover:border-indigo-500/50'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-2 min-w-0">
-                      <span className="w-3 h-3 rounded-sm shrink-0 mt-1" style={{ backgroundColor: sc.color }} />
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-white truncate">{sc.name}</h4>
-                        <span className="text-[11px] text-slate-400 block">
-                          {PATTERN_LABELS_FA[sc.patternType]}
-                        </span>
+                <div key={sc.id} className="space-y-2">
+                  <div
+                    onClick={() => onSelectSubScenario(sc.id)}
+                    onMouseEnter={() => onHoverScenario?.(sc.id)}
+                    onMouseLeave={() => onHoverScenario?.(null)}
+                    className={`p-3 rounded-xl border transition-colors cursor-pointer space-y-2 ${
+                      sc.isDiscarded
+                        ? 'bg-slate-950/60 border-slate-900 opacity-55'
+                        : isActive
+                        ? 'bg-slate-900 border-cyan-500/55'
+                        : 'bg-slate-900/50 border-slate-800/80 hover:border-indigo-500/50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="w-3 h-3 rounded-sm shrink-0 mt-1" style={{ backgroundColor: sc.color }} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="text-xs font-bold text-white truncate">{sc.name}</h4>
+                            {scValidatedValid !== null && (
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold border ${
+                                  scValidatedValid
+                                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                    : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                                }`}
+                              >
+                                {scValidatedValid ? 'معتبر ✓' : 'خطا ✕'}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-slate-400 block">
+                            {PATTERN_LABELS_FA[sc.patternType]}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          onToggleOverlay(sc.id);
+                        }}
+                        className={`p-1.5 rounded-lg border shrink-0 ${
+                          isOverlay || isActive
+                            ? 'bg-slate-800 border-slate-600 text-cyan-300'
+                            : 'bg-slate-950 border-slate-800 text-slate-500'
+                        }`}
+                      >
+                        {isOverlay || isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[11px] gap-2 flex-wrap">
+                      <span
+                        className={`font-mono tabular-nums ${
+                          hardFails === 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'
+                        }`}
+                      >
+                        اعتبار {sc.validityScore}% · {sc.vertices.length} نقطه
+                      </span>
+
+                      <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleValidateScenario(sc)}
+                          title="تأیید و ارزیابی مجزای این زیرسناریو"
+                          className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-semibold transition-colors ${
+                            scValidatedValid === true
+                              ? 'bg-emerald-600/25 border-emerald-500/60 text-emerald-200 hover:bg-emerald-600/40'
+                              : scValidatedValid === false
+                              ? 'bg-rose-600/20 border-rose-500/50 text-rose-200 hover:bg-rose-600/35'
+                              : 'bg-emerald-600/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30'
+                          }`}
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>تأیید</span>
+                        </button>
+
+                        <button
+                          onClick={() => onToggleKeepSubScenario(sc.id)}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-medium ${
+                            sc.isSelectedForTree && !sc.isDiscarded
+                              ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <Check className="w-3 h-3" />
+                          <span>{sc.isSelectedForTree && !sc.isDiscarded ? 'ثبت در درخت' : 'انتخاب'}</span>
+                        </button>
+
+                        <button
+                          onClick={() => onToggleDiscardSubScenario(sc.id)}
+                          className={`p-1 rounded-md border ${
+                            sc.isDiscarded
+                              ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                              : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-rose-400'
+                          }`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
                     </div>
+                  </div>
 
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        onToggleOverlay(sc.id);
+                  {scSummary && (
+                    <RuleDiagnosticsPanel
+                      scenario={sc}
+                      summary={scSummary}
+                      candles={candles}
+                      parentRole={currentDrill.role}
+                      parentWaveLabel={currentDrill.waveLabel}
+                      onApplyPattern={pattern => {
+                        if (!isActive) onSelectSubScenario(sc.id);
+                        onPatternChange(pattern, sc.id);
+                        const updated = RulesEngine.validateStructure(
+                          pattern,
+                          sc.vertices,
+                          sc.direction,
+                          currentDrill.role,
+                          currentDrill.waveLabel
+                        );
+                        setValidationReportsById(prev => ({ ...prev, [sc.id]: updated }));
+                        onValidateScenario?.(sc.id, updated);
                       }}
-                      className={`p-1.5 rounded-lg border shrink-0 ${
-                        isOverlay || isActive
-                          ? 'bg-slate-800 border-slate-600 text-cyan-300'
-                          : 'bg-slate-950 border-slate-800 text-slate-500'
-                      }`}
-                    >
-                      {isOverlay || isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[11px]">
-                    <span className={`font-mono tabular-nums ${hardFails === 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}`}>
-                      اعتبار {sc.validityScore}% · {sc.vertices.length} نقطه
-                    </span>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          onToggleKeepSubScenario(sc.id);
-                        }}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-medium ${
-                          sc.isSelectedForTree && !sc.isDiscarded
-                            ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
-                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        <Check className="w-3 h-3" />
-                        <span>{sc.isSelectedForTree && !sc.isDiscarded ? 'ثبت در درخت' : 'انتخاب'}</span>
-                      </button>
-
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          onToggleDiscardSubScenario(sc.id);
-                        }}
-                        className={`p-1 rounded-md border ${
-                          sc.isDiscarded
-                            ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
-                            : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-rose-400'
-                        }`}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
+                      onApplyVertices={verts => {
+                        if (!isActive) onSelectSubScenario(sc.id);
+                        onUpdateVertices(verts, sc.id);
+                        const updated = RulesEngine.validateStructure(
+                          sc.patternType,
+                          verts,
+                          sc.direction,
+                          currentDrill.role,
+                          currentDrill.waveLabel
+                        );
+                        setValidationReportsById(prev => ({ ...prev, [sc.id]: updated }));
+                        onValidateScenario?.(sc.id, updated);
+                      }}
+                      onRevalidate={() => handleValidateScenario(sc)}
+                      onClose={() =>
+                        setValidationReportsById(prev => {
+                          const next = { ...prev };
+                          delete next[sc.id];
+                          return next;
+                        })
+                      }
+                      variant="inline"
+                    />
+                  )}
                 </div>
               );
             })}
@@ -549,48 +903,130 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
         )}
 
         {subTab === 'LEGS' && (
-          <div className="space-y-2">
+          <div className="space-y-2.5" onMouseLeave={() => onHoverLeg?.(null)}>
             {!canDrillDeeper && (
               <div className="p-2.5 rounded-lg bg-amber-950/30 border border-amber-500/30 text-[11px] text-amber-200">
                 به پایین‌ترین تایم‌فریم تأییدشده ({confirmedLowestTF}) یا سقف درجه بازار ({maxAllowedDegree} درجه) رسیده‌اید.
               </div>
             )}
 
-            {waveLegs.map(leg => (
-              <div
-                key={`legrow-${leg.idx}`}
-                className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-2"
-              >
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2 text-xs font-bold text-white">
-                    <span className="font-mono text-cyan-300">{leg.legLabel}</span>
-                    <span className="text-slate-600">·</span>
-                    <span className={leg.role === 'MOTIVE' ? 'text-emerald-400' : 'text-amber-300'}>
-                      {leg.role === 'MOTIVE' ? 'اصلی (۵ موجی)' : 'اصلاحی (۳ موجی)'}
-                    </span>
+            {waveLegs.map(leg => {
+              const isUp = leg.vEnd.price >= leg.vStart.price;
+              const hasSyncedBranch = leg.syncedChildren.length > 0;
+              const allBranchValid = hasSyncedBranch && leg.syncedChildren.every(c => c.isValid);
+
+              return (
+                <div
+                  key={`legrow-${leg.idx}`}
+                  onMouseEnter={() => onHoverLeg?.(leg.idx)}
+                  onMouseLeave={() => onHoverLeg?.(null)}
+                  className="p-3 rounded-xl bg-slate-900/65 border border-slate-800 hover:border-indigo-500/50 transition-colors space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="flex items-center gap-2 text-xs font-bold text-white flex-wrap">
+                        {isUp ? (
+                          <TrendingUp className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        ) : (
+                          <TrendingDown className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        )}
+                        <span className="font-mono text-cyan-300">{leg.legLabel}</span>
+                        <span className={leg.role === 'MOTIVE' ? 'text-emerald-400' : 'text-amber-300'}>
+                          {leg.role === 'MOTIVE' ? 'اصلی (۵ موجی)' : 'اصلاحی (۳ موجی)'}
+                        </span>
+                        <span
+                          className={`font-mono text-[11px] tabular-nums ${
+                            leg.pctChange >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          {leg.pctChange > 0 ? `+${leg.pctChange}%` : `${leg.pctChange}%`}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-mono tabular-nums">
+                        {leg.vStart.price.toLocaleString()} → {leg.vEnd.price.toLocaleString()} · {leg.candleSpan} کندل
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() =>
+                        onDrillIntoLeg(
+                          currentDrill ? currentDrill.nodeId : activeNode?.id || activeLevelScenario.id,
+                          activeLevelScenario,
+                          leg.idx
+                        )
+                      }
+                      disabled={!canDrillDeeper}
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg disabled:bg-slate-800 disabled:text-slate-500 text-white text-[11px] font-semibold shrink-0 transition-colors ${
+                        hasSyncedBranch
+                          ? 'bg-cyan-600 hover:bg-cyan-500'
+                          : 'bg-indigo-600 hover:bg-indigo-500'
+                      }`}
+                    >
+                      <Layers className="w-3 h-3" />
+                      <span>
+                        {hasSyncedBranch
+                          ? `زیرشاخه ${nextLowerTF} (${leg.syncedChildren.length})`
+                          : `ریزش به ${nextLowerTF || '—'}`}
+                      </span>
+                    </button>
                   </div>
-                  <div className="text-[11px] text-slate-400 font-mono tabular-nums">
-                    {leg.vStart.price.toLocaleString()} → {leg.vEnd.price.toLocaleString()} · {leg.candleSpan} کندل
+
+                  {/* Live 1-to-1 Fractal Correspondence Status for this Leg */}
+                  <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10.5px] gap-2">
+                    {hasSyncedBranch ? (
+                      <>
+                        <span className="text-slate-300 truncate">
+                          متناظر با: {leg.syncedChildren.map(c => c.scenarioName.split('(')[0].trim()).join('، ')}
+                        </span>
+                        <span
+                          className={`shrink-0 font-bold ${
+                            allBranchValid ? 'text-emerald-400' : 'text-amber-300'
+                          }`}
+                        >
+                          {allBranchValid ? 'هم‌تراز ✓' : 'نیازمند بررسی'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-slate-500">زیرشاخه تایم پایین‌تر هنوز بارگذاری نشده</span>
+                        <span className="font-mono text-indigo-300 shrink-0">
+                          {nextLowerTF ? `هدف: ${nextLowerTF}` : 'پایان عمق'}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
-
-                <button
-                  onClick={() =>
-                    onDrillIntoLeg(
-                      currentDrill ? currentDrill.nodeId : activeNode?.id || activeLevelScenario.id,
-                      activeLevelScenario,
-                      leg.idx
-                    )
-                  }
-                  disabled={!canDrillDeeper}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-[11px] font-semibold shrink-0"
-                >
-                  <Layers className="w-3 h-3" />
-                  <span>ریزش به {nextLowerTF || '—'}</span>
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
+        )}
+
+        {subTab === 'TARGETS' && (
+          <TargetProjectionPanel
+            currentLevelScenarios={
+              currentDrill
+                ? activeSubScenarios
+                : rootScenarios.filter(s => s.isSelectedForTree && !s.isDiscarded)
+            }
+            allBranchItems={allTreeBranchItems}
+            activeScenarioId={activeLevelScenario.id}
+            candles={candles}
+            parentRole={currentDrill?.role || 'ROOT'}
+            parentWaveLabel={currentDrill?.waveLabel || ''}
+            onSelectScenario={id => {
+              if (currentDrill) {
+                onSelectSubScenario(id);
+              } else {
+                const matchedNode = fractalTreeNodes.find(n => n.scenarioId === id);
+                if (matchedNode) onSelectRootNode(matchedNode.id);
+              }
+            }}
+            onHoverScenario={onHoverScenario}
+            showPRZ={showPRZ}
+            onToggleShowPRZ={onToggleShowPRZ}
+            showTMW={showTMW}
+            onToggleShowTMW={onToggleShowTMW}
+          />
         )}
 
         {subTab === 'EDIT' && (
@@ -730,7 +1166,22 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
         )}
 
         {subTab === 'RULES' && (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            <PatternValidator
+              scenario={activeLevelScenario}
+              candles={candles}
+              parentRole={currentDrill?.role || 'ROOT'}
+              parentWaveLabel={currentDrill?.waveLabel || ''}
+              onApplyPattern={pattern => onPatternChange(pattern)}
+              onApplyVertices={verts => onUpdateVertices(verts)}
+              onValidationComplete={summary => {
+                setValidationReportsById(prev => ({ ...prev, [activeLevelScenario.id]: summary }));
+                onValidateScenario?.(activeLevelScenario.id, summary);
+              }}
+              onHighlightLeg={onHoverLeg}
+              variant="panel"
+            />
+
             {solvableAlt && (
               <div className="p-3 rounded-xl bg-amber-950/35 border border-amber-500/35 space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">

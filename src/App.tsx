@@ -5,7 +5,7 @@
  * Modes: Guided 3-Phase Wizard | Free Analysis Studio | SDD & Reference Code
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   WaveScenario,
   WaveVertex,
@@ -17,6 +17,16 @@ import {
 import { RulesEngine, ValidationSummary, SCENARIO_COLORS, inferWaveRole } from './engine/rulesEngine';
 import { FractalEngine, getDegreeForTimeframe, getLowerDegree, DEGREE_CONFIGS } from './engine/fractalEngine';
 import { SUPPORTED_ASSETS, generateRealisticCandles, generateAllTimeframesForAsset } from './data/sampleMarketData';
+import {
+  loadDraft,
+  saveDraft,
+  clearDraft,
+  makeStudioKey,
+  hasMeaningfulDraftWork,
+  FeiAutoSaveDraft,
+  StudioDraftPayload,
+  WizardAssetDraftPayload
+} from './engine/draftStorage';
 import { ChartStudio, ChartInteractionMode } from './components/ChartStudio';
 import { SleekSidebar } from './components/SleekSidebar';
 import { WizardWorkspace } from './components/WizardWorkspace';
@@ -26,7 +36,9 @@ import {
   Compass,
   LayoutGrid,
   FileCode2,
-  RotateCcw
+  RotateCcw,
+  ArchiveRestore,
+  X
 } from 'lucide-react';
 
 type AppMode = 'WIZARD' | 'STUDIO' | 'SDD';
@@ -49,11 +61,30 @@ interface StudioDrillEntry {
 }
 
 export default function App() {
-  const [appMode, setAppMode] = useState<AppMode>('WIZARD');
-  const [selectedAssetId, setSelectedAssetId] = useState<string>('BTCUSDT');
-  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1D');
+  const initialSavedDraft = useMemo(() => loadDraft(), []);
+  const validInitialAsset =
+    initialSavedDraft && SUPPORTED_ASSETS.some(a => a.id === initialSavedDraft.selectedAssetId)
+      ? initialSavedDraft.selectedAssetId
+      : 'BTCUSDT';
+  const validInitialTF = initialSavedDraft?.selectedTimeframe || '1D';
+
+  const [appMode, setAppMode] = useState<AppMode>(() => initialSavedDraft?.appMode || 'WIZARD');
+  const [selectedAssetId, setSelectedAssetId] = useState<string>(() => validInitialAsset);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>(() => validInitialTF);
   const [wizardResetCounter, setWizardResetCounter] = useState<number>(0);
   const [studioInteractionMode, setStudioInteractionMode] = useState<ChartInteractionMode>('EDIT');
+
+  const [wizardDraftByAsset, setWizardDraftByAsset] = useState<Record<string, WizardAssetDraftPayload>>(
+    () => initialSavedDraft?.wizardByAsset || {}
+  );
+  const [studioCacheByAssetTf, setStudioCacheByAssetTf] = useState<Record<string, StudioDraftPayload>>(
+    () => initialSavedDraft?.studioByAssetTf || {}
+  );
+  const [restoredDraftNotice, setRestoredDraftNotice] = useState<{ savedAt: number } | null>(() =>
+    hasMeaningfulDraftWork(initialSavedDraft) && initialSavedDraft
+      ? { savedAt: initialSavedDraft.savedAt }
+      : null
+  );
 
   const currentAsset = useMemo(() => {
     return SUPPORTED_ASSETS.find(a => a.id === selectedAssetId) || SUPPORTED_ASSETS[0];
@@ -116,16 +147,55 @@ export default function App() {
     ];
   }, []);
 
-  const [scenarios, setScenarios] = useState<WaveScenario[]>(() => buildStudioScenarios(candles, selectedTimeframe));
-  const [activeScenarioId, setActiveScenarioId] = useState<string>(() => scenarios[0]?.id || '');
+  const initialStudioDraft = initialSavedDraft?.studioByAssetTf?.[makeStudioKey(validInitialAsset, validInitialTF)];
+
+  const [scenarios, setScenarios] = useState<WaveScenario[]>(() =>
+    initialStudioDraft?.scenarios?.length
+      ? initialStudioDraft.scenarios
+      : buildStudioScenarios(candles, selectedTimeframe)
+  );
+  const [activeScenarioId, setActiveScenarioId] = useState<string>(
+    () => initialStudioDraft?.activeScenarioId || scenarios[0]?.id || ''
+  );
 
   // Free Studio Drill-Down state (multi-level fractal stack & cached sub-scenarios)
-  const [studioDrillStack, setStudioDrillStack] = useState<StudioDrillEntry[]>([]);
-  const [studioSubScenariosByKey, setStudioSubScenariosByKey] = useState<Record<string, WaveScenario[]>>({});
-  const [studioActiveSubIdByKey, setStudioActiveSubIdByKey] = useState<Record<string, string>>({});
+  const [studioDrillStack, setStudioDrillStack] = useState<StudioDrillEntry[]>(
+    () => initialStudioDraft?.drillStack || []
+  );
+  const [studioSubScenariosByKey, setStudioSubScenariosByKey] = useState<Record<string, WaveScenario[]>>(
+    () => initialStudioDraft?.subScenariosByKey || {}
+  );
+  const [studioActiveSubIdByKey, setStudioActiveSubIdByKey] = useState<Record<string, string>>(
+    () => initialStudioDraft?.activeSubIdByKey || {}
+  );
   const [hoveredStudioScenarioId, setHoveredStudioScenarioId] = useState<string | null>(null);
 
+  const prevStudioAssetTfRef = useRef<{ assetId: string; tf: string }>({
+    assetId: selectedAssetId,
+    tf: selectedTimeframe
+  });
+  const studioCacheRef = useRef(studioCacheByAssetTf);
+  studioCacheRef.current = studioCacheByAssetTf;
+
   useEffect(() => {
+    const prev = prevStudioAssetTfRef.current;
+    if (prev.assetId === selectedAssetId && prev.tf === selectedTimeframe) {
+      return;
+    }
+    prevStudioAssetTfRef.current = { assetId: selectedAssetId, tf: selectedTimeframe };
+
+    const key = makeStudioKey(selectedAssetId, selectedTimeframe);
+    const cached = studioCacheRef.current[key];
+    if (cached && cached.scenarios.length > 0) {
+      setScenarios(cached.scenarios);
+      setActiveScenarioId(cached.activeScenarioId || cached.scenarios[0].id);
+      setStudioDrillStack(cached.drillStack || []);
+      setStudioSubScenariosByKey(cached.subScenariosByKey || {});
+      setStudioActiveSubIdByKey(cached.activeSubIdByKey || {});
+      setHoveredStudioScenarioId(null);
+      return;
+    }
+
     const next = buildStudioScenarios(candles, selectedTimeframe);
     setScenarios(next);
     setActiveScenarioId(next[0]?.id || '');
@@ -134,6 +204,74 @@ export default function App() {
     setStudioActiveSubIdByKey({});
     setHoveredStudioScenarioId(null);
   }, [selectedAssetId, selectedTimeframe, candles, buildStudioScenarios]);
+
+  // Keep studioCacheByAssetTf synced and persist full Draft Auto-Save (debounced + beforeunload/pagehide flush)
+  const currentStudioPayload: StudioDraftPayload = useMemo(
+    () => ({
+      assetId: selectedAssetId,
+      timeframe: selectedTimeframe,
+      scenarios,
+      activeScenarioId,
+      drillStack: studioDrillStack,
+      subScenariosByKey: studioSubScenariosByKey,
+      activeSubIdByKey: studioActiveSubIdByKey
+    }),
+    [
+      selectedAssetId,
+      selectedTimeframe,
+      scenarios,
+      activeScenarioId,
+      studioDrillStack,
+      studioSubScenariosByKey,
+      studioActiveSubIdByKey
+    ]
+  );
+
+  useEffect(() => {
+    const key = makeStudioKey(selectedAssetId, selectedTimeframe);
+    setStudioCacheByAssetTf(prev => ({ ...prev, [key]: currentStudioPayload }));
+  }, [selectedAssetId, selectedTimeframe, currentStudioPayload]);
+
+  const latestDraftRef = useRef<FeiAutoSaveDraft | null>(null);
+  latestDraftRef.current = {
+    version: 1,
+    savedAt: Date.now(),
+    appMode,
+    selectedAssetId,
+    selectedTimeframe,
+    studioByAssetTf: {
+      ...studioCacheByAssetTf,
+      [makeStudioKey(selectedAssetId, selectedTimeframe)]: currentStudioPayload
+    },
+    wizardByAsset: wizardDraftByAsset
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (latestDraftRef.current) {
+        saveDraft({ ...latestDraftRef.current, savedAt: Date.now() });
+      }
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [appMode, selectedAssetId, selectedTimeframe, currentStudioPayload, studioCacheByAssetTf, wizardDraftByAsset]);
+
+  useEffect(() => {
+    const flushNow = () => {
+      if (latestDraftRef.current) {
+        saveDraft({ ...latestDraftRef.current, savedAt: Date.now() });
+      }
+    };
+    window.addEventListener('beforeunload', flushNow);
+    window.addEventListener('pagehide', flushNow);
+    return () => {
+      window.removeEventListener('beforeunload', flushNow);
+      window.removeEventListener('pagehide', flushNow);
+    };
+  }, []);
+
+  const handleWizardDraftChange = useCallback((payload: WizardAssetDraftPayload) => {
+    setWizardDraftByAsset(prev => ({ ...prev, [payload.assetId]: payload }));
+  }, []);
 
   const activeScenario = useMemo(() => {
     return scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
@@ -334,8 +472,8 @@ export default function App() {
     }
   };
 
-  const handleUpdateVertices = (newVertices: WaveVertex[]) => {
-    const targetId = effectiveActiveScenario?.id;
+  const handleUpdateVertices = (newVertices: WaveVertex[], targetScenarioId?: string) => {
+    const targetId = targetScenarioId || effectiveActiveScenario?.id;
     updateEffectiveScenarios(prev =>
       prev.map(sc => {
         if (sc.id !== targetId) return sc;
@@ -363,8 +501,8 @@ export default function App() {
     );
   };
 
-  const handlePatternChange = (newPattern: PatternFamily) => {
-    const targetId = effectiveActiveScenario.id;
+  const handlePatternChange = (newPattern: PatternFamily, targetScenarioId?: string) => {
+    const targetId = targetScenarioId || effectiveActiveScenario.id;
     updateEffectiveScenarios(prev =>
       prev.map(sc => {
         if (sc.id !== targetId) return sc;
@@ -416,10 +554,37 @@ export default function App() {
     updateEffectiveScenarios(prev => prev.map(sc => (sc.id === targetId ? { ...sc, isLocked: !sc.isLocked } : sc)));
   };
 
+  const handleDiscardSavedDraftAndResetAll = () => {
+    clearDraft();
+    setRestoredDraftNotice(null);
+    setWizardDraftByAsset({});
+    setStudioCacheByAssetTf({});
+    setWizardResetCounter(c => c + 1);
+    const next = buildStudioScenarios(candles, selectedTimeframe);
+    setScenarios(next);
+    setActiveScenarioId(next[0]?.id || '');
+    setStudioDrillStack([]);
+    setStudioSubScenariosByKey({});
+    setStudioActiveSubIdByKey({});
+  };
+
   const handleReset = () => {
+    clearDraft();
+    setRestoredDraftNotice(null);
     if (appMode === 'WIZARD') {
+      setWizardDraftByAsset(prev => {
+        const next = { ...prev };
+        delete next[selectedAssetId];
+        return next;
+      });
       setWizardResetCounter(c => c + 1);
     } else if (appMode === 'STUDIO') {
+      const key = makeStudioKey(selectedAssetId, selectedTimeframe);
+      setStudioCacheByAssetTf(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
       const next = buildStudioScenarios(candles, selectedTimeframe);
       setScenarios(next);
       setActiveScenarioId(next[0]?.id || '');
@@ -633,10 +798,47 @@ export default function App() {
         </div>
       )}
 
+      {/* Restored Local Draft Recovery Notice (shown only when resuming saved work on reload) */}
+      {restoredDraftNotice && appMode !== 'SDD' && (
+        <div className="bg-cyan-950/35 border-b border-cyan-500/30 px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+          <div className="flex items-center gap-2 text-cyan-100">
+            <ArchiveRestore className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>
+              آخرین وضعیت ذخیره‌شده موج‌شماری شما به‌صورت خودکار بازیابی شد
+            </span>
+            <span className="font-mono text-[11px] text-cyan-300/90 tabular-nums">
+              ({new Date(restoredDraftNotice.savedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })})
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDiscardSavedDraftAndResetAll}
+              className="px-2.5 py-0.5 rounded-md bg-slate-900/90 hover:bg-rose-950/80 border border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-200 text-[11px] font-medium transition-colors"
+            >
+              حذف پیش‌نویس و شروع تازه
+            </button>
+            <button
+              type="button"
+              onClick={() => setRestoredDraftNotice(null)}
+              className="flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-cyan-600/25 hover:bg-cyan-600/40 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold transition-colors"
+            >
+              <span>ادامه تحلیل</span>
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       {appMode === 'WIZARD' && (
         <main className="flex-1 flex flex-col p-3 overflow-hidden">
-          <WizardWorkspace asset={currentAsset} resetSignal={wizardResetCounter} />
+          <WizardWorkspace
+            asset={currentAsset}
+            resetSignal={wizardResetCounter}
+            savedDraftByAsset={wizardDraftByAsset}
+            onDraftChange={handleWizardDraftChange}
+          />
         </main>
       )}
 
@@ -675,6 +877,9 @@ export default function App() {
               onJumpDrillLevel={handleStudioJumpDrillLevel}
               onSwitchDrillTimeframe={handleStudioSwitchDrillTimeframe}
               hoveredScenario={hoveredStudioScenario}
+              parentRole={currentStudioDrill?.role || 'ROOT'}
+              parentWaveLabel={currentStudioDrill?.waveLabel || ''}
+              onValidateActiveScenario={handleValidateScenario}
             />
           </section>
 
@@ -725,6 +930,7 @@ export default function App() {
                 ? () => handleStudioJumpDrillLevel(studioDrillStack.length - 2)
                 : undefined
             }
+            candles={effectiveCandles}
           />
         </main>
       )}

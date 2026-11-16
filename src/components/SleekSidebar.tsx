@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
+  Candle,
   WaveScenario, 
   PatternFamily, 
   WaveDegree, 
@@ -17,6 +18,7 @@ import {
 import { ValidationSummary } from '../engine/rulesEngine';
 import { ChartInteractionMode } from './ChartStudio';
 import { ExplainabilityPanel } from './ExplainabilityPanel';
+import { PatternValidator } from './PatternValidator';
 import { FractalTree } from './FractalTree';
 import { ScenarioManager } from './ScenarioManager';
 import { TfBoundaryReport } from './TfBoundaryReport';
@@ -43,7 +45,7 @@ interface SleekSidebarProps {
   onToggleLock: (id: string) => void;
   onDeleteScenario: (id: string) => void;
   onNewScenario: () => void;
-  onPatternChange: (newPattern: PatternFamily) => void;
+  onPatternChange: (newPattern: PatternFamily, targetScenarioId?: string) => void;
   currentDegree: WaveDegree;
   onSelectDegree: (degree: WaveDegree) => void;
   onBranchScenario: (branchName: string, degree: WaveDegree) => void;
@@ -52,7 +54,7 @@ interface SleekSidebarProps {
   onSelectTimeframe: (tf: string) => void;
   onValidateScenario?: (id: string, summary: ValidationSummary) => void;
   onHoverScenario?: (id: string | null) => void;
-  onUpdateVertices?: (vertices: WaveVertex[]) => void;
+  onUpdateVertices?: (vertices: WaveVertex[], targetScenarioId?: string) => void;
   interactionMode?: ChartInteractionMode;
   onChangeInteractionMode?: (mode: ChartInteractionMode) => void;
   drillContext?: {
@@ -64,6 +66,7 @@ interface SleekSidebarProps {
     candleCount: number;
   } | null;
   onExitDrill?: () => void;
+  candles?: Candle[];
 }
 
 export const SleekSidebar: React.FC<SleekSidebarProps> = ({
@@ -88,7 +91,8 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   interactionMode,
   onChangeInteractionMode,
   drillContext,
-  onExitDrill
+  onExitDrill,
+  candles = []
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
 
@@ -157,6 +161,18 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                 فعال
               </span>
             </div>
+
+            {/* Strict PatternValidator Stepper */}
+            <PatternValidator
+              scenario={activeScenario}
+              candles={candles}
+              parentRole={drillContext?.role || 'ROOT'}
+              parentWaveLabel={drillContext?.waveLabel || ''}
+              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+              onApplyVertices={verts => onUpdateVertices?.(verts, activeScenario.id)}
+              onValidationComplete={summary => onValidateScenario?.(activeScenario.id, summary)}
+              variant="panel"
+            />
 
             {/* Explainability Component */}
             <ExplainabilityPanel
@@ -235,6 +251,9 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onUpdateVertices={onUpdateVertices}
               interactionMode={interactionMode}
               onChangeInteractionMode={onChangeInteractionMode}
+              candles={candles}
+              parentRole={drillContext?.role || 'ROOT'}
+              parentWaveLabel={drillContext?.waveLabel || ''}
             />
           </div>
         )}
