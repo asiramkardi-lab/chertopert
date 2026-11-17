@@ -1,0 +1,2346 @@
+
+یک نوت بکو جوپیتر نوت بوک آموزشی
+PhD proposal for KV cache reduction
+ساخت پلاگین VS Code
+جلسه ۳ موج‌شماری
+بررسی منطق گفتگو
+طراحی دستیار هوشمند الیوت
+تضاد برچسب در داده‌های بازیابی
+Qwen settings diff
+خلاصه بخش ۳
+روند و سطوح استاتیک SDD
+Qwen system message error fix
+دسترسی به دانلودکنندگان
+نقد پروژه
+Windows find script fix
+Notepad++ RTL
+آموزش ساختار بازار
+کندل استیک به SDD
+ساخت بنچمارک ترکیبی
+فهرست مفاهیم معاملهگری
+صفر تا ۱۰۰۰
+Empty message
+Evict gather bug
+Evict oracle crash root cause
+پروژه اوراکل اهمیت توکن
+سکرت تلگرام
+مشاهده سرویس‌های کاستوم systemctl
+اصلاح اسکریپت دیتاست
+حداقل سرمایه و کال مارجین مظنه
+mteb
+ایجنت لوکال با لنگ فیوز
+رشد انویدیا
+راست چین VS Code
+تبدیل متن به مارکدان
+تبدیل اسکریپت به BAT
+Codex custom model config
+Flash-attn CUDA mismatch fix
+Convert Python to Bash
+401 API Key Error
+تحلیل تغییرات کلاسترینگ
+سوینگ جلسه نهم
+پلن ادغام کد
+اطلاعات کندل
+OmniRoute username usage logging
+سیستم تحلیل تکنیکال
+Sum result
+Sum 59770 and 38652
+Sum
+Sum result
+Sum
+Sum of 57621 and 67200
+Sum
+Sum of 80857 and 95586
+Sum 12531 and 67629
+Sum of two numbers
+Sum of 43164 and 33140
+Sum of 42273 and 43119
+Sum
+Sum of 43164 and 33140
+دیزاین پترن
+تبدیل اکسل به پایتون
+حداقل GPU برای کوین 3.8
+Windows CMD combine Python files
+بازنویسی راهنمای Git Hooks
+Add stream usage true
+Sum
+HF dataset access error
+Private HF dataset viewer
+AutoGenerateBindingRedirects fix
+MSBuild resx unblock
+ویرایش اسکریپت برای کوئری
+هج طلا آبشده
+پرامپت بازنویسی متن تبدیل صوت به متن
+پرامپت دستهبندی تفسیر
+تعریف ریاضی اهمیت توکن
+Gemma 4 STT Guide
+Docker memory limit issue
+بازنویسی تعریف ریاضی اهمیت توکن
+پرامپت تشخیص ارجاعات
+تعریف دقیق اهمیت توکن
+گزارش نهایی ارزیابی
+براق کردن سینک استیل با اسید
+گزارش ساده کدام روش‌های فشرده‌سازی
+راهنمای جامع فاین‌تیون Gemma
+معانی RTW
+CPT fine-tuning Quran Gemma
+Ubuntu script concatenate Python files
+بازنویسی الگوریتم
+LangSmith CLI integration
+راه‌اندازی FastAPI برای ایجنت قرآن
+استخراج qrels
+اجرای NATS 4.0
+تشریح مقاله EPIKV
+KV Cache Compression
+Salam gibberish clarification
+اسکریپت پس‌نام نستد
+KV Cache Compression Methods
+تشریح مقاله RDKV
+KV Cache Eviction تشریح
+شرح مقاله ForesightKV
+KVpop
+جلسه ۳ موج‌شماری
+قدم به قدم نحوه موج شماری از تایم فریم بالا تا پایین با در نظر گرفتن تمام قواعد و شرایط و پیشنهاد سناریو های مختلف برای پیاده سازی توسط llm
+راهنمای گام‌به‌گام موج‌شماری از تایم‌فریم بالا به پایین (برای پیاده‌سازی LLM)
+این سند، الگوریتم کامل و گام‌به‌گام موج‌شماری را از تایم‌فریم بالا به پایین ارائه می‌دهد، با در نظر گرفتن تمام قواعد، شرایط مرزی، و سناریوهای مختلف. این سند به عنوان راهنمای اجرایی برای LLM هنگام پیاده‌سازی موتور موج‌شماری است.
+
+بخش ۱: نمای کلی الگوریتم (High-Level Algorithm)
+text
+START
+  │
+  ├── گام ۰: اعتبارسنجی داده ورودی
+  │
+  ├── گام ۱: انتخاب تایم‌فریم بالا (ماهانه/هفتگی)
+  │     └── پیدا کردن کف مطلق
+  │
+  ├── گام ۲: درشت‌موج‌شماری از کف مطلق (تایم بالا)
+  │     └── شناسایی سیکل‌های V (Super Cycle)
+  │
+  ├── گام ۳: رفتن به تایم‌فریم میانی (روزانه)
+  │     └── شناسایی سیکل‌های W (Cycle)
+  │
+  ├── گام ۴: رفتن به تایم‌فریم پایین (۴ ساعته/۱ ساعته)
+  │     └── شناسایی سیکل‌های BOLD (Primary)
+  │
+  ├── گام ۵: رفتن به تایم‌فریم پایین‌تر (ساعتی/۱۵ دقیقه)
+  │     └── شناسایی سیکل‌های SIMPLE (Intermediate)
+  │
+  ├── گام ۶: توقف در درجه ۴ (بورس) / ۱۵ (فارکس)
+  │
+  ├── گام ۷: اعتبارسنجی نهایی (قوانین، هم‌خوانی، Edge Cases)
+  │
+  ├── گام ۸: سناریو بندی (چند سناریو ممکن)
+  │
+  ├── گام ۹: محاسبه PRZ و TMV
+  │
+  ├── گام ۱۰: توصیه ورود و مدیریت ریسک
+  │
+  └── END
+گام ۰: اعتبارسنجی داده ورودی
+۰.۱ بررسی حداقل داده
+#	شرایط	اقدام	جلسه
+0.1	len(candles) < 10	خطا: "Insufficient data (min 10 candles)"	5
+0.2	len(candles) == 0	خطا: "No data"	5
+0.3	NaN در OHLCV	Forward-fill یا خطا	5
+0.4	timestamp تکراری	خطا: "Duplicate timestamps"	5
+0.5	open == high == low == close (همه یکسان)	خطا: "No price movement"	5
+0.6	timestamp خارج از ترتیب	مرتب‌سازی + هشدار	5
+۰.۲ تعیین تایم‌فریم شروع
+python
+def select_start_timeframe(candles: list[Candle]) -> str:
+    """انتخاب تایم‌فریم شروع بر اساس طول داده."""
+    days = (candles[-1].timestamp - candles[0].timestamp).days
+    
+    if days < 180:  # < 6 ماه
+        return "daily"  # کف مطلق در روزانه قابل تشخیص است
+    elif days < 365:  # 6 ماه - 1 سال
+        return "weekly"  # از هفتگی شروع کن
+    elif days < 365 * 5:  # 1-5 سال
+        return "weekly"  # از هفتگی شروع کن
+    else:  # > 5 سال
+        return "monthly"  # از ماهانه شروع کن
+قواعد انتخاب تایم‌فریم (از جلسه ۵):
+
+دیتای < ۶ ماه: از روزانه شروع کن (کف مطلق قابل تشخیص).
+
+دیتای ۶ ماه - ۵ سال: از هفتگی شروع کن.
+
+دیتای > ۵ سال: از ماهانه شروع کن.
+
+۰.۳ تعیین حداکثر درجه بر اساس تایم‌فریم
+تایم‌فریم	حداکثر درجه (بورس)	حداکثر درجه (فارکس)	جلسه
+ماهانه	۲	۵	3, 5
+هفتگی	۳	۷	3, 5
+روزانه	۴	۱۰	3, 5
+۴ ساعته	۵	۱۲	3, 5
+۱ ساعته	۶	۱۵	3, 5
+۱۵ دقیقه	- (بورس)	۱۵	3, 5
+python
+MAX_DEGREES = {
+    "monthly": {"stock": 2, "forex": 5},
+    "weekly": {"stock": 3, "forex": 7},
+    "daily": {"stock": 4, "forex": 10},
+    "4h": {"stock": 5, "forex": 12},
+    "1h": {"stock": 6, "forex": 15},
+    "15m": {"stock": 0, "forex": 15},
+}
+
+def get_max_degree(timeframe: str, market: str) -> int:
+    return MAX_DEGREES.get(timeframe, {}).get(market, 0)
+گام ۱: پیدا کردن کف مطلق (Absolute Bottom)
+۱.۱ الگوریتم پیدا کردن کف مطلق
+python
+def find_absolute_bottom(candles: list[Candle]) -> int | None:
+    """پیدا کردن پایین‌ترین نقطه در کل نمودار."""
+    if not candles:
+        return None
+    
+    lowest_idx = min(range(len(candles)), key=lambda i: candles[i].low)
+    return lowest_idx
+۱.۲ اعتبارسنجی کف مطلق
+قاعده از جلسه ۴: اگر نمودار از موج ۱ شروع شده و موج ۲ آن را ۱۰۰٪ پوشش دهد → کف مطلق هنوز تشکیل نشده.
+
+python
+def validate_absolute_bottom(candles: list[Candle], bottom_idx: int) -> tuple[bool, str]:
+    """بررسی اینکه کف مطلق واقعاً تشکیل شده."""
+    if bottom_idx is None or bottom_idx == 0:
+        return False, "No data before bottom; cannot validate"
+    
+    # بررسی: آیا کندل‌های قبل از کف مطلق وجود دارند؟
+    # اگر کف مطلق در ابتدای نمودار است، ممکن است کف واقعی نباشد
+    if bottom_idx < 5:
+        return False, "Bottom too close to start; possible incomplete data"
+    
+    # بررسی: آیا قیمت بعد از کف مطلق، ۱۰۰٪ آن را پوشش داده؟
+    post_bottom = candles[bottom_idx:]
+    if len(post_bottom) > 20:
+        # اگر قیمت به کف مطلق برگشته و آن را شکسته → کف مطلق جدید
+        if min(c.low for c in post_bottom[10:]) < candles[bottom_idx].low:
+            return False, "Bottom broken; new bottom formed"
+    
+    return True, f"Absolute bottom at index {bottom_idx} (low={candles[bottom_idx].low})"
+۱.۳ شرایط مرزی کف مطلق
+#	شرایط	اقدام	جلسه
+1.1	کف مطلق در ابتدای نمودار (index < 5)	خطا: "Bottom too close to start"	4, 5
+1.2	کف مطلق توسط کندل بعدی شکسته شده	کف مطلق جدید	4, 5
+1.3	کف مطلق در تایم ماهانه قابل تشخیص نیست	از هفتگی شروع کن	5
+1.4	کف مطلق در تایم روزانه قابل تشخیص است	نیازی به تایم بالاتر نیست	5
+گام ۲: درشت‌موج‌شماری از کف مطلق (تایم بالا)
+۲.۱ الگوریتم درشت‌موج‌شماری
+python
+def coarse_wave_count(
+    candles: list[Candle],
+    bottom_idx: int,
+    max_degree: int
+) -> list[Wave]:
+    """درشت‌موج‌شماری از کف مطلق تا کف معتبر."""
+    # ۱. پیدا کردن پیوت‌ها
+    pivots = find_pivots(candles[bottom_idx:], window=5)
+    
+    # ۲. ساخت کاندیدهای سیکل
+    candidates = build_cycle_candidates(pivots, candles[bottom_idx:])
+    
+    # ۳. اعتبارسنجی هر کاندید
+    valid_cycles = []
+    for cand in candidates:
+        result = validate_cycle(cand)
+        if result.valid or result.alternative:
+            valid_cycles.append(cand)
+    
+    # ۴. انتخاب بهترین کاندید (بیشترین confidence)
+    best = max(valid_cycles, key=lambda c: c.confidence, default=None)
+    
+    return best
+۲.۲ پیدا کردن پیوت‌ها (Pivot Detection)
+python
+def find_pivots(candles: list[Candle], window: int = 5) -> list[Pivot]:
+    """پیدا کردن نقاط چرخش (high/low) با window متغیر."""
+    pivots = []
+    for i in range(window, len(candles) - window):
+        # High pivot
+        if candles[i].high == max(c.high for c in candles[i-window:i+window+1]):
+            pivots.append(Pivot(index=i, type="high", price=candles[i].high))
+        # Low pivot
+        if candles[i].low == min(c.low for c in candles[i-window:i+window+1]):
+            pivots.append(Pivot(index=i, type="low", price=candles[i].low))
+    return pivots
+انتخاب window بهینه:
+
+تایم ماهانه: window = 3
+
+تایم هفتگی: window = 4
+
+تایم روزانه: window = 5
+
+تایم ۴ ساعته: window = 6
+
+تایم ۱ ساعته: window = 8
+
+۲.۳ ساخت کاندیدهای سیکل
+python
+def build_cycle_candidates(pivots: list[Pivot], candles: list[Candle]) -> list[Cycle]:
+    """ساخت کاندیدهای سیکل از پیوت‌ها."""
+    candidates = []
+    
+    # سیکل ایده‌آل: ۸ پیوت (۵ موج صعودی + ۳ موج نزولی)
+    for i in range(len(pivots) - 7):
+        wave_points = pivots[i:i+8]
+        if is_alternating(wave_points):  # high-low-high-low...
+            candidates.append(Cycle(points=wave_points, type="ideal"))
+    
+    # سیکل ترمینال: ۸ پیوت با نقض قانون ۳
+    for i in range(len(pivots) - 7):
+        wave_points = pivots[i:i+8]
+        if is_alternating(wave_points) and violates_rule_3(wave_points):
+            candidates.append(Cycle(points=wave_points, type="terminal"))
+    
+    # سیکل آنتی‌سیکل: ۸ پیوت با نقض قانون ۱
+    for i in range(len(pivots) - 7):
+        wave_points = pivots[i:i+8]
+        if is_alternating(wave_points) and violates_rule_1(wave_points):
+            candidates.append(Cycle(points=wave_points, type="anti_cycle"))
+    
+    return candidates
+۲.۴ اعتبارسنجی سیکل (ترتیب اولویت)
+python
+def validate_cycle(cycle: Cycle) -> ValidationResult:
+    """اعتبارسنجی سیکل با ترتیب اولویت."""
+    waves = cycle.to_waves()
+    
+    # اولویت ۱: سیکل ایده‌آل
+    if validate_ideal_cycle(waves).valid:
+        return ValidationResult(valid=True, type="ideal", confidence=0.9)
+    
+    # اولویت ۲: الگوی قطر
+    if validate_diagonal(waves).valid:
+        return ValidationResult(valid=True, type="diagonal", confidence=0.8)
+    
+    # اولویت ۳: ترمینال / آنتی‌سیکل
+    if validate_terminal(waves).valid:
+        return ValidationResult(valid=True, type="terminal", confidence=0.8)
+    if validate_anti_cycle(waves).valid:
+        return ValidationResult(valid=True, type="anti_cycle", confidence=0.75)
+    
+    # اولویت ۴: زیگزاگ
+    if validate_zigzag(waves).valid:
+        return ValidationResult(valid=True, type="zigzag", confidence=0.7)
+    
+    # اولویت ۵: فلت
+    if validate_flat(waves).valid:
+        return ValidationResult(valid=True, type="flat", confidence=0.65)
+    
+    # اولویت ۶: مثلث
+    if validate_triangle(waves).valid:
+        return ValidationResult(valid=True, type="triangle", confidence=0.7)
+    
+    # اولویت ۷: ترکیبی
+    if validate_complex(waves).valid:
+        return ValidationResult(valid=True, type="complex", confidence=0.5)
+    
+    return ValidationResult(valid=False, reason="No valid pattern")
+۲.۵ شرایط مرزی درشت‌موج‌شماری
+#	شرایط	اقدام	جلسه
+2.1	کمبود پیوت (کمتر از ۸)	خطا: "Insufficient pivots"	2
+2.2	پیوت‌های غیرمتناوب (high-high)	خطا: "Non-alternating pivots"	2
+2.3	سیکل ایده‌آل ممکن نیست + قطر ممکن	قطر (اولویت ۲)	6, 9
+2.4	سیکل ایده‌آل + ترمینال هر دو ممکن	سیکل ایده‌آل (اولویت ۱)	4
+2.5	هیچ الگوی ساده ممکن نیست	ترکیبی (اولویت ۷)	16
+2.6	نقض قانون ۳ + موج ۵ کوتاه	ترمینال	6
+2.7	نقض قانون ۳ + موج ۵ بلند	آنتی‌ترمینال	6
+2.8	نقض قانون ۱ + ساختار ۳-۵	آنتی‌سیکل	6
+گام ۳: رفتن به تایم‌فریم میانی (روزانه)
+۳.۱ الگوریتم انتقال به تایم پایین‌تر
+python
+def refine_to_lower_timeframe(
+    candles_high_tf: list[Candle],
+    candles_low_tf: list[Candle],
+    cycles_high_tf: list[Cycle]
+) -> list[Cycle]:
+    """پالایش سیکل‌ها با تایم‌فریم پایین‌تر."""
+    refined = []
+    
+    for high_cycle in cycles_high_tf:
+        # برای هر موج اصلی در سیکل بالا، ساختار درونی را در تایم پایین بررسی کن
+        for wave in high_cycle.main_waves:  # 1, 3, 5, A, C
+            internal = detect_internal_structure(
+                candles_low_tf, wave.start_idx, wave.end_idx
+            )
+            
+            if internal is None:
+                # شتابدار → فرض ۵ موجی
+                wave.is_impulsive = True
+                wave.internal_structure = 5
+            elif internal.count == 5:
+                wave.internal_structure = 5
+                wave.sub_waves = internal.waves
+            elif internal.count == 3:
+                # نقض ساختار (موج اصلی با ۳ موج)
+                wave.warning = f"Wave {wave.label} has 3 sub-waves; possible mislabel"
+                # بررسی الگوی جایگزین
+                if validate_diagonal_internal(internal).valid:
+                    wave.pattern = "diagonal"
+                else:
+                    wave.valid = False
+        
+        if high_cycle.valid:
+            refined.append(high_cycle)
+    
+    return refined
+۳.۲ شرایط مرزی انتقال تایم‌فریم
+#	شرایط	اقدام	جلسه
+3.1	موج اصلی در تایم بالا شتابدار	در تایم پایین ساختار ۵ موجی → فرکتالی؛ بدون ساختار → شتابدار (فرض ۵)	3, 5
+3.2	موج اصلی در تایم بالا ۵ موجی	در تایم پایین ۵ موجی → تأیید	3
+3.3	موج اصلی در تایم بالا ۳ موجی	شمارش اشتباه → بازشمارش	3
+3.4	موج اصلاحی در تایم بالا ۵ موجی	آنتی‌سیکل یا ترکیبی	3, 6
+3.5	موج شتابدار + ساختار ۵ موجی در تایم پایین	فرکتالی (نه شتابدار)	5
+3.6	موج شتابدار + بدون ساختار در تایم پایین	شتابدار (فرض ۵)	5
+گام ۴: رفتن به تایم‌فریم پایین (۴ ساعته/۱ ساعته)
+۴.۱ الگوریتم تکراری
+python
+def iterative_refinement(
+    candles_by_tf: dict[str, list[Candle]],
+    cycles: list[Cycle],
+    current_degree: int,
+    max_degree: int
+) -> list[Cycle]:
+    """پالایش تکراری تا رسیدن به درجه ۴."""
+    if current_degree >= max_degree:
+        return cycles  # توقف
+    
+    # انتقال به تایم پایین‌تر
+    next_tf = get_next_timeframe(current_degree)
+    
+    for cycle in cycles:
+        cycle.sub_cycles = refine_cycle(
+            candles_by_tf[next_tf], cycle
+        )
+    
+    return iterative_refinement(
+        candles_by_tf, cycles, current_degree + 1, max_degree
+    )
+۴.۲ شرایط مرزی تایم‌فریم پایین
+#	شرایط	اقدام	جلسه
+4.1	رسیدن به درجه ۴ (بورس)	توقف شمارش	3, 5
+4.2	رسیدن به درجه ۱۵ (فارکس)	توقف شمارش	3
+4.3	کمبود داده در تایم پایین	توقف در درجه فعلی	5
+4.4	قیمت از سقف درجه ۴ فراتر رفته	ارتقاء لیبل‌ها	3, 5
+گام ۵: توقف در درجه ۴ (بورس) / ۱۵ (فارکس)
+۵.۱ قانون توقف
+python
+def should_stop_counting(current_degree: int, timeframe: str, market: str) -> bool:
+    """بررسی توقف شمارش در درجه مجاز."""
+    max_deg = get_max_degree(timeframe, market)
+    return current_degree >= max_deg
+۵.۲ ارتقاء لیبل‌ها
+python
+def promote_degrees(cycles: list[Cycle]) -> list[Cycle]:
+    """ارتقاء لیبل‌ها وقتی درجه ۴ تمام شود."""
+    DEGREE_ORDER = ["SIMPLE", "BOLD", "W", "V"]
+    
+    for cycle in cycles:
+        for wave in cycle.waves:
+            current_idx = DEGREE_ORDER.index(wave.degree)
+            new_idx = min(current_idx + 1, len(DEGREE_ORDER) - 1)
+            wave.degree = DEGREE_ORDER[new_idx]
+    
+    return cycles
+۵.۳ شرایط مرزی توقف
+#	شرایط	اقدام	جلسه
+5.1	رسیدن به درجه ۴ (بورس)	توقف + ارتقاء	3, 5
+5.2	رسیدن به درجه ۱۵ (فارکس)	توقف	3
+5.3	قیمت از سقف درجه ۴ فراتر رفته	ارتقاء (V→W، W→BOLD، BOLD→SIMPLE، SIMPLE حذف)	3, 5
+5.4	درجه ۵ در بورس	نباید شمارش شود	3, 5
+گام ۶: اعتبارسنجی نهایی
+۶.۱ چک‌لیست اعتبارسنجی
+python
+def final_validation(cycles: list[Cycle], context: dict) -> ValidationReport:
+    """اعتبارسنجی نهایی همه قواعد."""
+    report = ValidationReport()
+    
+    for cycle in cycles:
+        # ۱. قوانین بنیادین
+        report.add(validate_rule_1(cycle))
+        report.add(validate_rule_2(cycle))
+        report.add(validate_rule_3(cycle))
+        
+        # ۲. فرکتال
+        report.add(validate_fractal(cycle))
+        
+        # ۳. هم‌خوانی درجات
+        report.add(validate_degree_consistency(cycle))
+        
+        # ۴. آخرین موج
+        report.add(validate_last_wave_no_correction(cycle))
+        
+        # ۵. Edge Cases
+        report.add(validate_edge_cases(cycle, context))
+    
+    return report
+۶.۲ جدول اعتبارسنجی نهایی
+#	قاعده	منبع	جلسه
+6.1	موج ۲ < ۱۰۰٪ موج ۱	قانون ۱	4
+6.2	موج ۳ کوتاه‌ترین نباشد	قانون ۲	4
+6.3	موج ۴ وارد محدوده ۱ نشود	قانون ۳	4
+6.4	موج اصلی ۵ موجی	فرکتال	3
+6.5	موج اصلاحی ۳ موجی	فرکتال	3
+6.6	هم‌خوانی درجات	حرکت‌شناسی	5
+6.7	آخرین موج روند، اصلاح ندارد	قانون	3
+6.8	کف مطلق تشکیل شده	کف مطلق	4, 5
+6.9	زیر درجه ۴ نشمار	محدودیت	3, 5
+6.10	X-Wave ≥ ۳ کندل	ترکیبی	16
+گام ۷: سناریو بندی (چند سناریو ممکن)
+۷.۱ الگوریتم تولید سناریو
+python
+def generate_scenarios(cycles: list[Cycle]) -> list[Scenario]:
+    """تولید سناریوهای ممکن برای آینده."""
+    scenarios = []
+    
+    # سناریو ۱: ادامه روند اصلی (ادامه صعود)
+    if cycles[-1].type in ["ideal", "terminal", "diagonal"]:
+        scenarios.append(Scenario(
+            name="uptrend_continuation",
+            description="Uptrend resumes after correction",
+            probability=0.6,
+            target=compute_tmv(cycles[-1]),
+            stop=compute_stop_loss(cycles[-1])
+        ))
+    
+    # سناریو ۲: ریزش (شروع روند نزولی)
+    if cycles[-1].wave_5.is_extended:
+        scenarios.append(Scenario(
+            name="downtrend_start",
+            description="Sharp reversal after extended wave 5",
+            probability=0.4,
+            target=compute_abc_target(cycles[-1]),
+            stop=compute_stop_loss(cycles[-1])
+        ))
+    
+    # سناریو ۳: رنج (خنثی)
+    scenarios.append(Scenario(
+        name="range_bound",
+        description="Sideways movement; wait for breakout",
+        probability=0.3,
+        target=None,
+        stop=None
+    ))
+    
+    return scenarios
+۷.۲ جدول سناریوهای ممکن
+#	سناریو	شرایط	احتمال	جلسه
+7.1	ادامه صعود	سیکل ایده‌آل + موج ۵ کوتاه	۶۰٪	6
+7.2	ریزش	کشیدگی موج ۵	۴۰٪	18
+7.3	رنج	موج ۴ پیچیده	۳۰٪	12
+7.4	W2 vs A	ساختار ۵-۳-۵ + ۶۱.۸٪ → W2	۸۵٪	11
+7.5	W2 vs A	ساختار ۳-۳ + ۳۸.۲٪ → A	۸۰٪	11
+7.6	ترمینال	نقض قانون ۳ + موج ۵ کوتاه	۹۰٪	6
+7.7	آنتی‌سیکل	نقض قانون ۱ + ساختار ۳-۵	۸۰٪	6
+۷.۳ شرایط مرزی سناریو بندی
+#	شرایط	اقدام	جلسه
+7.1	دو سناریو (W2 و A)	خرید پله‌ای	11
+7.2	W2 قطعی (۵-۳-۵ + ۶۱.۸٪)	خرید تک‌پله‌ای	11
+7.3	A قطعی (۳-۳ + ۳۸.۲٪)	خرید نکن	11
+7.4	سناریو مبهم + حمایت قوی	W2 (اعتبار بیشتر)	11
+7.5	سناریو مبهم + مقاومت قوی	A (اعتبار بیشتر)	11
+گام ۸: محاسبه PRZ و TMV
+۸.۱ محاسبه PRZ
+python
+def compute_prz(wave: Wave, fib_level: float) -> PRZ:
+    """محاسبه محدوده پرپتانسیل چرخش."""
+    if wave.direction == "up":
+        start = wave.end_price - wave.length * fib_level
+        end = wave.end_price - wave.length * (fib_level - 0.05)
+    else:
+        start = wave.end_price + wave.length * (fib_level - 0.05)
+        end = wave.end_price + wave.length * fib_level
+    
+    return PRZ(
+        start=start, end=end,
+        level=fib_level,
+        confidence=get_prz_confidence(fib_level)
+    )
+۸.۲ محاسبه TMV
+python
+def compute_tmv(wave1: Wave, wave2: Wave) -> TMV:
+    """محاسبه هدف حرکت موج ۳."""
+    x = wave1.start_price
+    y = wave1.end_price
+    z = wave2.end_price
+    
+    direction = "up" if y > x else "down"
+    sign = 1 if direction == "up" else -1
+    length = abs(y - x)
+    
+    return TMV(
+        prime=y,
+        ideal=z + sign * length * 1.0,
+        alternate=z + sign * length * 1.618,
+        direction=direction
+    )
+۸.۳ جدول PRZ و TMV
+#	مفهوم	فرمول	جلسه
+8.1	PRZ موج ۲	۶۱.۸٪ یا ۷۸.۶٪ رتریسمنت موج ۱	7
+8.2	PRZ موج ۴	۳۸.۲٪ یا ۵۰٪ رتریسمنت موج ۳	7
+8.3	TMV Prime	سقف/کف موج ۱	8
+8.4	TMV Ideal	۱۰۰٪ پروجکشن	8
+8.5	TMV Alternate	۱۶۱.۸٪ پروجکشن	8
+8.6	کشیدگی موج ۳	TMV موج ۵ = ۶۱.۸٪	18
+8.7	کشیدگی موج ۵	TMV موج ۵ = ۲۶۱.۸٪	18
+گام ۹: توصیه ورود و مدیریت ریسک
+۹.۱ الگوریتم توصیه ورود
+python
+def recommend_entry(cycles: list[Cycle], scenarios: list[Scenario]) -> EntryRecommendation:
+    """توصیه ورود بر اساس سناریوها."""
+    primary = max(scenarios, key=lambda s: s.probability)
+    
+    if primary.name == "uptrend_continuation":
+        # ورود در شروع موج ۳
+        return EntryRecommendation(
+            action="buy",
+            zone="start_wave_3",
+            entry_price=cycles[-1].wave_2.end_price,
+            stop_loss=cycles[-1].wave_2.end_price * 0.98,
+            targets=[
+                cycles[-1].tmv.prime,
+                cycles[-1].tmv.ideal,
+                cycles[-1].tmv.alternate
+            ],
+            risk="low"
+        )
+    
+    elif primary.name == "downtrend_start":
+        return EntryRecommendation(
+            action="sell",
+            zone="start_wave_A",
+            entry_price=cycles[-1].wave_5.end_price,
+            stop_loss=cycles[-1].wave_5.end_price * 1.02,
+            targets=[
+                cycles[-1].wave_4.start_price,
+                cycles[-1].wave_3.end_price
+            ],
+            risk="medium"
+        )
+    
+    else:  # range_bound
+        return EntryRecommendation(
+            action="wait",
+            zone="none",
+            entry_price=None,
+            stop_loss=None,
+            targets=[],
+            risk="high"
+        )
+۹.۲ جدول توصیه ورود
+#	سناریو	ورود	استاپ	هدف	ریسک	جلسه
+9.1	W2 تأیید	۶۱.۸٪	زیر موج ۲	TMV Ideal	کم	11
+9.2	W2 احتمالی	۶۱.۸٪ + ۷۸.۶٪ (پله‌ای)	زیر موج ۲	TMV Ideal	متوسط	11
+9.3	A تأیید	نخر	-	-	-	11
+9.4	شروع موج ۳	شروع موج ۳	زیر موج ۲	TMV Alternate	کم	11
+9.5	کشیدگی موج ۵	سیو سود فوری	-	-	-	18
+9.6	ترمینال	سیو سود فوری	-	-	-	6
+9.7	قطر پایانی	سیو سود فوری	-	-	-	9
+۹.۳ شرایط مرزی توصیه ورود
+#	شرایط	اقدام	جلسه
+9.1	رتریسمنت < ۵۰٪	ورود نکن	11
+9.2	رتریسمنت = ۶۱.۸٪ + سیگنال	ورود	11
+9.3	رتریسمنت = ۷۸.۶٪ + سیگنال	ورود (با شتاب‌گیری)	11
+9.4	۶۱.۸٪ بدون سیگنال	صبر	11
+9.5	عبور از ۶۱.۸٪ به ۷۸.۶٪	صبر برای ۷۸.۶٪	11
+9.6	پول‌بک به ۵۰٪	Fallback ورود	11
+9.7	A قطعی	ورود نکن	11
+9.8	کشیدگی موج ۵	سیو سود	18
+گام ۱۰: مدیریت ریسک
+۱۰.۱ الگوریتم Trailing Stop
+python
+def update_trailing_stop(
+    current_price: float,
+    entry_price: float,
+    tmv: TMV,
+    extension: str | None
+) -> StopRecommendation:
+    """به‌روزرسانی استاپ بر اساس TMV hit."""
+    if extension == "wave_5":
+        return StopRecommendation(
+            action="immediate_profit_taking",
+            stop_price=current_price,
+            reason="Wave 5 extension: reversal imminent"
+        )
+    
+    if current_price >= tmv.alternate:
+        return StopRecommendation(
+            action="trail_high",
+            stop_price=current_price * 0.95,
+            reason="Alternate hit; lock 5% profit"
+        )
+    elif current_price >= tmv.ideal:
+        return StopRecommendation(
+            action="trail_mid",
+            stop_price=current_price * 0.93,
+            reason="Ideal hit; lock 7% profit"
+        )
+    elif current_price >= tmv.prime:
+        return StopRecommendation(
+            action="trail_low",
+            stop_price=current_price * 0.90,
+            reason="Prime hit; lock 10% profit"
+        )
+    
+    return StopRecommendation(
+        action="initial_stop",
+        stop_price=entry_price * 0.95,
+        reason="No TMV hit yet; initial stop"
+    )
+۱۰.۲ جدول Trailing Stop
+#	شرایط	استاپ	جلسه
+10.1	TMV Prime hit	۱۰٪ زیر قیمت فعلی	18
+10.2	TMV Ideal hit	۷٪ زیر قیمت فعلی	18
+10.3	TMV Alternate hit	۵٪ زیر قیمت فعلی	18
+10.4	کشیدگی موج ۵	سیو سود فوری	18
+10.5	کشیدگی موج ۳	Trailing Stop فعال	18
+10.6	بدون Trailing Stop	ریسک بالا	19
+جدول خلاصه: ترتیب اجرای گام‌ها
+گام	عنوان	خروجی	جلسات مرجع
+۰	اعتبارسنجی داده	تایم‌فریم شروع + حداکثر درجه	3, 5
+۱	کف مطلق	ایندکس کف مطلق	4, 5
+۲	درشت‌موج‌شماری	سیکل‌های V	2, 4, 6, 9, 16
+۳	تایم میانی	سیکل‌های W	3, 5
+۴	تایم پایین	سیکل‌های BOLD	3, 5
+۵	توقف	توقف در درجه ۴	3, 5
+۶	اعتبارسنجی	گزارش نهایی	4, 6
+۷	سناریو بندی	۳+ سناریو	11
+۸	PRZ/TMV	محدوده‌های هدف	7, 8, 18
+۹	توصیه ورود	ورود/صبر/فروش	11
+۱۰	مدیریت ریسک	Trailing Stop	18, 19
+شبه‌کد کامل الگوریتم
+python
+def full_wave_counting_pipeline(
+    candles_by_tf: dict[str, list[Candle]],
+    market: str = "stock"
+) -> WaveCountingResult:
+    """خط لوله کامل موج‌شماری از بالا به پایین."""
+    
+    # گام ۰: اعتبارسنجی
+    validation = validate_input_data(candles_by_tf)
+    if not validation.valid:
+        return WaveCountingResult(error=validation.error)
+    
+    start_tf = select_start_timeframe(candles_by_tf["daily"])
+    max_degree = get_max_degree(start_tf, market)
+    
+    # گام ۱: کف مطلق
+    bottom_idx = find_absolute_bottom(candles_by_tf[start_tf])
+    if bottom_idx is None:
+        return WaveCountingResult(error="No absolute bottom")
+    
+    bottom_valid, bottom_msg = validate_absolute_bottom(
+        candles_by_tf[start_tf], bottom_idx
+    )
+    if not bottom_valid:
+        return WaveCountingResult(error=bottom_msg)
+    
+    # گام ۲: درشت‌موج‌شماری
+    cycles_v = coarse_wave_count(
+        candles_by_tf[start_tf], bottom_idx, max_degree
+    )
+    if not cycles_v:
+        return WaveCountingResult(error="No valid cycles found")
+    
+    # گام ۳-۴: پالایش تکراری
+    current_tf = start_tf
+    current_degree = 1
+    cycles = cycles_v
+    
+    while current_degree < max_degree:
+        next_tf = get_next_timeframe(current_tf)
+        if next_tf not in candles_by_tf:
+            break
+        
+        cycles = refine_to_lower_timeframe(
+            candles_by_tf[current_tf],
+            candles_by_tf[next_tf],
+            cycles
+        )
+        
+        current_tf = next_tf
+        current_degree += 1
+    
+    # گام ۵: توقف
+    if current_degree >= max_degree:
+        cycles = promote_degrees(cycles)
+    
+    # گام ۶: اعتبارسنجی نهایی
+    validation_report = final_validation(cycles, {
+        "market": market,
+        "timeframe": current_tf,
+        "degree": current_degree
+    })
+    
+    # گام ۷: سناریو بندی
+    scenarios = generate_scenarios(cycles)
+    
+    # گام ۸: PRZ/TMV
+    prz_list = [compute_prz(w, 0.618) for w in cycles[-1].corrective_waves]
+    tmv = compute_tmv(cycles[-1].wave_1, cycles[-1].wave_2)
+    
+    # گام ۹: توصیه ورود
+    entry = recommend_entry(cycles, scenarios)
+    
+    # گام ۱۰: مدیریت ریسک
+    stop = update_trailing_stop(
+        current_price=candles_by_tf[current_tf][-1].close,
+        entry_price=entry.entry_price or 0,
+        tmv=tmv,
+        extension=cycles[-1].wave_5.extension
+    )
+    
+    return WaveCountingResult(
+        cycles=cycles,
+        validation=validation_report,
+        scenarios=scenarios,
+        prz=prz_list,
+        tmv=tmv,
+        entry=entry,
+        stop=stop,
+        bottom_idx=bottom_idx,
+        start_tf=start_tf,
+        final_tf=current_tf,
+        final_degree=current_degree
+    )
+نکات کلیدی برای LLM
+ترتیب اولویت: همیشه از ساده‌ترین الگو شروع کن (ایده‌آل → قطر → ترمینال → زیگزاگ → فلت → مثلث → ترکیبی).
+
+توقف در درجه ۴: در بورس، زیر درجه ۴ نشمار.
+
+کف مطلق: اگر کف مطلق تشکیل نشده → شمارش نکن.
+
+فرض ساختار: موج شتابدار → فرض ۵ (اصلی) یا ۳ (اصلاحی).
+
+هم‌خوانی درجات: موج ۲ و ۴ باید اندازه مشابه داشته باشند (نسبت < ۱۰).
+
+سناریو بندی: همیشه ۲-۳ سناریو ممکن در نظر بگیر.
+
+PRZ و TMV: PRZ = محدوده چرخش؛ TMV = هدف حرکت.
+
+ورود: رتریسمنت ≥ ۵۰٪ + سیگنال.
+
+مدیریت ریسک: Trailing Stop بر اساس TMV hit.
+
+Edge Cases: همه شرایط مرزی از سند قبلی را چک کن.
+
+جدول جامع: نگاشت گام‌ها به جلسات
+گام	جلسات مرتبط	مفاهیم کلیدی
+۰	1, 3, 5	اعتبارسنجی، انتخاب تایم‌فریم، محدودیت درجه
+۱	4, 5	کف مطلق، کف معتبر
+۲	2, 4, 6, 9, 16	سیکل ایده‌آل، قوانین، ترمینال، قطر، ترکیبی
+۳	3, 5	فرکتال، هم‌خوانی درجات
+۴	3, 5	فرکتال، درجه امواج
+۵	3, 5	توقف در درجه ۴، ارتقاء لیبل‌ها
+۶	4, 6, 9	قوانین، ترمینال، قطر
+۷	11	سناریو بندی W2 vs A
+۸	7, 8, 18	فیبوناچی، TMV، کشیدگی
+۹	11	ستاپ ورود، خرید پله‌ای
+۱۰	18, 19	Trailing Stop، مدیریت ریسک
+این سند راهنمای اجرایی کامل برای LLM است تا موج‌شماری را از تایم‌فریم بالا به پایین با در نظر گرفتن تمام قواعد، شرایط مرزی، و سناریوهای مختلف پیاده‌سازی کند.
+
+مستند قبلی را با در نظر گرفتن شرایط مرزی مجددا به صورت کامل بازنویسی کن
+راهنمای کامل و بازنویسی‌شده موج‌شماری از تایم‌فریم بالا به پایین
+همراه با تمام شرایط مرزی، قواعد، و سناریوها (نسخه نهایی برای LLM)
+فهرست مطالب
+نمای کلی الگوریتم
+
+گام ۰: اعتبارسنجی داده ورودی
+
+گام ۱: انتخاب تایم‌فریم و حداکثر درجه
+
+گام ۲: پیدا کردن کف مطلق
+
+گام ۳: درشت‌موج‌شماری (تایم بالا)
+
+گام ۴: پالایش به تایم میانی
+
+گام ۵: پالایش به تایم پایین
+
+گام ۶: توقف در درجه مجاز
+
+گام ۷: اعتبارسنجی نهایی
+
+گام ۸: سناریو بندی
+
+گام ۹: محاسبه PRZ و TMV
+
+گام ۱۰: توصیه ورود
+
+گام ۱۱: مدیریت ریسک
+
+شبه‌کد کامل
+
+جدول جامع شرایط مرزی
+
+بخش ۱: نمای کلی الگوریتم
+text
+┌─────────────────────────────────────────────────────────────┐
+│                    START                                    │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۰: اعتبارسنجی داده ورودی                                │
+│   - بررسی حداقل ۱۰ کندل                                     │
+│   - بررسی NaN، تکراری، ترتیب زمانی                          │
+│   - بررسی نوسان قیمت                                        │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۱: انتخاب تایم‌فریم شروع و حداکثر درجه                   │
+│   - < ۶ ماه → daily                                        │
+│   - ۶ ماه - ۵ سال → weekly                                 │
+│   - > ۵ سال → monthly                                      │
+│   - تعیین max_degree (بورس/فارکس)                           │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۲: پیدا کردن کف مطلق                                    │
+│   - پیدا کردن پایین‌ترین نقطه                                │
+│   - اعتبارسنجی (تشکیل شده؟ شکسته نشده؟)                     │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۳: درشت‌موج‌شماری (تایم بالا)                            │
+│   - پیدا کردن پیوت‌ها                                       │
+│   - ساخت کاندیدهای سیکل                                     │
+│   - اعتبارسنجی با ترتیب اولویت                              │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۴: پالایش به تایم میانی (تکرار)                         │
+│   - بررسی ساختار درونی امواج اصلی                           │
+│   - تشخیص شتابدار vs فرکتالی                                │
+│   - اعتبارسنجی مجدد                                         │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۵: پالایش به تایم پایین (تکرار)                         │
+│   - ادامه تا رسیدن به max_degree                            │
+│   - بررسی Edge Cases                                        │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۶: توقف در درجه مجاز                                    │
+│   - توقف در درجه ۴ (بورس) یا ۱۵ (فارکس)                     │
+│   - ارتقاء لیبل‌ها در صورت لزوم                             │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۷: اعتبارسنجی نهایی                                     │
+│   - چک‌لیست کامل قوانین                                     │
+│   - بررسی همه Edge Cases                                    │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۸: سناریو بندی                                          │
+│   - تولید ۲-۳ سناریو ممکن                                   │
+│   - محاسبه احتمال هر سناریو                                 │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۹: محاسبه PRZ و TMV                                     │
+│   - محدوده چرخش (PRZ)                                       │
+│   - هدف حرکت (TMV)                                          │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۱۰: توصیه ورود                                          │
+│   - ورود/صبر/فروش                                           │
+│   - ورود پله‌ای در صورت ابهام                                │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ گام ۱۱: مدیریت ریسک                                         │
+│   - Trailing Stop                                           │
+│   - سیو سود                                                 │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    END                                      │
+└─────────────────────────────────────────────────────────────┘
+گام ۰: اعتبارسنجی داده ورودی
+۰.۱ بررسی‌های اولیه (Pre-flight Checks)
+python
+def validate_input_data(candles_by_tf: dict[str, list[Candle]]) -> ValidationResult:
+    """اعتبارسنجی کامل داده ورودی."""
+    errors = []
+    warnings = []
+    
+    # ۰.۱.۱: بررسی وجود تایم‌فریم روزانه (حداقل)
+    if "daily" not in candles_by_tf:
+        errors.append("Missing daily timeframe data")
+        return ValidationResult(valid=False, errors=errors)
+    
+    daily = candles_by_tf["daily"]
+    
+    # ۰.۱.۲: بررسی خالی نبودن
+    if len(daily) == 0:
+        errors.append("Empty data")
+        return ValidationResult(valid=False, errors=errors)
+    
+    # ۰.۱.۳: بررسی حداقل ۱۰ کندل
+    if len(daily) < 10:
+        errors.append(f"Insufficient data: {len(daily)} candles (min 10)")
+        return ValidationResult(valid=False, errors=errors)
+    
+    # ۰.۱.۴: بررسی NaN
+    nan_count = sum(1 for c in daily if any(
+        pd.isna(c.open) or pd.isna(c.high) or pd.isna(c.low) or pd.isna(c.close)
+        for _ in [1]
+    ))
+    if nan_count > 0:
+        if nan_count > len(daily) * 0.1:  # بیش از ۱۰٪ NaN
+            errors.append(f"Too many NaN values: {nan_count}")
+        else:
+            warnings.append(f"Forward-filled {nan_count} NaN values")
+    
+    # ۰.۱.۵: بررسی timestamp تکراری
+    timestamps = [c.timestamp for c in daily]
+    if len(timestamps) != len(set(timestamps)):
+        errors.append("Duplicate timestamps found")
+    
+    # ۰.۱.۶: بررسی ترتیب زمانی
+    for i in range(1, len(daily)):
+        if daily[i].timestamp < daily[i-1].timestamp:
+            errors.append(f"Timestamp out of order at index {i}")
+            break
+    
+    # ۰.۱.۷: بررسی نوسان قیمت (همه یکسان)
+    all_prices = [c.close for c in daily]
+    if len(set(all_prices)) == 1:
+        errors.append("No price movement (all closes identical)")
+    
+    # ۰.۱.۸: بررسی کندل‌های Doji (همه open=high=low=close)
+    doji_count = sum(1 for c in daily if c.open == c.high == c.low == c.close)
+    if doji_count == len(daily):
+        errors.append("All candles are Doji (no price movement)")
+    elif doji_count > len(daily) * 0.5:
+        warnings.append(f"High Doji count: {doji_count}")
+    
+    # ۰.۱.۹: بررسی کندل‌های با قیمت منفی
+    if any(c.low < 0 for c in daily):
+        errors.append("Negative prices found")
+    
+    # ۰.۱.۱۰: بررسی high < low
+    if any(c.high < c.low for c in daily):
+        errors.append("Invalid candle: high < low")
+    
+    return ValidationResult(
+        valid=len(errors) == 0,
+        errors=errors,
+        warnings=warnings
+    )
+۰.۲ جدول شرایط مرزی گام ۰
+#	شرایط	اقدام	جلسه
+0.1	len(candles) < 10	خطا: "Insufficient data (min 10)"	5
+0.2	len(candles) == 0	خطا: "No data"	5
+0.3	NaN > ۱۰٪	خطا: "Too many NaN"	5
+0.4	NaN < ۱۰٪	Forward-fill + هشدار	5
+0.5	timestamp تکراری	خطا: "Duplicate timestamps"	5
+0.6	timestamp خارج از ترتیب	خطا (یا مرتب‌سازی + هشدار)	5
+0.7	open == high == low == close (همه)	خطا: "No price movement"	5
+0.8	Doji > ۵۰٪	هشدار	5
+0.9	قیمت منفی	خطا: "Negative prices"	5
+0.10	high < low	خطا: "Invalid candle"	5
+0.11	فقط تایم‌فریم روزانه	معتبر (سایر تایم‌ها اختیاری)	5
+0.12	دیتای < ۱ ماه	هشدار: شمارش ممکن است ناقص باشد	5
+گام ۱: انتخاب تایم‌فریم و حداکثر درجه
+۱.۱ الگوریتم انتخاب تایم‌فریم شروع
+python
+def select_start_timeframe(daily_candles: list[Candle]) -> str:
+    """انتخاب تایم‌فریم شروع بر اساس طول داده."""
+    days = (daily_candles[-1].timestamp - daily_candles[0].timestamp).days
+    
+    # قانون: < ۶ ماه → daily
+    if days < 180:
+        return "daily"
+    
+    # قانون: ۶ ماه - ۵ سال → weekly
+    elif days < 365 * 5:
+        return "weekly"
+    
+    # قانون: > ۵ سال → monthly
+    else:
+        return "monthly"
+۱.۲ تعیین حداکثر درجه
+python
+MAX_DEGREES = {
+    "monthly": {"stock": 2, "forex": 5},
+    "weekly": {"stock": 3, "forex": 7},
+    "daily": {"stock": 4, "forex": 10},
+    "4h": {"stock": 5, "forex": 12},
+    "1h": {"stock": 6, "forex": 15},
+    "15m": {"stock": 0, "forex": 15},  # در بورس استفاده نمی‌شود
+}
+
+def get_max_degree(timeframe: str, market: str) -> int:
+    """دریافت حداکثر درجه مجاز."""
+    return MAX_DEGREES.get(timeframe, {}).get(market, 0)
+
+def get_next_timeframe(current: str) -> str | None:
+    """تایم‌فریم بعدی (پایین‌تر)."""
+    order = ["monthly", "weekly", "daily", "4h", "1h", "15m"]
+    try:
+        idx = order.index(current)
+        return order[idx + 1] if idx + 1 < len(order) else None
+    except ValueError:
+        return None
+۱.۳ جدول شرایط مرزی گام ۱
+#	شرایط	اقدام	جلسه
+1.1	دیتای < ۶ ماه	start_tf = "daily"	5
+1.2	دیتای ۶ ماه - ۵ سال	start_tf = "weekly"	5
+1.3	دیتای > ۵ سال	start_tf = "monthly"	5
+1.4	تایم‌فریم روزانه نباشد	خطا: "Daily data required"	5
+1.5	تایم‌فریم هفتگی نباشد	از روزانه استفاده کن	5
+1.6	تایم‌فریم ماهانه نباشد	از هفتگی استفاده کن	5
+1.7	بورس + تایم ۱۵ دقیقه	خطا (در بورس زیر روزانه نداریم)	3, 5
+1.8	فارکس + تایم ۱۵ دقیقه	معتبر (max_degree=15)	3
+1.9	دیتای < ۱ ماه	هشدار + از daily شروع کن	5
+1.10	دیتای > ۲۰ سال	هشدار: ممکن است تایم ماهانه فشرده باشد	5
+گام ۲: پیدا کردن کف مطلق
+۲.۱ الگوریتم پیدا کردن کف مطلق
+python
+def find_absolute_bottom(candles: list[Candle]) -> int | None:
+    """پیدا کردن پایین‌ترین نقطه در کل نمودار."""
+    if not candles:
+        return None
+    
+    lowest_idx = min(range(len(candles)), key=lambda i: candles[i].low)
+    return lowest_idx
+۲.۲ اعتبارسنجی کف مطلق
+python
+def validate_absolute_bottom(
+    candles: list[Candle],
+    bottom_idx: int
+) -> tuple[bool, str]:
+    """بررسی اینکه کف مطلق واقعاً تشکیل شده."""
+    
+    # ۲.۲.۱: اگر کف در ابتدای نمودار است → ممکن است ناقص باشد
+    if bottom_idx < 5:
+        return False, "Bottom too close to start; possible incomplete data"
+    
+    # ۲.۲.۲: بررسی شکست کف توسط کندل‌های بعدی
+    # اگر قیمت بعد از کف، به زیر کف برگشته → کف مطلق جدید
+    post_bottom = candles[bottom_idx:]
+    if len(post_bottom) > 20:
+        # فقط ۱۰ کندل بعد از کف را بررسی کن (نه همه)
+        # چون ممکن است سیکل بعدی کف جدید بسازد
+        if min(c.low for c in post_bottom[10:20]) < candles[bottom_idx].low:
+            return False, "Bottom broken by subsequent candles; new bottom formed"
+    
+    # ۲.۲.۳: بررسی اینکه کف مطلق قبل از کندل‌های کافی است
+    if bottom_idx == 0:
+        return False, "Bottom at index 0; no prior data for reference"
+    
+    return True, f"Absolute bottom at index {bottom_idx} (low={candles[bottom_idx].low})"
+۲.۳ جدول شرایط مرزی گام ۲
+#	شرایط	اقدام	جلسه
+2.1	کف مطلق در index < 5	خطا: "Bottom too close to start"	4, 5
+2.2	کف مطلق در index == 0	خطا: "No prior data for reference"	4
+2.3	کف مطلق توسط کندل بعدی شکسته شده	کف مطلق جدید (بازشمارش)	4, 5
+2.4	کف مطلق در تایم ماهانه قابل تشخیص نیست	از هفتگی شروع کن	5
+2.5	کف مطلق در تایم روزانه قابل تشخیص است	نیازی به تایم بالاتر نیست	5
+2.6	نمودار از موج ۱ شروع + موج ۲ آن را ۱۰۰٪ پوشش می‌دهد	کف مطلق هنوز تشکیل نشده	4
+2.7	کف مطلق + سیکل کامل	کف مطلق + کف معتبر	5
+2.8	دو سیکل کامل	کف مطلق اولی + کف معتبر دومی	5
+2.9	کف معتبر توسط موج ۲ سیکل بعدی ۱۰۰٪ پوشش داده شده	کف معتبر باطل	5
+گام ۳: درشت‌موج‌شماری (تایم بالا)
+۳.۱ الگوریتم درشت‌موج‌شماری
+python
+def coarse_wave_count(
+    candles: list[Candle],
+    bottom_idx: int,
+    max_degree: int
+) -> list[Cycle]:
+    """درشت‌موج‌شماری از کف مطلق."""
+    
+    # ۳.۱.۱: پیدا کردن پیوت‌ها با window مناسب
+    window = get_pivot_window(get_timeframe_from_candles(candles))
+    pivots = find_pivots(candles[bottom_idx:], window)
+    
+    # ۳.۱.۲: بررسی حداقل پیوت
+    if len(pivots) < 8:
+        return []  # نمی‌توان سیکل کامل ساخت
+    
+    # ۳.۱.۳: ساخت کاندیدهای سیکل
+    candidates = build_cycle_candidates(pivots, candles[bottom_idx:])
+    
+    # ۳.۱.۴: اعتبارسنجی هر کاندید با ترتیب اولویت
+    valid_cycles = []
+    for cand in candidates:
+        result = validate_cycle_priority(cand)
+        if result.valid or result.alternative:
+            cand.confidence = result.confidence
+            cand.type = result.type
+            valid_cycles.append(cand)
+    
+    # ۳.۱.۵: انتخاب بهترین کاندید (بیشترین confidence)
+    valid_cycles.sort(key=lambda c: c.confidence, reverse=True)
+    
+    # ۳.۱.۶: برگرداندن تا ۳ کاندید برتر (برای سناریو بندی)
+    return valid_cycles[:3]
+۳.۲ پیدا کردن پیوت‌ها
+python
+def get_pivot_window(timeframe: str) -> int:
+    """انتخاب window مناسب برای هر تایم‌فریم."""
+    windows = {
+        "monthly": 3,
+        "weekly": 4,
+        "daily": 5,
+        "4h": 6,
+        "1h": 8,
+        "15m": 10,
+    }
+    return windows.get(timeframe, 5)
+
+def find_pivots(candles: list[Candle], window: int = 5) -> list[Pivot]:
+    """پیدا کردن پیوت‌های high/low."""
+    pivots = []
+    for i in range(window, len(candles) - window):
+        # High pivot
+        if candles[i].high == max(c.high for c in candles[i-window:i+window+1]):
+            pivots.append(Pivot(index=i, type="high", price=candles[i].high))
+        # Low pivot
+        if candles[i].low == min(c.low for c in candles[i-window:i+window+1]):
+            pivots.append(Pivot(index=i, type="low", price=candles[i].low))
+    return pivots
+۳.۳ ساخت کاندیدهای سیکل
+python
+def build_cycle_candidates(pivots: list[Pivot], candles: list[Candle]) -> list[Cycle]:
+    """ساخت کاندیدهای سیکل از پیوت‌ها."""
+    candidates = []
+    
+    # ۳.۳.۱: سیکل ایده‌آل (۸ پیوت متناوب)
+    for i in range(len(pivots) - 7):
+        points = pivots[i:i+8]
+        if is_alternating(points):
+            candidates.append(Cycle(points=points, type="ideal"))
+    
+    # ۳.۳.۲: سیکل ترمینال (نقض قانون ۳ + موج ۵ کوتاه)
+    for i in range(len(pivots) - 7):
+        points = pivots[i:i+8]
+        if is_alternating(points):
+            waves = points_to_waves(points, candles)
+            if violates_rule_3(waves) and waves[4].length < waves[2].length:
+                candidates.append(Cycle(points=points, type="terminal"))
+    
+    # ۳.۳.۳: آنتی‌سیکل (نقض قانون ۱ + ساختار ۳-۵)
+    for i in range(len(pivots) - 7):
+        points = pivots[i:i+8]
+        if is_alternating(points):
+            waves = points_to_waves(points, candles)
+            if violates_rule_1(waves) and waves[0].sub_wave_count == 3:
+                candidates.append(Cycle(points=points, type="anti_cycle"))
+    
+    # ۳.۳.۴: الگوی قطر (ساختار ۳-۳-۳-۳-۳)
+    for i in range(len(pivots) - 7):
+        points = pivots[i:i+8]
+        if is_alternating(points):
+            waves = points_to_waves(points, candles)
+            if all(w.sub_wave_count == 3 for w in waves[:5]):
+                candidates.append(Cycle(points=points, type="diagonal"))
+    
+    # ۳.۳.۵: زیگزاگ (ساختار ۵-۳-۵)
+    for i in range(len(pivots) - 3):
+        points = pivots[i:i+4]
+        if is_alternating(points):
+            waves = points_to_waves(points, candles)
+            if is_zigzag(waves):
+                candidates.append(Cycle(points=points, type="zigzag"))
+    
+    # ۳.۳.۶: فلت (ساختار ۳-۳-۵)
+    for i in range(len(pivots) - 3):
+        points = pivots[i:i+4]
+        if is_alternating(points):
+            waves = points_to_waves(points, candles)
+            if is_flat(waves):
+                candidates.append(Cycle(points=points, type="flat"))
+    
+    # ۳.۳.۷: مثلث (ساختار ۳-۳-۳-۳-۳)
+    for i in range(len(pivots) - 5):
+        points = pivots[i:i+6]
+        if is_alternating(points):
+            waves = points_to_waves(points, candles)
+            if is_triangle(waves):
+                candidates.append(Cycle(points=points, type="triangle"))
+    
+    # ۳.۳.۸: ترکیبی (در صورت عدم موفقیت سایر الگوها)
+    # (این در validate_cycle_priority بررسی می‌شود)
+    
+    return candidates
+۳.۴ اعتبارسنجی با ترتیب اولویت
+python
+def validate_cycle_priority(cycle: Cycle) -> ValidationResult:
+    """اعتبارسنجی سیکل با ترتیب اولویت (از جلسه ۱۶)."""
+    waves = cycle.to_waves()
+    
+    # اولویت ۱: سیکل ایده‌آل
+    if cycle.type == "ideal":
+        result = validate_ideal_cycle(waves)
+        if result.valid:
+            return ValidationResult(valid=True, type="ideal", confidence=0.95)
+    
+    # اولویت ۲: الگوی قطر
+    if cycle.type == "diagonal":
+        result = validate_diagonal(waves)
+        if result.valid:
+            return ValidationResult(valid=True, type="diagonal", confidence=0.85)
+    
+    # اولویت ۳: ترمینال / آنتی‌سیکل
+    if cycle.type == "terminal":
+        result = validate_terminal(waves)
+        if result.valid:
+            return ValidationResult(valid=True, type="terminal", confidence=0.8)
+    
+    if cycle.type == "anti_cycle":
+        result = validate_anti_cycle(waves)
+        if result.valid:
+            return ValidationResult(valid=True, type="anti_cycle", confidence=0.75)
+    
+    # اولویت ۴: زیگزاگ
+    if cycle.type == "zigzag":
+        result = validate_zigzag(waves)
+        if result.valid:
+            return ValidationResult(valid=True, type="zigzag", confidence=0.7)
+    
+    # اولویت ۵: فلت
+    if cycle.type == "flat":
+        result = validate_flat(waves)
+        if result.valid:
+            return ValidationResult(valid=True, type="flat", confidence=0.65)
+    
+    # اولویت ۶: مثلث
+    if cycle.type == "triangle":
+        result = validate_triangle(waves)
+        if result.valid:
+            return ValidationResult(valid=True, type="triangle", confidence=0.7)
+    
+    # اولویت ۷: ترکیبی (آخرین راه‌حل)
+    result = validate_complex(waves)
+    if result.valid:
+        return ValidationResult(valid=True, type="complex", confidence=0.5)
+    
+    return ValidationResult(valid=False, reason="No valid pattern")
+۳.۵ جدول شرایط مرزی گام ۳
+#	شرایط	اقدام	جلسه
+3.1	کمبود پیوت (< ۸)	خطا: "Insufficient pivots"	2
+3.2	پیوت‌های غیرمتناوب (high-high)	خطا: "Non-alternating pivots"	2
+3.3	سیکل ایده‌آل ممکن نیست + قطر ممکن	قطر (اولویت ۲)	6, 9
+3.4	سیکل ایده‌آل + ترمینال هر دو ممکن	سیکل ایده‌آل (اولویت ۱)	4
+3.5	هیچ الگوی ساده ممکن نیست	ترکیبی (اولویت ۷)	16
+3.6	نقض قانون ۳ + موج ۵ کوتاه	ترمینال	6
+3.7	نقض قانون ۳ + موج ۵ بلند	آنتی‌ترمینال	6
+3.8	نقض قانون ۱ + ساختار ۳-۵	آنتی‌سیکل	6
+3.9	موج ۳ کوتاه‌ترین	خطا (نقض قانون ۲)	4
+3.10	موج ۴ وارد محدوده ۱	هشدار + بررسی الگوی جایگزین	4
+3.11	موج ۲ > ۱۰۰٪ موج ۱	خطا (نقض قانون ۱)	4
+3.12	موج ۵ < ۱۰۰٪ موج ۴	خطا (نقض CB-Wave)	6
+3.13	۵+ کاندید معتبر	انتخاب ۳ برتر + سناریو بندی	11
+3.14	فقط ۱ کاندید معتبر	استفاده مستقیم	11
+گام ۴: پالایش به تایم میانی
+۴.۱ الگوریتم پالایش
+python
+def refine_to_lower_timeframe(
+    candles_high_tf: list[Candle],
+    candles_low_tf: list[Candle],
+    cycles: list[Cycle]
+) -> list[Cycle]:
+    """پالایش سیکل‌ها با تایم‌فریم پایین‌تر."""
+    refined = []
+    
+    for cycle in cycles:
+        cycle_valid = True
+        
+        for wave in cycle.main_waves:  # 1, 3, 5, A, C
+            # ۴.۱.۱: بررسی ساختار درونی در تایم پایین
+            internal = detect_internal_structure(
+                candles_low_tf, wave.start_idx, wave.end_idx
+            )
+            
+            # ۴.۱.۲: اگر ساختار قابل شمارش نیست → شتابدار
+            if internal is None:
+                wave.is_impulsive = True
+                wave.internal_structure = 5  # فرض ۵ موجی
+                wave.warning = "Impulsive; assuming 5 sub-waves"
+                continue
+            
+            # ۴.۱.۳: اگر ساختار ۵ موجی → فرکتالی
+            if internal.count == 5:
+                wave.internal_structure = 5
+                wave.sub_waves = internal.waves
+                wave.is_impulsive = False
+                continue
+            
+            # ۴.۱.۴: اگر ساختار ۳ موجی → نقض ساختار
+            if internal.count == 3:
+                # بررسی: آیا الگوی قطر است؟
+                if validate_diagonal_internal(internal).valid:
+                    wave.pattern = "diagonal"
+                    wave.internal_structure = 3
+                else:
+                    wave.warning = f"Wave {wave.label} has 3 sub-waves; possible mislabel"
+                    cycle_valid = False
+        
+        # ۴.۱.۵: بررسی امواج اصلاحی
+        for wave in cycle.corrective_waves:  # 2, 4, B
+            internal = detect_internal_structure(
+                candles_low_tf, wave.start_idx, wave.end_idx
+            )
+            
+            if internal is None:
+                wave.is_impulsive = True
+                wave.internal_structure = 3  # فرض ۳ موجی
+                continue
+            
+            if internal.count == 3:
+                wave.internal_structure = 3
+                wave.sub_waves = internal.waves
+                continue
+            
+            if internal.count == 5:
+                # آنتی‌سیکل یا ترکیبی
+                if validate_anti_cycle_internal(internal).valid:
+                    wave.pattern = "anti_cycle"
+                else:
+                    wave.pattern = "complex"
+                wave.internal_structure = 5
+        
+        if cycle_valid:
+            refined.append(cycle)
+    
+    return refined
+۴.۲ تشخیص ساختار درونی
+python
+def detect_internal_structure(
+    candles: list[Candle],
+    start_idx: int,
+    end_idx: int
+) -> InternalStructure | None:
+    """تشخیص ساختار درونی یک موج در تایم پایین‌تر."""
+    segment = candles[start_idx:end_idx+1]
+    
+    if len(segment) < 10:
+        return None  # دیتای ناکافی
+    
+    # پیدا کردن پیوت‌های داخلی
+    pivots = find_pivots(segment, window=3)
+    
+    if len(pivots) < 4:
+        return None  # نمی‌توان ساختار ۳ موجی ساخت
+    
+    # بررسی ساختار ۵ موجی (۶ پیوت)
+    if len(pivots) >= 6:
+        if is_alternating(pivots[:6]):
+            return InternalStructure(count=5, waves=pivots_to_waves(pivots[:6]))
+    
+    # بررسی ساختار ۳ موجی (۴ پیوت)
+    if len(pivots) >= 4:
+        if is_alternating(pivots[:4]):
+            return InternalStructure(count=3, waves=pivots_to_waves(pivots[:4]))
+    
+    return None
+۴.۳ جدول شرایط مرزی گام ۴
+#	شرایط	اقدام	جلسه
+4.1	موج اصلی در تایم بالا شتابدار + ساختار ۵ موجی در تایم پایین	فرکتالی (نه شتابدار)	3, 5
+4.2	موج اصلی در تایم بالا شتابدار + بدون ساختار در تایم پایین	شتابدار (فرض ۵)	3, 5
+4.3	موج اصلی در تایم بالا ۵ موجی	در تایم پایین ۵ موجی → تأیید	3
+4.4	موج اصلی در تایم بالا ۳ موجی	شمارش اشتباه → بازشمارش	3
+4.5	موج اصلاحی در تایم بالا ۵ موجی	آنتی‌سیکل یا ترکیبی	3, 6
+4.6	موج شتابدار + ساختار ۳ موجی در تایم پایین	احتمالاً موج اصلاحی است، نه اصلی	5
+4.7	کمبود دیتا در تایم پایین (< ۱۰ کندل)	توقف در درجه فعلی	5
+4.8	موج اصلی با ۳ موج + قطر معتبر	قطر (پذیرفته)	9
+4.9	موج اصلی با ۳ موج + قطر نامعتبر	شمارش اشتباه	9
+4.10	موج اصلاحی با ۵ موج + آنتی‌سیکل معتبر	آنتی‌سیکل (پذیرفته)	6
+4.11	موج اصلاحی با ۵ موج + آنتی‌سیکل نامعتبر	ترکیبی	16
+گام ۵: پالایش به تایم پایین
+۵.۱ الگوریتم تکراری
+python
+def iterative_refinement(
+    candles_by_tf: dict[str, list[Candle]],
+    cycles: list[Cycle],
+    current_tf: str,
+    max_degree: int
+) -> list[Cycle]:
+    """پالایش تکراری تا رسیدن به max_degree."""
+    current_degree = get_degree_from_tf(current_tf)
+    
+    # ۵.۱.۱: بررسی توقف
+    if current_degree >= max_degree:
+        return cycles
+    
+    # ۵.۱.۲: تایم بعدی
+    next_tf = get_next_timeframe(current_tf)
+    if next_tf is None or next_tf not in candles_by_tf:
+        return cycles  # توقف
+    
+    # ۵.۱.۳: بررسی حداقل دیتا در تایم بعدی
+    if len(candles_by_tf[next_tf]) < 10:
+        return cycles  # دیتای ناکافی
+    
+    # ۵.۱.۴: پالایش
+    refined = refine_to_lower_timeframe(
+        candles_by_tf[current_tf],
+        candles_by_tf[next_tf],
+        cycles
+    )
+    
+    # ۵.۱.۵: بازگشت تکراری
+    return iterative_refinement(
+        candles_by_tf, refined, next_tf, max_degree
+    )
+۵.۲ جدول شرایط مرزی گام ۵
+#	شرایط	اقدام	جلسه
+5.1	رسیدن به max_degree	توقف شمارش	3, 5
+5.2	تایم بعدی موجود نیست	توقف در تایم فعلی	5
+5.3	دیتای تایم بعدی < ۱۰ کندل	توقف در تایم فعلی	5
+5.4	پالایش ناموفق (هیچ سیکلی معتبر نماند)	بازگشت به تایم بالا	3
+5.5	قیمت از سقف درجه ۴ فراتر رفته	ارتقاء لیبل‌ها	3, 5
+5.6	موج ۲ > ۱۰۰٪ موج ۱ در تایم پایین	بازشمارش سیکل	4
+5.7	موج ۳ کوتاه‌ترین در تایم پایین	بازشمارش سیکل	4
+5.8	موج ۴ وارد محدوده ۱ در تایم پایین	بررسی ترمینال/قطر	4, 6, 9
+گام ۶: توقف در درجه مجاز
+۶.۱ قانون توقف
+python
+def should_stop_counting(current_degree: int, timeframe: str, market: str) -> bool:
+    """بررسی توقف شمارش در درجه مجاز."""
+    max_deg = get_max_degree(timeframe, market)
+    return current_degree >= max_deg
+۶.۲ ارتقاء لیبل‌ها
+python
+DEGREE_ORDER = ["SIMPLE", "BOLD", "W", "V"]
+
+def promote_degrees(cycles: list[Cycle]) -> list[Cycle]:
+    """ارتقاء لیبل‌ها وقتی درجه ۴ تمام شود."""
+    for cycle in cycles:
+        for wave in cycle.waves:
+            current_idx = DEGREE_ORDER.index(wave.degree)
+            new_idx = min(current_idx + 1, len(DEGREE_ORDER) - 1)
+            wave.degree = DEGREE_ORDER[new_idx]
+    return cycles
+۶.۳ جدول شرایط مرزی گام ۶
+#	شرایط	اقدام	جلسه
+6.1	رسیدن به درجه ۴ (بورس)	توقف + ارتقاء	3, 5
+6.2	رسیدن به درجه ۱۵ (فارکس)	توقف	3
+6.3	قیمت از سقف درجه ۴ فراتر رفته	ارتقاء (V→W، W→BOLD، BOLD→SIMPLE، SIMPLE حذف)	3, 5
+6.4	درجه ۵ در بورس	نباید شمارش شود	3, 5
+6.5	درجه ۶ در بورس	خطا	3
+6.6	ارتقاء لیبل‌ها بدون دلیل	خطا	3
+6.7	ارتقاء + حذف SIMPLE	ممکن است	3, 5
+گام ۷: اعتبارسنجی نهایی
+۷.۱ چک‌لیست اعتبارسنجی
+python
+def final_validation(cycles: list[Cycle], context: dict) -> ValidationReport:
+    """اعتبارسنجی نهایی همه قواعد."""
+    report = ValidationReport()
+    
+    for cycle in cycles:
+        # ۷.۱.۱: قوانین بنیادین
+        report.add(validate_rule_1(cycle))
+        report.add(validate_rule_2(cycle))
+        report.add(validate_rule_3(cycle))
+        
+        # ۷.۱.۲: فرکتال
+        report.add(validate_fractal(cycle))
+        
+        # ۷.۱.۳: هم‌خوانی درجات
+        report.add(validate_degree_consistency(cycle))
+        
+        # ۷.۱.۴: آخرین موج
+        report.add(validate_last_wave_no_correction(cycle))
+        
+        # ۷.۱.۵: Edge Cases
+        report.add(validate_edge_cases(cycle, context))
+    
+    return report
+۷.۲ جدول اعتبارسنجی نهایی
+#	قاعده	منبع	جلسه
+7.1	موج ۲ < ۱۰۰٪ موج ۱	قانون ۱	4
+7.2	موج ۳ کوتاه‌ترین نباشد	قانون ۲	4
+7.3	موج ۴ وارد محدوده ۱ نشود	قانون ۳	4
+7.4	موج اصلی ۵ موجی	فرکتال	3
+7.5	موج اصلاحی ۳ موجی	فرکتال	3
+7.6	هم‌خوانی درجات	حرکت‌شناسی	5
+7.7	آخرین موج روند، اصلاح ندارد	قانون	3
+7.8	کف مطلق تشکیل شده	کف مطلق	4, 5
+7.9	زیر درجه ۴ نشمار	محدودیت	3, 5
+7.10	X-Wave ≥ ۳ کندل	ترکیبی	16
+7.11	موج ۵ ≥ ۱۰۰٪ موج ۴	CB-Wave	6
+7.12	موج ۵ < ۱۰۰٪ موج ۳	کوتاه‌شدگی/ترمینال	6, 19
+7.13	موج ۳ > ۱۶۱.۸٪ → کشیدگی	کشیدگی	18
+7.14	موج ۵ > ۱۶۱.۸٪ → زنگ خطر	کشیدگی	18
+7.15	B > ۶۱.۸٪ → فلت	فلت	12
+7.16	C > ۱۰۰٪ B → زیگزاگ معتبر	زیگزاگ	10
+7.17	مثلث فقط در ۲، ۴، B	مثلث	14
+7.18	قطر فقط در ۱، ۳، ۵، A، C	قطر	9
+7.19	ترمینال فقط در موج ۵	ترمینال	6
+7.20	الگوی ترکیبی فقط در اصلاحی	ترکیبی	16
+گام ۸: سناریو بندی
+۸.۱ الگوریتم تولید سناریو
+python
+def generate_scenarios(cycles: list[Cycle]) -> list[Scenario]:
+    """تولید سناریوهای ممکن برای آینده."""
+    scenarios = []
+    latest = cycles[0]  # بهترین کاندید
+    
+    # ۸.۱.۱: سناریو ادامه روند (ادامه صعود)
+    if latest.type in ["ideal", "terminal", "diagonal"]:
+        scenarios.append(Scenario(
+            name="uptrend_continuation",
+            description="Uptrend resumes after correction",
+            probability=0.6,
+            target=compute_tmv(latest),
+            stop=compute_stop_loss(latest)
+        ))
+    
+    # ۸.۱.۲: سناریو ریزش (شروع روند نزولی)
+    if latest.wave_5.is_extended:
+        scenarios.append(Scenario(
+            name="downtrend_start",
+            description="Sharp reversal after extended wave 5",
+            probability=0.4,
+            target=compute_abc_target(latest),
+            stop=compute_stop_loss(latest)
+        ))
+    
+    # ۸.۱.۳: سناریو W2 vs A
+    if len(latest.corrective_waves) > 0:
+        w2_scenario = compute_w2_scenario(latest)
+        a_scenario = compute_a_scenario(latest)
+        scenarios.extend([w2_scenario, a_scenario])
+    
+    # ۸.۱.۴: سناریو رنج (خنثی)
+    if latest.type in ["flat", "triangle"]:
+        scenarios.append(Scenario(
+            name="range_bound",
+            description="Sideways movement; wait for breakout",
+            probability=0.5,
+            target=None,
+            stop=None
+        ))
+    
+    # ۸.۱.۵: مرتب‌سازی بر اساس احتمال
+    scenarios.sort(key=lambda s: s.probability, reverse=True)
+    
+    return scenarios[:3]  # حداکثر ۳ سناریو
+۸.۲ جدول سناریوهای ممکن
+#	سناریو	شرایط	احتمال	جلسه
+8.1	ادامه صعود	سیکل ایده‌آل + موج ۵ کوتاه	۶۰٪	6
+8.2	ریزش	کشیدگی موج ۵	۴۰٪	18
+8.3	رنج	موج ۴ پیچیده (فلت/مثلث)	۳۰٪	12, 14
+8.4	W2 vs A (W2)	ساختار ۵-۳-۵ + ۶۱.۸٪	۸۵٪	11
+8.5	W2 vs A (A)	ساختار ۳-۳ + ۳۸.۲٪	۸۰٪	11
+8.6	ترمینال	نقض قانون ۳ + موج ۵ کوتاه	۹۰٪	6
+8.7	آنتی‌سیکل	نقض قانون ۱ + ساختار ۳-۵	۸۰٪	6
+8.8	قطر پایانی	موج ۵ = قطر	۸۵٪	9
+8.9	مثلث پایانی	موج ۵ = مثلث	۷۰٪	15
+۸.۳ جدول شرایط مرزی گام ۸
+#	شرایط	اقدام	جلسه
+8.1	دو سناریو (W2 و A)	خرید پله‌ای	11
+8.2	W2 قطعی (۵-۳-۵ + ۶۱.۸٪)	خرید تک‌پله‌ای	11
+8.3	A قطعی (۳-۳ + ۳۸.۲٪)	خرید نکن	11
+8.4	سناریو مبهم + حمایت قوی	W2 (اعتبار بیشتر)	11
+8.5	سناریو مبهم + مقاومت قوی	A (اعتبار بیشتر)	11
+8.6	۳+ سناریو ممکن	انتخاب ۲ برتر	11
+8.7	هیچ سناریو معتبری نیست	صبر	11
+8.8	سناریو در انتهای بازار	کاهش اعتبار	16
+8.9	سناریو در گذشته بازار	اعتبار بالا	13
+گام ۹: محاسبه PRZ و TMV
+۹.۱ محاسبه PRZ
+python
+def compute_prz(wave: Wave, fib_level: float) -> PRZ:
+    """محاسبه محدوده پرپتانسیل چرخش."""
+    if wave.direction == "up":
+        start = wave.end_price - wave.length * fib_level
+        end = wave.end_price - wave.length * (fib_level - 0.05)
+    else:
+        start = wave.end_price + wave.length * (fib_level - 0.05)
+        end = wave.end_price + wave.length * fib_level
+    
+    return PRZ(
+        start=start, end=end,
+        level=fib_level,
+        confidence=get_prz_confidence(fib_level)
+    )
+
+def get_prz_confidence(fib_level: float) -> float:
+    """اعتبار هر سطح فیبوناچی برای PRZ."""
+    confidences = {
+        0.236: 0.4,   # فقط شناسایی
+        0.382: 0.6,   # متوسط
+        0.500: 0.4,   # ضعیف
+        0.618: 0.85,  # قوی
+        0.786: 0.8,   # قوی + شتاب‌گیری
+    }
+    return confidences.get(fib_level, 0.3)
+۹.۲ محاسبه TMV
+python
+def compute_tmv(wave1: Wave, wave2: Wave) -> TMV:
+    """محاسبه هدف حرکت موج ۳."""
+    x = wave1.start_price
+    y = wave1.end_price
+    z = wave2.end_price
+    
+    direction = "up" if y > x else "down"
+    sign = 1 if direction == "up" else -1
+    length = abs(y - x)
+    
+    return TMV(
+        prime=y,
+        ideal=z + sign * length * 1.0,
+        alternate=z + sign * length * 1.618,
+        direction=direction
+    )
+
+def compute_tmv_short(wave: Wave) -> float:
+    """TMV کوتاه (هدف اولیه)."""
+    return wave.end_price
+
+def compute_tmv_ideal(wave1: Wave, wave2: Wave) -> float:
+    """TMV ایده‌آل (۱۰۰٪ پروجکشن)."""
+    length = wave1.length
+    if wave1.direction == "up":
+        return wave2.end_price + length * 1.0
+    else:
+        return wave2.end_price - length * 1.0
+
+def compute_tmv_alternate(wave1: Wave, wave2: Wave) -> float:
+    """TMV جایگزین (۱۶۱.۸٪ پروجکشن)."""
+    length = wave1.length
+    if wave1.direction == "up":
+        return wave2.end_price + length * 1.618
+    else:
+        return wave2.end_price - length * 1.618
+۹.۳ جدول PRZ و TMV
+#	مفهوم	فرمول	جلسه
+9.1	PRZ موج ۲	۶۱.۸٪ یا ۷۸.۶٪ رتریسمنت موج ۱	7
+9.2	PRZ موج ۴	۳۸.۲٪ یا ۵۰٪ رتریسمنت موج ۳	7
+9.3	TMV Prime	سقف/کف موج ۱	8
+9.4	TMV Ideal	۱۰۰٪ پروجکشن	8
+9.5	TMV Alternate	۱۶۱.۸٪ پروجکشن	8
+9.6	کشیدگی موج ۳	TMV موج ۵ = ۶۱.۸٪	18
+9.7	کشیدگی موج ۵	TMV موج ۵ = ۲۶۱.۸٪	18
+9.8	کوتاه‌شدگی موج ۵	TMV موج ۵ < ۱۰۰٪	6, 18
+۹.۴ جدول شرایط مرزی گام ۹
+#	شرایط	اقدام	جلسه
+9.1	موج ۵ کوتاه (کوتاه‌شدگی)	TMV کاهش می‌یابد	6, 18
+9.2	موج ۳ کشیده	TMV موج ۵ کاهش می‌یابد	18
+9.3	موج ۵ کشیده	TMV موج ۵ افزایش می‌یابد	18
+9.4	قطر پایانی	TMV ندارد (سیگنال فروش)	9
+9.5	ترمینال	TMV کاهش می‌یابد	6
+9.6	PRZ = ۶۱.۸٪ + TMV Ideal همپوشانی	اعتبار بالا	8
+9.7	PRZ بدون TMV	اعتبار متوسط	8
+9.8	TMV بدون PRZ	ممکن است (PRZ اختیاری)	8
+9.9	همپوشانی TMV با مقاومت	اعتبار بالا	7
+9.10	همپوشانی PRZ با حمایت	اعتبار بالا	7
+گام ۱۰: توصیه ورود
+۱۰.۱ الگوریتم توصیه ورود
+python
+def recommend_entry(cycles: list[Cycle], scenarios: list[Scenario]) -> EntryRecommendation:
+    """توصیه ورود بر اساس سناریوها."""
+    primary = scenarios[0] if scenarios else None
+    
+    if primary is None:
+        return EntryRecommendation(action="wait", risk="high")
+    
+    # ۱۰.۱.۱: ورود در شروع موج ۳
+    if primary.name == "uptrend_continuation":
+        if cycles[0].wave_2_complete:
+            return EntryRecommendation(
+                action="buy",
+                zone="start_wave_3",
+                entry_price=cycles[0].wave_2.end_price,
+                stop_loss=cycles[0].wave_2.end_price * 0.98,
+                targets=[
+                    cycles[0].tmv.prime,
+                    cycles[0].tmv.ideal,
+                    cycles[0].tmv.alternate
+                ],
+                risk="low"
+            )
+    
+    # ۱۰.۱.۲: ورود در ۶۱.۸٪
+    if primary.name == "W2":
+        return EntryRecommendation(
+            action="buy",
+            zone="61.8%",
+            entry_price=cycles[0].wave_1.end_price * 0.382,
+            stop_loss=cycles[0].wave_1.end_price * 0.35,
+            targets=[cycles[0].tmv.ideal, cycles[0].tmv.alternate],
+            risk="medium"
+        )
+    
+    # ۱۰.۱.۳: ورود در ۷۸.۶٪
+    if primary.name == "W2_extended":
+        return EntryRecommendation(
+            action="buy",
+            zone="78.6%",
+            entry_price=cycles[0].wave_1.end_price * 0.214,
+            stop_loss=cycles[0].wave_1.end_price * 0.18,
+            targets=[cycles[0].tmv.ideal],
+            risk="medium"
+        )
+    
+    # ۱۰.۱.۴: A قطعی → نخر
+    if primary.name == "A":
+        return EntryRecommendation(action="wait", risk="high")
+    
+    # ۱۰.۱.۵: کشیدگی موج ۵ → سیو سود
+    if primary.name == "downtrend_start":
+        return EntryRecommendation(action="sell", risk="medium")
+    
+    # ۱۰.۱.۶: رنج → صبر
+    return EntryRecommendation(action="wait", risk="high")
+۱۰.۲ جدول توصیه ورود
+#	سناریو	ورود	استاپ	هدف	ریسک	جلسه
+10.1	W2 تأیید	۶۱.۸٪	زیر موج ۲	TMV Ideal	کم	11
+10.2	W2 احتمالی	۶۱.۸٪ + ۷۸.۶٪ (پله‌ای)	زیر موج ۲	TMV Ideal	متوسط	11
+10.3	A تأیید	نخر	-	-	-	11
+10.4	شروع موج ۳	شروع موج ۳	زیر موج ۲	TMV Alternate	کم	11
+10.5	کشیدگی موج ۵	سیو سود فوری	-	-	-	18
+10.6	ترمینال	سیو سود فوری	-	-	-	6
+10.7	قطر پایانی	سیو سود فوری	-	-	-	9
+10.8	رنج	صبر	-	-	بالا	12, 14
+10.9	پول‌بک به ۵۰٪	ورود در ۵۰٪	زیر ۵۰٪	TMV Ideal	متوسط	11
+10.10	ساختار ۵-۳-۵ + ۵۰٪	ورود (حتی بدون ۶۱.۸٪)	زیر موج ۲	TMV Ideal	متوسط	11
+۱۰.۳ جدول شرایط مرزی گام ۱۰
+#	شرایط	اقدام	جلسه
+10.1	رتریسمنت < ۵۰٪	ورود نکن	11
+10.2	رتریسمنت = ۶۱.۸٪ + سیگنال	ورود	11
+10.3	رتریسمنت = ۷۸.۶٪ + سیگنال	ورود (با شتاب‌گیری)	11
+10.4	۶۱.۸٪ بدون سیگنال	صبر	11
+10.5	عبور از ۶۱.۸٪ به ۷۸.۶٪	صبر برای ۷۸.۶٪	11
+10.6	پول‌بک به ۵۰٪	Fallback ورود	11
+10.7	A قطعی	ورود نکن	11
+10.8	کشیدگی موج ۵	سیو سود	18
+10.9	ترمینال	سیو سود	6
+10.10	قطر پایانی	سیو سود	9
+10.11	مثلث پایانی	سیو سود	15
+10.12	انتهای بازار بدون تأیید	صبر	13, 16
+10.13	ترس از دست دادن (FOMO)	ورود نکن	11
+10.14	سیگنال ضعیف (Doji)	صبر	11
+10.15	سیگنال قوی (کندل چکش)	ورود	11
+گام ۱۱: مدیریت ریسک
+۱۱.۱ الگوریتم Trailing Stop
+python
+def update_trailing_stop(
+    current_price: float,
+    entry_price: float,
+    tmv: TMV,
+    extension: str | None,
+    pattern_type: str
+) -> StopRecommendation:
+    """به‌روزرسانی استاپ بر اساس TMV hit."""
+    
+    # ۱۱.۱.۱: کشیدگی موج ۵ → سیو سود فوری
+    if extension == "wave_5":
+        return StopRecommendation(
+            action="immediate_profit_taking",
+            stop_price=current_price,
+            reason="Wave 5 extension: reversal imminent"
+        )
+    
+    # ۱۱.۱.۲: ترمینال → سیو سود
+    if pattern_type == "terminal":
+        return StopRecommendation(
+            action="profit_taking",
+            stop_price=current_price * 0.98,
+            reason="Terminal pattern: wave 5 truncated"
+        )
+    
+    # ۱۱.۱.۳: قطر پایانی → سیو سود
+    if pattern_type == "ending_diagonal":
+        return StopRecommendation(
+            action="profit_taking",
+            stop_price=current_price * 0.97,
+            reason="Ending diagonal: reversal imminent"
+        )
+    
+    # ۱۱.۱.۴: TMV Alternate hit
+    if current_price >= tmv.alternate:
+        return StopRecommendation(
+            action="trail_high",
+            stop_price=current_price * 0.95,
+            reason="Alternate hit; lock 5% profit"
+        )
+    
+    # ۱۱.۱.۵: TMV Ideal hit
+    if current_price >= tmv.ideal:
+        return StopRecommendation(
+            action="trail_mid",
+            stop_price=current_price * 0.93,
+            reason="Ideal hit; lock 7% profit"
+        )
+    
+    # ۱۱.۱.۶: TMV Prime hit
+    if current_price >= tmv.prime:
+        return StopRecommendation(
+            action="trail_low",
+            stop_price=current_price * 0.90,
+            reason="Prime hit; lock 10% profit"
+        )
+    
+    # ۱۱.۱.۷: بدون hit
+    return StopRecommendation(
+        action="initial_stop",
+        stop_price=entry_price * 0.95,
+        reason="No TMV hit yet; initial stop"
+    )
+۱۱.۲ جدول Trailing Stop
+#	شرایط	استاپ	جلسه
+11.1	TMV Prime hit	۱۰٪ زیر قیمت فعلی	18
+11.2	TMV Ideal hit	۷٪ زیر قیمت فعلی	18
+11.3	TMV Alternate hit	۵٪ زیر قیمت فعلی	18
+11.4	کشیدگی موج ۵	سیو سود فوری	18
+11.5	کشیدگی موج ۳	Trailing Stop فعال	18
+11.6	ترمینال	سیو سود	6
+11.7	قطر پایانی	سیو سود	9
+11.8	مثلث پایانی	سیو سود	15
+11.9	بدون Trailing Stop	ریسک بالا	19
+11.10	Trailing Stop فعال	مدیریت ریسک کامل	19
+۱۱.۳ جدول شرایط مرزی گام ۱۱
+#	شرایط	اقدام	جلسه
+11.1	ورود در ۶۱.۸٪ + استاپ زیر موج ۲	استاپ اولیه	11
+11.2	ورود در ۵۰٪ پول‌بک	استاپ زیر ۵۰٪	11
+11.3	ورود پله‌ای (۶۱.۸٪ + ۷۸.۶٪)	استاپ برای هر پله	11
+11.4	ورود در شروع موج ۳	استاپ زیر موج ۲	11
+11.5	سیو سود در ۱۰۰٪ TMV	فروش ۵۰٪	18
+11.6	سیو سود در ۱۶۱.۸٪ TMV	فروش ۵۰٪ باقیمانده	18
+11.7	کشیدگی موج ۵ + TMV	سیو سود فوری	18
+11.8	ترمینال + TMV	سیو سود فوری	6
+11.9	قطر پایانی + TMV	سیو سود فوری	9
+11.10	مثلث پایانی + TMV	سیو سود فوری	15
+11.11	استاپ خورد	خروج	19
+11.12	ریسک به ریوارد < ۱	ورود نکن	11
+11.13	ریسک به ریوارد > ۲	ورود	11
+11.14	مدیریت سرمایه بدون موج‌شماری	ناقص	19
+11.15	موج‌شماری بدون مدیریت سرمایه	ناقص	19
+شبه‌کد کامل
+python
+def full_wave_counting_pipeline(
+    candles_by_tf: dict[str, list[Candle]],
+    market: str = "stock"
+) -> WaveCountingResult:
+    """خط لوله کامل موج‌شماری از بالا به پایین."""
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۰: اعتبارسنجی داده
+    # ═══════════════════════════════════════════════════════
+    validation = validate_input_data(candles_by_tf)
+    if not validation.valid:
+        return WaveCountingResult(
+            error="; ".join(validation.errors),
+            warnings=validation.warnings
+        )
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۱: انتخاب تایم‌فریم شروع و حداکثر درجه
+    # ═══════════════════════════════════════════════════════
+    start_tf = select_start_timeframe(candles_by_tf["daily"])
+    
+    # اگر تایم شروع در دیکشنری نیست، به تایم پایین‌تر برو
+    while start_tf not in candles_by_tf and start_tf != "daily":
+        start_tf = get_next_timeframe(start_tf)
+    
+    max_degree = get_max_degree(start_tf, market)
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۲: پیدا کردن کف مطلق
+    # ═══════════════════════════════════════════════════════
+    bottom_idx = find_absolute_bottom(candles_by_tf[start_tf])
+    if bottom_idx is None:
+        return WaveCountingResult(error="No absolute bottom found")
+    
+    bottom_valid, bottom_msg = validate_absolute_bottom(
+        candles_by_tf[start_tf], bottom_idx
+    )
+    if not bottom_valid:
+        return WaveCountingResult(error=bottom_msg)
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۳: درشت‌موج‌شماری
+    # ═══════════════════════════════════════════════════════
+    cycles = coarse_wave_count(
+        candles_by_tf[start_tf], bottom_idx, max_degree
+    )
+    if not cycles:
+        return WaveCountingResult(error="No valid cycles found")
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۴-۵: پالایش تکراری
+    # ═══════════════════════════════════════════════════════
+    current_tf = start_tf
+    current_degree = 1
+    
+    while current_degree < max_degree:
+        next_tf = get_next_timeframe(current_tf)
+        if next_tf is None or next_tf not in candles_by_tf:
+            break
+        
+        if len(candles_by_tf[next_tf]) < 10:
+            break
+        
+        cycles = refine_to_lower_timeframe(
+            candles_by_tf[current_tf],
+            candles_by_tf[next_tf],
+            cycles
+        )
+        
+        if not cycles:
+            return WaveCountingResult(error="Refinement failed")
+        
+        current_tf = next_tf
+        current_degree += 1
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۶: توقف در درجه مجاز
+    # ═══════════════════════════════════════════════════════
+    if current_degree >= max_degree:
+        cycles = promote_degrees(cycles)
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۷: اعتبارسنجی نهایی
+    # ═══════════════════════════════════════════════════════
+    validation_report = final_validation(cycles, {
+        "market": market,
+        "timeframe": current_tf,
+        "degree": current_degree
+    })
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۸: سناریو بندی
+    # ═══════════════════════════════════════════════════════
+    scenarios = generate_scenarios(cycles)
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۹: PRZ و TMV
+    # ═══════════════════════════════════════════════════════
+    prz_list = []
+    tmv = None
+    
+    for wave in cycles[0].corrective_waves:
+        for level in [0.382, 0.5, 0.618, 0.786]:
+            prz_list.append(compute_prz(wave, level))
+    
+    if len(cycles[0].waves) >= 2:
+        tmv = compute_tmv(cycles[0].wave_1, cycles[0].wave_2)
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۱۰: توصیه ورود
+    # ═══════════════════════════════════════════════════════
+    entry = recommend_entry(cycles, scenarios)
+    
+    # ═══════════════════════════════════════════════════════
+    # گام ۱۱: مدیریت ریسک
+    # ═══════════════════════════════════════════════════════
+    current_price = candles_by_tf[current_tf][-1].close
+    stop = None
+    
+    if entry.entry_price and tmv:
+        extension = cycles[0].wave_5.extension if cycles[0].wave_5 else None
+        pattern_type = cycles[0].type
+        stop = update_trailing_stop(
+            current_price=current_price,
+            entry_price=entry.entry_price,
+            tmv=tmv,
+            extension=extension,
+            pattern_type=pattern_type
+        )
+    
+    # ═══════════════════════════════════════════════════════
+    # خروجی نهایی
+    # ═══════════════════════════════════════════════════════
+    return WaveCountingResult(
+        cycles=cycles,
+        validation=validation_report,
+        scenarios=scenarios,
+        prz=prz_list,
+        tmv=tmv,
+        entry=entry,
+        stop=stop,
+        bottom_idx=bottom_idx,
+        start_tf=start_tf,
+        final_tf=current_tf,
+        final_degree=current_degree,
+        warnings=validation.warnings
+    )
+جدول جامع شرایط مرزی
+جدول ۱: شرایط مرزی داده ورودی
+#	شرایط	اقدام	جلسه
+1	len(candles) < 10	خطا	5
+2	len(candles) == 0	خطا	5
+3	NaN > ۱۰٪	خطا	5
+4	NaN < ۱۰٪	Forward-fill	5
+5	timestamp تکراری	خطا	5
+6	timestamp خارج از ترتیب	خطا	5
+7	open == high == low == close	خطا	5
+8	Doji > ۵۰٪	هشدار	5
+9	قیمت منفی	خطا	5
+10	high < low	خطا	5
+11	فقط تایم‌فریم روزانه	معتبر	5
+12	دیتای < ۱ ماه	هشدار	5
+جدول ۲: شرایط مرزی تایم‌فریم
+#	شرایط	اقدام	جلسه
+1	دیتای < ۶ ماه	daily	5
+2	دیتای ۶ ماه - ۵ سال	weekly	5
+3	دیتای > ۵ سال	monthly	5
+4	بورس + ۱۵ دقیقه	خطا	3, 5
+5	فارکس + ۱۵ دقیقه	معتبر	3
+6	دیتای > ۲۰ سال	هشدار	5
+جدول ۳: شرایط مرزی کف مطلق
+#	شرایط	اقدام	جلسه
+1	کف در index < 5	خطا	4, 5
+2	کف در index == 0	خطا	4
+3	کف توسط کندل بعدی شکسته	کف جدید	4, 5
+4	کف در تایم ماهانه قابل تشخیص نیست	از هفتگی	5
+5	نمودار از موج ۱ + موج ۲ آن را ۱۰۰٪ پوشش می‌دهد	کف مطلق هنوز تشکیل نشده	4
+6	کف معتبر توسط موج ۲ سیکل بعدی ۱۰۰٪ پوشش داده شده	کف معتبر باطل	5
+جدول ۴: شرایط مرزی قوانین بنیادین
+#	شرایط	اقدام	جلسه
+1	موج ۲ = ۱۰۰٪ موج ۱	نقض قانون ۱	4
+2	موج ۲ = ۹۹.۹٪ موج ۱	معتبر (مرزی)	4
+3	موج ۳ = کوتاه‌ترین	نقض قانون ۲	4
+4	موج ۳ = موج ۱ و ۵	معتبر	4
+5	موج ۴ = سقف موج ۱ (تماس)	معتبر (مرزی)	4
+6	موج ۴ = ۰.۱٪ نفوذ	نقض قانون ۳	4
+7	نقض قانون ۳ + موج ۵ کوتاه	ترمینال	4, 6
+8	نقض قانون ۳ + موج ۵ بلند	آنتی‌ترمینال	6
+9	نقض قانون ۳ + ساختار ۳-۳-۳-۳-۳	قطر	9
+10	نقض قانون ۱ + ساختار ۳-۵	آنتی‌سیکل	6
+11	نقض قانون ۱ + ساختار ۳-۳	شمارش اشتباه	6
+جدول ۵: شرایط مرزی فرکتال و درجه
+#	شرایط	اقدام	جلسه
+1	موج اصلی با ۳ موج	خطا	3
+2	موج اصلاحی با ۵ موج	آنتی‌سیکل/ترکیبی	3, 6
+3	موج شتابدار در جایگاه اصلی	فرض ۵	3
+4	موج شتابدار در جایگاه اصلاحی	فرض ۳	3
+5	موج شتابدار + ساختار ۵ موجی در تایم پایین	فرکتالی	5
+6	۵ سطح تودرتو (روزانه)	فقط ۴ سطح	3, 5
+7	۴ سطح تودرتو (هفتگی)	فقط ۳ سطح	3, 5
+8	قیمت از سقف درجه ۴ فراتر	ارتقاء	3, 5
+9	موج ۲ = ۱ کندل، موج ۴ = ۵۰ کندل	هشدار (عدم هم‌خوانی)	5
+10	موج ۲ = ۱۰ کندل، موج ۴ = ۳۰ کندل	معتبر	5
+جدول ۶: شرایط مرزی زیگزاگ
+#	شرایط	اقدام	جلسه
+1	C > ۱۰۰٪ B	معتبر	10
+2	C = ۱۰۰٪ B	مرزی	10
+3	C < ۱۰۰٪ B	نامعتبر	10
+4	B < ۶۱.۸٪ A + C=۳	زیگزاگ سیمپل	10
+5	B > ۶۱.۸٪ A + C=۳	ترکیبی	10
+6	C = ۶۱.۸٪ A	مرز کوتاه‌شده/نامعتبر	10
+7	C = ۱۰۰٪ A	مرز کوتاه‌شده/معمولی	10
+8	C = ۱۶۱.۸٪ A	مرز معمولی/کشیده	10
+9	C = ۵۰٪ A	نامعتبر	10
+10	AB = CD (دقیقاً)	AB=CD	10
+11	AB = CD (تفاوت < ۵٪)	AB=CD تقریبی	10
+12	رتریسمنت روی موج ۵	خطا	8
+13	رتریسمنت روی موج ۵ با ۵۰٪	هشدار	8
+14	رتریسمنت روی موج ۵ با ۱۲۰٪	خطا	8
+جدول ۷: شرایط مرزی فلت
+#	شرایط	اقدام	جلسه
+1	B = ۶۱.۸٪ A	مرز	12
+2	B = ۶۲٪ A	فلت	12
+3	B = ۷۰٪ A، C = ۹۰٪ B	ناقص B	13
+4	B = ۹۰٪ A، C = ۷۰٪ B	ناقص C	13
+5	B = ۷۰٪ A، C = ۷۰٪ B	ناقص دوگانه	13
+6	B = ۱۰۰٪ A، C = ۱۰۰٪ B	متعارف (مرزی)	13
+7	B = ۱۰۵٪ A، C = ۱۰۰٪ B	نامنظم	13
+8	B = ۱۳۸.۲٪ A، C = ۱۰۰٪ B	نامنظم (مرزی)	13
+9	B = ۱۵۰٪ A، C = ۱۲۰٪ B	نامنظم کشیده	13
+10	B = ۱۱۰٪ A، C = ۵۰٪ B	جاری (حذف)	13
+11	فلت در انتهای بازار بدون تأیید	اعتبار کم (۰.۴)	12, 13
+12	فلت در انتهای بازار با تأیید	اعتبار متوسط (۰.۶)	13
+13	فلت ناقص دوگانه در انتهای بازار	اعتبار بسیار کم (۰.۳)	13
+14	موج ۴ = ۵+ موج + گره شمارش	فلت گره‌گشا	13
+15	موج ۴ = ۵+ موج بدون گره	صبر	13
+جدول ۸: شرایط مرزی مثلث
+#	شرایط	اقدام	جلسه
+1	مثلث در موج ۲	معتبر (۲۰٪)	15
+2	مثلث در موج ۴	معتبر (۵۰٪)	15
+3	مثلث در موج B	معتبر (۳۰٪)	15
+4	مثلث در موج ۱	نامعتبر	14
+5	مثلث در موج ۳	نامعتبر	14
+6	مثلث در موج ۵	نامعتبر (باید قطر پایانی)	14
+7	مثلث با ۵ موج که هر یک ۵ موج	قطر	14
+8	مثلث با ۳ موج	زیگزاگ	14
+9	خطوط روند موازی	مستطیل	14
+10	خطوط روند مختلط	نامعتبر	15
+11	پایان در باکس سوم	استاندارد	15
+12	پایان بعد از باکس سوم	غیرایده‌آل	15
+13	پایان قبل از باکس سوم	ایده‌آل	15
+14	همه موج‌ها < ۵۰٪	ضعیف	15
+15	برخی موج‌ها < ۵۰٪	غیرایده‌آل	15
+16	Ending Triangle در موج ۵	سیگنال فروش	15
+17	مثلث نامحدود (موج A = مثلث)	نادر	15
+18	مثلث واگرا + موج A = مثلث	بسیار نادر	15
+جدول ۹: شرایط مرزی قطر
+#	شرایط	اقدام	جلسه
+1	همه امواج ۳ موجی + نقض قانون ۳	قطر	9
+2	موج ۳ پنج‌موجی	نقض ساختار	9
+3	موج ۵ پنج‌موجی	نقض ساختار	9
+4	همه امواج ۳ موجی بدون نقض قانون ۳	قطر پیشرو	9
+5	موج ۱ = ۵، موج ۲ = ۳ + موج ۳ = قطر	پیشرو ایده‌آل	9
+6	موج ۱ = ۳، موج ۲ = ۵ + موج ۳ = قطر	پیشرو آنتی	9
+7	موج ۱ = ۳، موج ۲ = ۳ + موج ۳ = قطر	شتابدار	9
+8	قطر در موج ۵	پایانی	9
+9	قطر در موج ۳	نادر	9
+10	قطر در موج A	نادر	9
+11	قطر در موج C	پایانی	9
+12	قطر + اصلاح ۵۰-۶۱.۸٪	استاندارد	9
+13	آنتی‌قطر + اصلاح > ۶۱.۸٪	استاندارد	9
+14	قطر پایانی + ریزش به شروع	سیگنال فروش	9
+15	قطر پایانی + ریزش کمتر	هشدار	9
+جدول ۱۰: شرایط مرزی فیبوناچی
+#	شرایط	اقدام	جلسه
+1	اصلاح ۰٪	شروع نشده	7
+2	اصلاح ۱۰۰٪	نقض قانون	7
+3	اصلاح > ۱۰۰٪	آنتی‌سیکل	7
+4	اصلاح ۶۱.۸٪	تراز طلایی	7
+5	اصلاح ۲۳.۶٪	کشیدگی موج ۱	7
+6	اصلاح ۳۸.۲٪	چرخش موج ۴	7
+7	اصلاح ۷۸.۶٪	چرخش + شتاب‌گیری	7
+8	اکستنشن ۶۱.۸٪	ترمینال	7
+9	اکستنشن > ۱۶۱.۸٪	کشیدگی	7
+10	پروجکشن بدون Z	خطا	8
+11	پروجکشن روی ۱-۲ برای موج ۵	خطا	8
+12	پروجکشن روی ۳-۴ برای موج ۳	خطا	8
+13	رسم برعکس رتریسمنت	خطا	7
+14	رسم برعکس اکستنشن	خطا	7
+15	TMV Prime = Ideal	نادر	18
+16	PRZ همپوشانی کامل TMV	اعتبار بالا	8
+17	PRZ بدون TMV	اعتبار کمتر	8
+18	TMV بدون PRZ	ممکن	8
+جدول ۱۱: شرایط مرزی کشیدگی
+#	شرایط	اقدام	جلسه
+1	موج ۱ = ۲۰۰٪ موج ۳	کشیدگی موج ۱	18
+2	موج ۳ = ۲۰۰٪ موج ۱	کشیدگی موج ۳	18
+3	موج ۵ = ۲۰۰٪ موج ۳	کشیدگی موج ۵	18
+4	همه هم‌اندازه	بدون کشیدگی	18
+5	موج ۲ < ۳۸.۲٪ + موج ۱ > ۱۰۰٪ قبلی	کشیدگی موج ۱	18
+6	موج ۲ > ۳۸.۲٪	تأیید نمی‌شود	18
+7	موج ۴ < ۳۸.۲٪ + موج ۳ > ۱۶۱.۸٪	کشیدگی موج ۳	18
+8	موج ۴ > ۳۸.۲٪	تأیید نمی‌شود	18
+9	موج ۵ = ۱۶۱.۸٪	مرزی	18
+10	موج ۵ > ۱۶۱.۸٪	کشیدگی	18
+11	موج ۵ > ۲۰۰٪	کشیدگی شدید	18
+12	موج ۵ > ۲۶۱.۸٪	بسیار شدید	18
+13	کشیدگی موج ۳ + موج ۴ نفوذ	ترمینال	6, 18
+14	کشیدگی موج ۵ + ریزش	سیو سود	18
+جدول ۱۲: شرایط مرزی الگوهای ترکیبی
+#	شرایط	اقدام	جلسه
+1	Z-X-Z	استاندارد	16, 17
+2	Z-X-Z-X-Z	غیراستاندارد	16
+3	Z-X-F-X-Z	غیراستاندارد (پیچیده)	17
+4	X-Wave = ۲ کندل	نامعتبر	16, 17
+5	X-Wave = ۳ کندل	معتبر	16, 17
+6	X-Wave = زیگزاگ	معتبر	17
+7	X-Wave = شتابدار	معتبر	17
+8	X-Wave = شتابدار + ساختار ۵ موجی	زیگزاگ	17
+9	I-X-I	بسیار نادر	17
+10	G-X-G	نادر	17
+11	T-X-T	نادر	17
+12	ترکیبی + نقض ۳ قانون	نامعتبر	16
+13	ترکیبی + ۱ قانون نقض	نامعتبر	16
+14	ترکیبی + ۲+ قانون نقض	قطعاً نامعتبر	16
+15	ترکیبی + ساده ممکن + هدف یکسان	ساده ترجیح	17
+16	ترکیبی + ساده ممکن + هدف متفاوت	ساده اولویت	17
+17	ترکیبی در انتهای بازار	اعتبار کم	16
+18	ترکیبی + ۴+ الگو	"too complex"	17
+جدول ۱۳: شرایط مرزی ورود
+#	شرایط	اقدام	جلسه
+1	رتریسمنت < ۵۰٪	ورود نکن	11
+2	رتریسمنت = ۵۰٪	مرز	11
+3	رتریسمنت = ۶۱.۸٪	ایده‌آل	11
+4	رتریسمنت = ۷۸.۶٪	با شتاب‌گیری	11
+5	۶۱.۸٪ + سیگنال	ورود	11
+6	۶۱.۸٪ بدون سیگنال	صبر	11
+7	عبور از ۶۱.۸٪ به ۷۸.۶٪	صبر	11
+8	۵۵٪ سپس پول‌بک به ۵۰٪	Fallback	11
+9	رسیدن به ۴۰٪	صبر	11
+10	ساختار ۵-۳-۵ + ۵۰٪	ورود	11
+11	ساختار ۵-۳-۵ + ۳۸.۲٪	صبر	11
+12	ساختار مبهم	صبر	11
+13	W2 قطعی	تک‌پله‌ای	11
+14	W2 احتمالی	دو‌پله‌ای	11
+15	A قطعی	نخر	11
+16	پول‌بک به ۵۰٪ + سیگنال	ورود	11
+17	پول‌بک به ۳۸.۲٪	صبر	11
+18	بدون پول‌بک	صبر	11
+جدول ۱۴: شرایط مرزی مدیریت ریسک
+#	شرایط	اقدام	جلسه
+1	TMV Prime hit	استاپ زیر موج ۲	18
+2	TMV Ideal hit	استاپ زیر ۶۱.۸٪	18
+3	TMV Alternate hit	استاپ زیر ۱۰۰٪	18
+4	کشیدگی موج ۵	سیو سود فوری	18
+5	کشیدگی موج ۳	Trailing Stop	18
+6	بدون Trailing Stop	ریسک بالا	19
+7	Trailing Stop فعال	کامل	19
+8	ریسک به ریوارد < ۱	ورود نکن	11
+9	ریسک به ریوارد > ۲	ورود	11
+10	ترمینال	سیو سود	6
+11	قطر پایانی	سیو سود	9
+12	مثلث پایانی	سیو سود	15
+جدول ۱۵: شرایط مرزی عملکرد
+#	شرایط	اقدام	جلسه
+1	۱۰۰۰ کندل	< ۵۰۰ms	5
+2	۱۰ موج	< ۱۰۰ms	7, 10
+3	۵۰ موج	< ۲۰۰ms	4, 9
+4	۸ موج	< ۱۰۰ms	19
+5	۱۰۰ کندل	< ۲۰۰ms	3
+6	حافظه	< ۵۰MB برای ۱۰۰۰ کندل	5
+جمع‌بندی نهایی
+این سند راهنمای کامل و بازنویسی‌شده موج‌شماری از تایم‌فریم بالا به پایین است که شامل:
+
+۱۱ گام اصلی با شبه‌کد کامل برای هر گام.
+
+۱۵ جدول شرایط مرزی با بیش از ۲۰۰ Edge Case.
+
+ترتیب اولویت الگوها (ایده‌آل → قطر → ترمینال → زیگزاگ → فلت → مثلث → ترکیبی).
+
+مدیریت ریسک با Trailing Stop و سیو سود.
+
+سناریو بندی برای آینده.
+
+نگاشت کامل به جلسات ۱-۱۹.
+
+نکات کلیدی برای LLM:
+
+همیشه از گام ۰ (اعتبارسنجی) شروع کن.
+
+ترتیب اولویت الگوها را رعایت کن.
+
+Edge Cases را در هر گام چک کن.
+
+سناریو بندی را فراموش نکن.
+
+مدیریت ریسک را در انتها اعمال کن.
+
+کد را تست‌محور بنویس (ابتدا تست، بعد پیاده‌سازی).
+
+مستندسازی هر گام با docstring.
+
+خطاها با پیام‌های واضح برگردان.
+
+
+Beta
+AI can make mistakes, so double-check it.
+0 / 0
+used queries
+
+
+1

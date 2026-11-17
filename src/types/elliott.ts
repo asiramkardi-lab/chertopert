@@ -100,17 +100,33 @@ export interface PrzZone {
   direction: WaveDirection;
   confidence: number;
   isPrimary: boolean;
+  anchorCandleIndex?: number;
+  startCandleIndex?: number;
+  endCandleIndex?: number;
+  waveLabel?: string;
 }
 
-export interface TmwZone {
+export interface TmvZone {
   id: string;
   labelFa: string;
+  lowPrice: number;
+  highPrice: number;
+  primePrice: number;
+  short0618Price: number;
+  ideal100Price: number;
+  alternate1618Price: number;
+  direction: WaveDirection;
+  basisPairLabel: string;
+  isPrimary: boolean;
+  anchorCandleIndex?: number;
   startCandleIndex: number;
   endCandleIndex: number;
-  ratioLabel: string;
-  durationCandles: number;
-  confidence: number;
-  isPrimary: boolean;
+  targetPrices?: Array<{
+    id: string;
+    label: string;
+    ratioLabel: string;
+    price: number;
+  }>;
 }
 
 export interface ProjectedTargetItem extends TargetItem {
@@ -271,6 +287,12 @@ export interface EntryStrategyReport {
   isFallback50: boolean;
   accelerationAt786: boolean;
   waveStrengthClass: 'STRONG' | 'MODERATE' | 'WEAK';
+  candleSignal: 'HAMMER_OR_ENGULFING' | 'DOJI_WEAK' | 'NEUTRAL';
+  candleSignalLabelFa: string;
+  riskRewardRatio: number | null;
+  riskRewardVerdictFa: string;
+  stopLossPrice: number | null;
+  isFomoBlocked: boolean;
   steps: EntryStepPlan[];
   warnings: string[];
   notes: string[];
@@ -290,6 +312,9 @@ export interface TriangleAnalysisReport {
   idealCompletionBeforeBox3: boolean;
   tradingApproachFa: string;
   endingTriangle: boolean;
+  isParallelRectangle?: boolean;
+  isMixedTrendlines?: boolean;
+  isRareWaveATriangle?: boolean;
   confidence: number;
   warnings: string[];
   notes: string[];
@@ -307,6 +332,9 @@ export interface ExtensionTmvTrailingReport {
     | 'INITIAL_BELOW_WAVE_2';
   trailingStopLabelFa: string;
   trailingStopDescFa: string;
+  trailingLockPct: number | null;
+  partialProfitPlanFa: string[];
+  endingTriangleTriggered: boolean;
   warnings: string[];
 }
 
@@ -353,10 +381,15 @@ export interface WaveCharacteristicsReport {
 export interface InputDataValidationReport {
   valid: boolean;
   candleCount: number;
+  nanCount: number;
+  nanPct: number;
+  forwardFilledCount: number;
+  historySpanDays: number;
   dojiPct: number;
   recommendedStartTf: '1D' | '1W' | '1M';
   errors: string[];
   warnings: string[];
+  historyWarnings: string[];
 }
 
 export interface ScenarioProjectionReport {
@@ -368,7 +401,7 @@ export interface ScenarioProjectionReport {
   invalidationPrice: number;
   targets: ProjectedTargetItem[];
   przZones: PrzZone[];
-  tmwZones: TmwZone[];
+  tmvZones: TmvZone[];
   completedStructure?: CompletedStructureAnalysis | null;
   extensionLayers?: FibonacciExtensionLayer[];
   tmvSummary?: TmvTierSummary;
@@ -377,6 +410,68 @@ export interface ScenarioProjectionReport {
   projectionPairNoteFa?: string;
   forbidWave5RetracementFa?: string;
   wave3ExtensionEffectFa?: string;
+  tmvPrimeApproxIdealWarningFa?: string;
+}
+
+export type PipelineStepStatus = 'PASSED' | 'WARNING' | 'BLOCKED' | 'SKIPPED';
+
+export interface TriggeredEdgeCase {
+  id: string;
+  tableNumber: number;
+  tableNameFa: string;
+  ruleRef: string;
+  sessionRef: string;
+  conditionFa: string;
+  actionFa: string;
+  severity: 'INFO' | 'WARNING' | 'ERROR';
+}
+
+export interface PipelineStepResult {
+  stepNumber: number; // 0 to 11
+  titleFa: string;
+  status: PipelineStepStatus;
+  summaryFa: string;
+  detailsFa: string[];
+  sessions: string[];
+  edgeCases: TriggeredEdgeCase[];
+}
+
+export interface PipelinePriorityCandidate {
+  scenarioId: string;
+  name: string;
+  patternType: PatternFamily;
+  priorityTier: number; // 1..7
+  priorityTierLabelFa: string;
+  validityScore: number;
+  confidenceScore: number;
+  isValid: boolean;
+  isPrimary: boolean;
+}
+
+export interface TopDownPipelineReport {
+  marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
+  startTf: string;
+  finalTf: string;
+  maxAllowedDegree: number;
+  reachedDegree: number;
+  absoluteBottomIndex: number;
+  absoluteBottomPrice: number;
+  absoluteBottomValid: boolean;
+  executionMs: number;
+  budgetOk: boolean; // < 500ms per Table 15
+  overallStatus: PipelineStepStatus;
+  steps: PipelineStepResult[];
+  edgeCasesTriggered: TriggeredEdgeCase[];
+  priorityRankedCandidates: PipelinePriorityCandidate[];
+  futureScenarios: Array<{
+    id: string;
+    labelFa: string;
+    probabilityPct: number;
+    conditionFa: string;
+    actionFa: string;
+  }>;
+  entryActionFa: string;
+  riskActionFa: string;
 }
 
 export interface WaveScenario {

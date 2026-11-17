@@ -1,8 +1,8 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * TargetProjectionPanel: Step 3 Last-Leg Probable Target Predictor & PRZ/TMW Forecast Studio.
- * Displays deterministic probable price targets, PRZ reversal zones, TMW time corridors,
+ * TargetProjectionPanel: Step 3 Last-Leg Probable Target Predictor & PRZ/TMV Forecast Studio.
+ * Displays deterministic probable price targets, horizontal PRZ reversal zones, horizontal TMV target zones,
  * and hard invalidation bounds for every kept scenario and every drilled fractal branch.
  */
 
@@ -18,7 +18,6 @@ import { TargetProjectionEngine } from '../engine/targetProjectionEngine';
 import { PatternEngines } from '../engine/patternEngines';
 import {
   Target,
-  Clock,
   Layers,
   TrendingUp,
   TrendingDown,
@@ -57,8 +56,8 @@ interface TargetProjectionPanelProps {
   onHoverScenario?: (scenarioId: string | null) => void;
   showPRZ: boolean;
   onToggleShowPRZ?: () => void;
-  showTMW: boolean;
-  onToggleShowTMW?: () => void;
+  showTMV?: boolean;
+  onToggleShowTMV?: () => void;
 }
 
 export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
@@ -72,8 +71,8 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
   onHoverScenario,
   showPRZ,
   onToggleShowPRZ,
-  showTMW,
-  onToggleShowTMW
+  showTMV = true,
+  onToggleShowTMV
 }) => {
   const [scope, setScope] = useState<'LEVEL' | 'TREE'>('LEVEL');
 
@@ -119,38 +118,38 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
           </span>
         </div>
 
-        {/* Independent PRZ & TMW Show/Hide Switches */}
-        <div className="grid grid-cols-2 gap-2">
+        {/* Independent Horizontal PRZ & Horizontal TMV Switches */}
+        <div className="grid grid-cols-2 gap-1.5">
           <button
             type="button"
             onClick={onToggleShowPRZ}
-            className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border text-[11px] font-semibold transition-colors ${
+            className={`flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-lg border text-[10.5px] font-semibold transition-colors ${
               showPRZ
                 ? 'bg-amber-500/15 border-amber-500/45 text-amber-200'
                 : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
             }`}
           >
-            <span className="flex items-center gap-1.5">
-              {showPRZ ? <Eye className="w-3.5 h-3.5 text-amber-400" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>ناحیه قیمتی PRZ</span>
+            <span className="flex items-center gap-1 min-w-0 truncate">
+              {showPRZ ? <Eye className="w-3.5 h-3.5 text-amber-400 shrink-0" /> : <EyeOff className="w-3.5 h-3.5 shrink-0" />}
+              <span className="truncate">PRZ افقی</span>
             </span>
-            <span className="font-mono text-[10px]">{showPRZ ? 'نمایش' : 'مخفی'}</span>
+            <span className="font-mono text-[9.5px] shrink-0">{showPRZ ? 'نمایش' : 'مخفی'}</span>
           </button>
 
           <button
             type="button"
-            onClick={onToggleShowTMW}
-            className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border text-[11px] font-semibold transition-colors ${
-              showTMW
-                ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200'
+            onClick={onToggleShowTMV}
+            className={`flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-lg border text-[10.5px] font-semibold transition-colors ${
+              showTMV
+                ? 'bg-sky-500/15 border-sky-500/45 text-sky-200'
                 : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
             }`}
           >
-            <span className="flex items-center gap-1.5">
-              {showTMW ? <Eye className="w-3.5 h-3.5 text-cyan-400" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>پنجره زمانی TMW</span>
+            <span className="flex items-center gap-1 min-w-0 truncate">
+              {showTMV ? <Eye className="w-3.5 h-3.5 text-sky-400 shrink-0" /> : <EyeOff className="w-3.5 h-3.5 shrink-0" />}
+              <span className="truncate">TMV افقی</span>
             </span>
-            <span className="font-mono text-[10px]">{showTMW ? 'نمایش' : 'مخفی'}</span>
+            <span className="font-mono text-[9.5px] shrink-0">{showTMV ? 'نمایش' : 'مخفی'}</span>
           </button>
         </div>
 
@@ -196,7 +195,7 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
             item.parentWaveLabel
           );
           const primaryPrz = report.przZones.find(z => z.isPrimary) || report.przZones[0];
-          const primaryTmw = report.tmwZones.find(z => z.isPrimary) || report.tmwZones[0];
+          const primaryTmv = report.tmvZones?.find(z => z.isPrimary) || report.tmvZones?.[0];
           const isNextBull = report.nextDirection === 'BULLISH';
 
           const tmvTrailing = PatternEngines.analyzeExtensionAndTrailing(
@@ -204,7 +203,8 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
             item.candlesForBranch,
             report.tmvSummary?.prime,
             report.tmvSummary?.ideal100,
-            report.tmvSummary?.alternate1618
+            report.tmvSummary?.alternate1618,
+            item.parentWaveLabel
           );
           const entryPlan = PatternEngines.analyzeEntryStrategy(scenario, item.candlesForBranch);
           const isDiagonalPattern =
@@ -335,20 +335,24 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                 </div>
               )}
 
-              {/* PRZ, TMW & Invalidation Summary Grid */}
+              {/* Horizontal PRZ & Horizontal TMV Summary Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {/* PRZ Box */}
+                {/* Horizontal PRZ Box */}
                 <div
-                  className={`p-2.5 rounded-lg border space-y-1 ${
+                  className={`p-2.5 rounded-lg border space-y-1.5 ${
                     showPRZ
                       ? 'bg-amber-950/20 border-amber-500/35'
                       : 'bg-slate-950/60 border-slate-800/80 opacity-75'
                   }`}
                 >
                   <div className="flex items-center justify-between text-[10.5px]">
-                    <span className="font-bold text-amber-300">ناحیه بازگشت PRZ</span>
+                    <span className="font-bold text-amber-300">ناحیه افقی بازگشت PRZ</span>
                     <span className="font-mono text-[9.5px] text-slate-400">
-                      {showPRZ ? 'فعال' : 'مخفی'}
+                      {primaryPrz
+                        ? `${primaryPrz.direction === 'BULLISH' ? '↑ حمایت' : '↓ مقاومت'} · ${primaryPrz.confidence}%`
+                        : showPRZ
+                        ? 'فعال'
+                        : 'مخفی'}
                     </span>
                   </div>
                   {primaryPrz ? (
@@ -357,38 +361,53 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                         {primaryPrz.lowPrice.toLocaleString()} – {primaryPrz.highPrice.toLocaleString()}
                       </div>
                       <div className="text-[10px] text-slate-400 font-mono tabular-nums truncate">
-                        تراز میانی: {primaryPrz.midPrice.toLocaleString()} · {primaryPrz.contributingRatios.join(' + ')}
+                        {primaryPrz.labelFa} · {primaryPrz.contributingRatios.join(' + ')}
                       </div>
+                      {report.przZones.filter(z => z.id !== primaryPrz.id).length > 0 && (
+                        <div className="pt-1 border-t border-amber-500/20 space-y-0.5">
+                          {report.przZones
+                            .filter(z => z.id !== primaryPrz.id)
+                            .slice(0, 2)
+                            .map(extra => (
+                              <div
+                                key={extra.id}
+                                className="flex items-center justify-between gap-1 text-[9.5px] text-amber-200/75 font-mono tabular-nums"
+                              >
+                                <span className="truncate font-sans">{extra.labelFa}</span>
+                                <span className="shrink-0">
+                                  {extra.lowPrice.toLocaleString()}–{extra.highPrice.toLocaleString()}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div className="text-[10.5px] text-slate-500">محاسبه نشده</div>
                   )}
                 </div>
 
-                {/* TMW Box */}
+                {/* Horizontal TMV Box */}
                 <div
                   className={`p-2.5 rounded-lg border space-y-1 ${
-                    showTMW
-                      ? 'bg-cyan-950/20 border-cyan-500/35'
+                    showTMV
+                      ? 'bg-sky-950/20 border-sky-500/35'
                       : 'bg-slate-950/60 border-slate-800/80 opacity-75'
                   }`}
                 >
                   <div className="flex items-center justify-between text-[10.5px]">
-                    <span className="font-bold text-cyan-300 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      <span>پنجره زمانی TMW</span>
-                    </span>
+                    <span className="font-bold text-sky-300">ناحیه افقی هدف حرکت TMV</span>
                     <span className="font-mono text-[9.5px] text-slate-400">
-                      {showTMW ? 'فعال' : 'مخفی'}
+                      {showTMV ? 'فعال' : 'مخفی'}
                     </span>
                   </div>
-                  {primaryTmw ? (
+                  {primaryTmv ? (
                     <>
                       <div className="text-xs font-mono font-bold text-white tabular-nums">
-                        کندل #{primaryTmw.startCandleIndex + 1} تا #{primaryTmw.endCandleIndex + 1} ({primaryTmw.durationCandles} کندل)
+                        {primaryTmv.lowPrice.toLocaleString()} – {primaryTmv.highPrice.toLocaleString()}
                       </div>
                       <div className="text-[10px] text-slate-400 font-mono tabular-nums truncate">
-                        نسبت زمانی: {primaryTmw.ratioLabel}
+                        Prime: {primaryTmv.primePrice.toLocaleString()} · Ideal: {primaryTmv.ideal100Price.toLocaleString()}
                       </div>
                     </>
                   ) : (
@@ -516,20 +535,38 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                     </div>
                   )}
 
-                  {/* Session 18 Trailing Stop & Wave 5 Warning */}
-                  <div className="p-2 rounded bg-slate-900/90 border border-slate-800 space-y-1">
-                    <div className="flex items-center justify-between gap-2">
+                  {report.tmvPrimeApproxIdealWarningFa && (
+                    <div className="text-[10px] text-cyan-200 bg-cyan-950/30 border border-cyan-500/30 rounded px-2 py-1">
+                      {report.tmvPrimeApproxIdealWarningFa}
+                    </div>
+                  )}
+
+                  {/* Session 18 & Table 14 Trailing Stop, 50/50 Profit Plan & Wave 5 Warning */}
+                  <div className="p-2 rounded bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-bold text-emerald-300 flex items-center gap-1">
                         <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                         <span>حد ضرر متحرک (TMV Trailing): {tmvTrailing.trailingStopLabelFa}</span>
                       </span>
-                      {tmvTrailing.extendedWave && (
-                        <span className="font-mono text-[9.5px] text-amber-300">
-                          کشیدگی {tmvTrailing.extendedWave}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2 font-mono text-[9.5px]">
+                        {tmvTrailing.trailingLockPct !== null && (
+                          <span className="text-cyan-300 font-bold">
+                            فاصله قفل سود: {tmvTrailing.trailingLockPct}%
+                          </span>
+                        )}
+                        {tmvTrailing.extendedWave && (
+                          <span className="text-amber-300">
+                            کشیدگی {tmvTrailing.extendedWave}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <p className="text-[10px] text-slate-400 leading-relaxed">{tmvTrailing.trailingStopDescFa}</p>
+                    <div className="pt-1 border-t border-slate-800/80 space-y-0.5 text-[9.5px] text-slate-300">
+                      {tmvTrailing.partialProfitPlanFa.map((plan, pIdx) => (
+                        <div key={pIdx}>• {plan}</div>
+                      ))}
+                    </div>
                     {tmvTrailing.warnings.map((w, idx) => (
                       <div key={idx} className="text-[10px] text-rose-300 font-semibold">
                         {w}
@@ -572,7 +609,7 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                 </div>
               )}
 
-              {/* Session 11: Multi-Step Entry Strategy & W2 vs A Classifier */}
+              {/* Session 11 & Tables 13-14: Multi-Step Entry Strategy, Candle Confirmation & R/R */}
               <div className="p-2.5 rounded-lg bg-slate-950/85 border border-slate-800 space-y-1.5 text-[10.5px]">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="font-bold text-indigo-300 flex items-center gap-1.5">
@@ -580,7 +617,7 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                     <span>استراتژی ورود و تفکیک W2 از A (جلسه ۱۱)</span>
                   </span>
                   <span className="font-mono tabular-nums text-[10px] text-cyan-300">
-                    {entryPlan.w2VsALabelFa} ({entryPlan.scenarioConfidence}%)
+                    {entryPlan.w2VsALabelFa} ({Math.round(entryPlan.scenarioConfidence * 100)}%)
                   </span>
                 </div>
                 <div className="text-[10px] text-slate-300">
@@ -588,6 +625,30 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                   <span className="font-mono tabular-nums">{entryPlan.retracementPct}%</span> · حداقل ۵۰٪:{' '}
                   <span className={entryPlan.meetsMin50 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                     {entryPlan.meetsMin50 ? 'محقق ✓' : 'ناکافی ✕'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 flex-wrap text-[10px] pt-0.5">
+                  <span
+                    className={
+                      entryPlan.candleSignal === 'HAMMER_OR_ENGULFING'
+                        ? 'text-emerald-300 font-semibold'
+                        : entryPlan.candleSignal === 'DOJI_WEAK'
+                        ? 'text-amber-300 font-semibold'
+                        : 'text-slate-400'
+                    }
+                  >
+                    کندل اخیر: {entryPlan.candleSignalLabelFa}
+                  </span>
+                  <span
+                    className={`font-mono tabular-nums font-bold ${
+                      entryPlan.riskRewardRatio !== null && entryPlan.riskRewardRatio >= 2
+                        ? 'text-emerald-400'
+                        : entryPlan.riskRewardRatio !== null && entryPlan.riskRewardRatio < 1
+                        ? 'text-rose-400'
+                        : 'text-amber-300'
+                    }`}
+                  >
+                    {entryPlan.riskRewardVerdictFa}
                   </span>
                 </div>
                 {entryPlan.steps.length > 0 && (

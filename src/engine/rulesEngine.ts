@@ -17,7 +17,7 @@ import {
   WaveRole,
   ScenarioProjectionReport
 } from '../types/elliott';
-import { PivotDetector } from './pivotDetector';
+import { PivotDetector, getPivotWindowForTimeframe } from './pivotDetector';
 import { FractalEngine } from './fractalEngine';
 import { TargetProjectionEngine } from './targetProjectionEngine';
 
@@ -30,6 +30,7 @@ export interface AbsoluteBottomEvaluation {
   absoluteBottomPrice: number;
   validLowIdx: number | null;
   validLowInvalidated: boolean;
+  boundaryIssuesFa?: string[];
   reasonFa: string;
 }
 
@@ -441,10 +442,11 @@ export class RulesEngine {
       }
     } else {
       // Motive Patterns (Ideal Cycle, Terminal, Anti-Terminal, Diagonals)
-      // 1. RULE 1 (Cardinal): Wave 2 cannot retrace 100% of Wave 1
+      // 1. RULE 1 (Cardinal): Wave 2 cannot retrace 100% of Wave 1 (Table 4: 99.9% valid borderline, 100% invalid)
       if (vertices.length >= 3) {
         const retraceRatio2 = len1 > 0 ? retrace2 / len1 : 0;
         const rule1Passed = isBull ? p2 > p0 : p2 < p0;
+        const isBorderline99 = rule1Passed && retraceRatio2 >= 0.985;
 
         rules.push({
           ruleId: 'CARDINAL_RULE_1',
@@ -452,11 +454,13 @@ export class RulesEngine {
           nameFa: 'قانون اول: موج ۲ نباید ۱۰۰٪ موج ۱ را پوشش دهد',
           type: 'HARD',
           passed: rule1Passed,
-          score: rule1Passed ? 100 : 0,
+          score: rule1Passed ? (isBorderline99 ? 88 : 100) : 0,
           conceptId: 'C07',
           messageFa: rule1Passed
-            ? `موج ۲ به میزان ${(retraceRatio2 * 100).toFixed(1)}٪ موج ۱ را اصلاح کرده و مبدأ موج ۱ را نشکسته است.`
-            : 'نقض قانون ۱: موج ۲ بیش از ۱۰۰٪ موج ۱ را پوشش داده است (کف مطلق شکسته یا الگو آنتی‌سیکل است).',
+            ? isBorderline99
+              ? `موج ۲ در مرز بحرانی (${(retraceRatio2 * 100).toFixed(1)}٪ < ۱۰۰٪) موج ۱ قرار دارد — معتبر مرزی (جدول ۴.۲).`
+              : `موج ۲ به میزان ${(retraceRatio2 * 100).toFixed(1)}٪ موج ۱ را اصلاح کرده و مبدأ موج ۱ را نشکسته است.`
+            : 'نقض قانون ۱ (جدول ۴.۱): موج ۲ بیش از یا مساوی ۱۰۰٪ موج ۱ را پوشش داده است (کف مطلق شکسته یا الگو آنتی‌سیکل است).',
           canBeSolvedByAlternate: rule1Passed ? undefined : 'ANTI_CYCLE'
         });
 
@@ -466,7 +470,7 @@ export class RulesEngine {
         }
       }
 
-      // 2. RULE 2 (Cardinal): Wave 3 cannot be the shortest among 1, 3, 5
+      // 2. RULE 2 (Cardinal): Wave 3 cannot be the shortest among 1, 3, 5 (Table 4: equality W3=W1=W5 is valid)
       if (vertices.length >= 6) {
         const isWave3Shortest = len3 < len1 && len3 < len5;
         const rule2Passed = !isWave3Shortest;
@@ -481,13 +485,15 @@ export class RulesEngine {
           conceptId: 'C07',
           messageFa: rule2Passed
             ? `موج ۳ با طول ${Math.round(len3).toLocaleString()} کوتاه‌ترین موج نیست (موج ۱: ${Math.round(len1).toLocaleString()}، موج ۵: ${Math.round(len5).toLocaleString()}).`
-            : 'نقض قانون ۲: موج ۳ کوتاه‌ترین موج است! شمارش نامعتبر است و باید بازشماری شود.'
+            : 'نقض قانون ۲ (جدول ۴.۳): موج ۳ کوتاه‌ترین موج است! شمارش نامعتبر است و باید بازشماری شود.'
         });
       }
 
-      // 3. RULE 3 (Cardinal): Wave 4 overlap with Wave 1
+      // 3. RULE 3 (Cardinal): Wave 4 overlap with Wave 1 (Table 4: exact touch valid borderline, >=0.1% overlap fails)
       if (vertices.length >= 5) {
-        const hasOverlap = isBull ? p4 <= p1 : p4 >= p1;
+        const overlapTolerance = Math.abs(len1) * 0.001;
+        const hasExactTouch = Math.abs(p4 - p1) <= overlapTolerance;
+        const hasOverlap = isBull ? p4 < p1 - overlapTolerance : p4 > p1 + overlapTolerance;
 
         if (pattern === 'IDEAL_CYCLE') {
           const rule3Passed = !hasOverlap;
@@ -497,11 +503,13 @@ export class RulesEngine {
             nameFa: 'قانون سوم: موج ۴ نباید وارد محدوده قیمتی موج ۱ شود',
             type: 'HARD',
             passed: rule3Passed,
-            score: rule3Passed ? 100 : 0,
+            score: rule3Passed ? (hasExactTouch ? 88 : 100) : 0,
             conceptId: 'C07',
             messageFa: rule3Passed
-              ? `موج ۴ (${p4.toLocaleString()}) وارد حریم موج ۱ (${p1.toLocaleString()}) نشده است.`
-              : `نقض قانون ۳: موج ۴ (${p4.toLocaleString()}) وارد محدوده قیمتی موج ۱ (${p1.toLocaleString()}) شده است.`,
+              ? hasExactTouch
+                ? `موج ۴ (${p4.toLocaleString()}) با سقف موج ۱ تماس مرزی دارد بدون نفوذ — معتبر مرزی (جدول ۴.۵).`
+                : `موج ۴ (${p4.toLocaleString()}) وارد حریم موج ۱ (${p1.toLocaleString()}) نشده است.`
+              : `نقض قانون ۳ (جدول ۴.۶): موج ۴ (${p4.toLocaleString()}) با نفوذ > ۰.۱٪ وارد محدوده قیمتی موج ۱ (${p1.toLocaleString()}) شده است.`,
             canBeSolvedByAlternate: hasOverlap ? (vertices.length >= 6 && len5 > len3 ? 'ANTI_TERMINAL' : 'TERMINAL') : undefined
           });
 
@@ -516,8 +524,8 @@ export class RulesEngine {
             name: 'Non-Ideal Overlap Feature',
             nameFa: 'ویژگی هم‌پوشانی موج ۴ و ۱ (ترمینال / قطر)',
             type: 'STRUCTURE',
-            passed: hasOverlap,
-            score: hasOverlap ? 100 : 50,
+            passed: hasOverlap || hasExactTouch,
+            score: hasOverlap ? 100 : hasExactTouch ? 75 : 50,
             conceptId: pattern.includes('DIAGONAL') ? 'C20' : 'C19',
             messageFa: hasOverlap
               ? `موج ۴ وارد محدوده موج ۱ شده که با مشخصه الگوی ${PATTERN_LABELS_FA[pattern]} سازگار است.`
@@ -701,39 +709,194 @@ export class RulesEngine {
     const idealnessScore = allHardPassed ? softAvg : 15;
     const confidenceScore = Math.round(validityScore * 0.6 + idealnessScore * 0.4);
 
-    // Targets & Invalidation (P10)
+    // Targets & Invalidation (P10) — Pattern & Phase Aware (synced with TMV/TargetProjectionEngine)
     const invalidationPrice = p0;
     const targets: TargetItem[] = [];
 
     if (len1 > 0) {
-      if (vertices.length <= 4) {
-        const sign = isBull ? 1 : -1;
-        targets.push({
-          id: 'T_EXT_1618',
-          label: 'تارگت اکستنشن ۱.۶۱۸',
-          ratioLabel: '1.618 Fib',
-          price: Math.round((p2 + sign * len1 * 1.618) * 10) / 10,
-          descriptionFa: 'هدف ایده‌آل موج ۳ یا C',
-          type: 'FIB_EXTENSION',
-          confidence: 90
-        });
+      const sign = isBull ? 1 : -1;
+      const lastVert = vertices[vertices.length - 1];
+      const totalNetSpan = Math.max(0.01, Math.abs(lastVert.price - p0));
+
+      if (vertices.length === 2) {
+        targets.push(
+          {
+            id: 'T_W2_618',
+            label: 'هدف ۶۱.۸٪ موج ۲ (PRZ)',
+            ratioLabel: '0.618 Ret W1',
+            price: Math.round((p1 - sign * len1 * 0.618) * 10) / 10,
+            descriptionFa: 'نسبت طلایی اصلاح موج ۲',
+            type: 'FIB_RETRACEMENT',
+            confidence: 90
+          },
+          {
+            id: 'T_W2_786',
+            label: 'هدف ۷۸.۶٪ موج ۲',
+            ratioLabel: '0.786 Ret W1',
+            price: Math.round((p1 - sign * len1 * 0.786) * 10) / 10,
+            descriptionFa: 'حداکثر اصلاح پرشتاب موج ۲',
+            type: 'FIB_RETRACEMENT',
+            confidence: 80
+          }
+        );
+      } else if (vertices.length === 3) {
+        const ratioIdeal = isCorrectivePattern ? 1.0 : 1.618;
+        const ratioExt = isCorrectivePattern ? 1.618 : 2.618;
+        targets.push(
+          {
+            id: 'T_EXT_100',
+            label: isCorrectivePattern ? 'هدف ۱۰۰٪ موج C' : 'هدف پایه ۱۰۰٪ موج ۳',
+            ratioLabel: '1.000 Fib',
+            price: Math.round((p2 + sign * len1 * 1.0) * 10) / 10,
+            descriptionFa: 'برابری طول موج بعدی با موج اول',
+            type: 'WAVE_EQUALITY',
+            confidence: 84
+          },
+          {
+            id: isCorrectivePattern ? 'T_C_IDEAL' : 'T_EXT_1618',
+            label: isCorrectivePattern ? 'تارگت اکستنشن ۱.۶۱۸ موج C' : 'تارگت ایده‌آل ۱.۶۱۸ موج ۳',
+            ratioLabel: `${ratioIdeal.toFixed(3)} Fib`,
+            price: Math.round((p2 + sign * len1 * ratioIdeal) * 10) / 10,
+            descriptionFa: 'هدف ایده‌آل موج ۳ یا C',
+            type: 'FIB_EXTENSION',
+            confidence: 92
+          },
+          {
+            id: 'T_EXT_ALT',
+            label: 'هدف ممتد جایگزین',
+            ratioLabel: `${ratioExt.toFixed(3)} Fib`,
+            price: Math.round((p2 + sign * len1 * ratioExt) * 10) / 10,
+            descriptionFa: 'اکستنشن ممتد ساختار',
+            type: 'FIB_EXTENSION',
+            confidence: 72
+          }
+        );
+      } else if (vertices.length === 4) {
+        if (isCorrectivePattern) {
+          targets.push(
+            {
+              id: 'T_C1_382',
+              label: 'هدف اولیه موج ۱ جدید (۳۸.۲٪)',
+              ratioLabel: '0.382 Ret (0→C)',
+              price: Math.round((p3 - sign * totalNetSpan * 0.382) * 10) / 10,
+              descriptionFa: 'اولین هدف چرخش پس از اتمام ساختار اصلاحی',
+              type: 'FIB_RETRACEMENT',
+              confidence: 85
+            },
+            {
+              id: 'T_C1_618',
+              label: 'هدف ۶۱.۸٪ بازگشت اصلاحی',
+              ratioLabel: '0.618 Ret (0→C)',
+              price: Math.round((p3 - sign * totalNetSpan * 0.618) * 10) / 10,
+              descriptionFa: 'تأیید چرخش روند پس از اصلاح',
+              type: 'FIB_RETRACEMENT',
+              confidence: 89
+            }
+          );
+        } else {
+          targets.push(
+            {
+              id: 'T_W4_382',
+              label: 'هدف کلاسیک ۳۸.۲٪ موج ۴',
+              ratioLabel: '0.382 Ret W3',
+              price: Math.round((p3 - sign * len3 * 0.382) * 10) / 10,
+              descriptionFa: 'ناحیه استاندارد اصلاح موج ۴',
+              type: 'FIB_RETRACEMENT',
+              confidence: 91
+            },
+            {
+              id: 'T_W4_500',
+              label: 'مرز ۵۰٪ موج ۴',
+              ratioLabel: '0.500 Ret W3',
+              price: Math.round((p3 - sign * len3 * 0.5) * 10) / 10,
+              descriptionFa: 'حداکثر اصلاح متعارف موج ۴',
+              type: 'FIB_RETRACEMENT',
+              confidence: 78
+            }
+          );
+        }
+      } else if (vertices.length === 5) {
+        const w3Ratio = len3 / Math.max(0.01, len1);
+        const w5Factor =
+          pattern === 'TERMINAL'
+            ? 0.618
+            : w3Ratio >= 2.618
+            ? 0.382
+            : w3Ratio >= 1.618
+            ? 0.618
+            : 1.0;
+        const baseSpan = pattern === 'TERMINAL' || w3Ratio >= 1.618 ? len3 : len1;
+        targets.push(
+          {
+            id: 'T5_EQ',
+            label: w3Ratio >= 1.618 ? 'هدف تعدیل‌شده موج ۵ (موج ۳ کشیده)' : 'تارگت برابری موج ۵ با موج ۱',
+            ratioLabel: w3Ratio >= 1.618 ? `${w5Factor} W3` : '1.000 Fib W1',
+            price: Math.round((p4 + sign * baseSpan * w5Factor) * 10) / 10,
+            descriptionFa: 'هدف کلاسیک موج ۵ بر اساس قانون جفت‌ها',
+            type: pattern === 'TERMINAL' ? 'TMV' : 'WAVE_EQUALITY',
+            confidence: 88
+          },
+          {
+            id: 'T5_0618_03',
+            label: 'تارگت تلاقی ۰.۶۱۸ (۰←۳)',
+            ratioLabel: '0.618 (0→3)',
+            price: Math.round((p4 + sign * Math.max(0.01, Math.abs(p3 - p0)) * 0.618) * 10) / 10,
+            descriptionFa: 'نسبت طلایی مسیر ۰ تا ۳ از کف موج ۴',
+            type: 'FIB_EXTENSION',
+            confidence: 86
+          }
+        );
       } else {
-        const sign = isBull ? 1 : -1;
-        targets.push({
-          id: 'T5_EQ',
-          label: 'تارگت برابری موج ۵ با موج ۱',
-          ratioLabel: '1.000 Fib W1',
-          price: Math.round((p4 + sign * len1) * 10) / 10,
-          descriptionFa: 'هدف کلاسیک موج ۵',
-          type: 'WAVE_EQUALITY',
-          confidence: 85
-        });
+        // 6+ vertices (completed or completing Wave 5)
+        if (pattern === 'TERMINAL') {
+          targets.push(
+            {
+              id: 'T_TERM_W4',
+              label: 'هدف فوری بازگشت به موج ۴',
+              ratioLabel: 'Wave 4 Base',
+              price: Math.round(p4 * 10) / 10,
+              descriptionFa: 'بازگشت سریع ترمینال به محدوده موج ۴',
+              type: 'TMV',
+              confidence: 92
+            },
+            {
+              id: 'T_TERM_50',
+              label: 'اصلاح ۵۰٪ کل ساختار ترمینال',
+              ratioLabel: '0.500 Ret (0→5)',
+              price: Math.round((lastVert.price - sign * totalNetSpan * 0.5) * 10) / 10,
+              descriptionFa: 'هدف میانی اصلاح پس از ترمینال',
+              type: 'FIB_RETRACEMENT',
+              confidence: 82
+            }
+          );
+        } else {
+          targets.push(
+            {
+              id: 'T_A_382',
+              label: 'هدف اصلی موج A (۳۸.۲٪ کل سیکل)',
+              ratioLabel: '0.382 Ret (0→5)',
+              price: Math.round((lastVert.price - sign * totalNetSpan * 0.382) * 10) / 10,
+              descriptionFa: 'نخستین ناحیه بازگشتی اصلی پس از سیکل ۵ موجی',
+              type: 'FIB_RETRACEMENT',
+              confidence: 90
+            },
+            {
+              id: 'T_ABC_500',
+              label: 'هدف اصلاح کامل ۵۰٪ سیکل',
+              ratioLabel: '0.500 Ret (0→5)',
+              price: Math.round((lastVert.price - sign * totalNetSpan * 0.5) * 10) / 10,
+              descriptionFa: 'ناحیه تعادل اصلاح متعاقب موج ۵',
+              type: 'FIB_RETRACEMENT',
+              confidence: 81
+            }
+          );
+        }
       }
       targets.push({
         id: 'INV_LEVEL',
         label: 'سطح ابطال سناریو',
         ratioLabel: 'Invalidation',
-        price: vertices.length >= 3 && !isCorrectivePattern ? p0 : p0,
+        price: p0,
         descriptionFa: 'شکست مبدأ موج شمارش را باطل می‌کند',
         type: 'INVALIDATION',
         confidence: 100,
@@ -819,7 +982,7 @@ export class RulesEngine {
   }
 
   /**
-   * Session 4.3 & 5.5: Evaluate Absolute Bottom (global low) and Valid Lows after complete cycles.
+   * Session 4.3, 5.5 & Table 3 (Step 2): Evaluate Absolute Bottom (global low) and Valid Lows after complete cycles.
    */
   public static evaluateAbsoluteBottomAndValidLows(
     candles: Candle[],
@@ -833,6 +996,7 @@ export class RulesEngine {
         absoluteBottomPrice: 0,
         validLowIdx: null,
         validLowInvalidated: false,
+        boundaryIssuesFa: ['داده کندلی خالی است.'],
         reasonFa: 'داده کندلی برای تشخیص کف مطلق وجود ندارد.'
       };
     }
@@ -848,35 +1012,100 @@ export class RulesEngine {
       }
     }
 
+    const boundaryIssuesFa: string[] = [];
+    // Table 3.2: index == 0
+    if (extremeIdx === 0) {
+      boundaryIssuesFa.push('جدول ۳ (۲.۲): کف/سقف مطلق روی اولین کندل (index == 0) قرار دارد؛ داده مرجع قبلی وجود ندارد.');
+    } else if (extremeIdx < 5) {
+      // Table 3.1: index < 5
+      boundaryIssuesFa.push(`جدول ۳ (۲.۱): کف/سقف مطلق در index ${extremeIdx} (< ۵) است؛ احتمال ناقص‌بودن تاریخچه پیشین وجود دارد.`);
+    }
+
+    // Table 3.3: post_bottom[10..20] break check
+    const postSlice = candles.slice(extremeIdx);
+    if (postSlice.length > 20) {
+      const window10to20 = postSlice.slice(10, 20);
+      const brokePost = window10to20.some(c =>
+        isBull ? c.low < extremePrice * 0.999 : c.high > extremePrice * 1.001
+      );
+      if (brokePost) {
+        boundaryIssuesFa.push('جدول ۳ (۲.۳): کف مطلق در فاصله ۱۰ تا ۲۰ کندل بعدی شکسته شده است؛ کف جدید مبنا قرار گیرد.');
+      }
+    }
+
     if (vertices.length >= 3) {
       const p0 = vertices[0].price;
       const p2 = vertices[2].price;
       const breached = isBull ? p2 <= p0 : p2 >= p0;
       if (vertices[0].candleIndex <= 6 && breached) {
+        boundaryIssuesFa.push('جدول ۳ (۲.۵): موج ۲ پس از موج ۱ آغازین ۱۰۰٪ آن را پوشش داده و کف مطلق هنوز تشکیل نشده است.');
         return {
           formed: false,
           absoluteBottomIdx: extremeIdx,
           absoluteBottomPrice: extremePrice,
           validLowIdx: null,
           validLowInvalidated: true,
+          boundaryIssuesFa,
           reasonFa: 'کف مطلق هنوز تثبیت نشده است؛ موج ۲ بیش از ۱۰۰٪ موج ۱ بازگشت داشته و باید منتظر کف جدید ماند.'
         };
       }
     }
 
     const validLowIdx = vertices.length >= 5 ? vertices[4].candleIndex : vertices.length >= 3 ? vertices[2].candleIndex : null;
+    // Table 3.6: Check if validLow is invalidated by subsequent price breach
+    let validLowInvalidated = false;
+    if (validLowIdx !== null && validLowIdx < candles.length - 1) {
+      const vlPrice = isBull ? candles[validLowIdx].low : candles[validLowIdx].high;
+      const futureSlice = candles.slice(validLowIdx + 1);
+      if (futureSlice.some(c => (isBull ? c.low < vlPrice * 0.998 : c.high > vlPrice * 1.002))) {
+        validLowInvalidated = true;
+        boundaryIssuesFa.push('جدول ۳ (۲.۹): کف معتبر بعدی توسط موج اصلاحی ۱۰۰٪ پوشش داده شده و باطل است.');
+      }
+    }
 
     return {
-      formed: true,
+      formed: extremeIdx > 0,
       absoluteBottomIdx: extremeIdx,
       absoluteBottomPrice: extremePrice,
       validLowIdx,
-      validLowInvalidated: false,
+      validLowInvalidated,
+      boundaryIssuesFa,
       reasonFa:
         validLowIdx !== null
-          ? `کف مطلق در کندل #${extremeIdx + 1} (${extremePrice.toLocaleString()}) و کف معتبر در کندل #${validLowIdx + 1} تثبیت شده است.`
+          ? `کف مطلق در کندل #${extremeIdx + 1} (${extremePrice.toLocaleString()}) و کف معتبر در کندل #${validLowIdx + 1} ${validLowInvalidated ? '(باطل‌شده توسط موج بعدی)' : 'تثبیت شده است'}.`
           : `کف مطلق در کندل #${extremeIdx + 1} با قیمت ${extremePrice.toLocaleString()} شناسایی شد.`
     };
+  }
+
+  /**
+   * 7-Tier Pattern Counting Priority per Session 16 & Step 3.4:
+   * 1. Ideal -> 2. Diagonal -> 3. Terminal / Anti-Cycle -> 4. Zigzag -> 5. Flat -> 6. Triangle -> 7. Complex
+   */
+  public static getPatternPriorityRank(pattern: PatternFamily): number {
+    switch (pattern) {
+      case 'IDEAL_CYCLE':
+        return 1;
+      case 'LEADING_DIAGONAL':
+      case 'ANTI_LEADING_DIAGONAL':
+      case 'ENDING_DIAGONAL':
+      case 'ANTI_DIAGONAL':
+        return 2;
+      case 'TERMINAL':
+      case 'ANTI_TERMINAL':
+      case 'ANTI_CYCLE':
+        return 3;
+      case 'ZIGZAG':
+        return 4;
+      case 'FLAT_REGULAR':
+      case 'FLAT_EXPANDED':
+      case 'FLAT_RUNNING':
+        return 5;
+      case 'TRIANGLE_CONVERGING':
+      case 'TRIANGLE_EXPANDING':
+        return 6;
+      default:
+        return 7;
+    }
   }
 
   /**
@@ -902,7 +1131,11 @@ export class RulesEngine {
         ? Math.max(safeStart + 6, Math.min(candles.length - 1, endIndex))
         : candles.length - 1;
     const sliced = candles.slice(safeStart, safeEnd + 1);
-    const pivots = PivotDetector.detectPivots(sliced, 2, 2, 0.8);
+    const adaptiveWin = Math.min(
+      getPivotWindowForTimeframe(timeframe),
+      Math.max(2, Math.floor(sliced.length / 8))
+    );
+    const pivots = PivotDetector.detectPivots(sliced, adaptiveWin, adaptiveWin, 0.8);
 
     // Build alternating High/Low pivot chain starting at safeStart
     const startPrice = sliced[0].low;
@@ -1233,11 +1466,13 @@ export class RulesEngine {
       );
     }
 
-    // Sort valid scenarios higher, keeping primary first
+    // Sort by primary first, then validity score, and break ties using 7-tier pattern priority (Step 3.4)
     return scenarios.sort((a, b) => {
       if (a.isPrimary && !b.isPrimary) return -1;
       if (!a.isPrimary && b.isPrimary) return 1;
-      return b.validityScore - a.validityScore;
+      const scoreDiff = b.validityScore - a.validityScore;
+      if (Math.abs(scoreDiff) >= 8) return scoreDiff;
+      return this.getPatternPriorityRank(a.patternType) - this.getPatternPriorityRank(b.patternType);
     });
   }
 
@@ -1653,7 +1888,7 @@ export class RulesEngine {
   }
 
   /**
-   * Predicts PRZ (Potential Reversal Zones), TMW (Time Windows), completed-structure Fibonacci extension layers,
+   * Predicts PRZ (Potential Reversal Zones), TMV (Target Movement Zones), completed-structure Fibonacci extension layers,
    * and probable last-leg price targets via TargetProjectionEngine.
    */
   public static predictScenarioProjections(

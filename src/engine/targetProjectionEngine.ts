@@ -5,8 +5,8 @@
  * Deterministic Elliott Wave Target & Fibonacci Extension Layer Engine.
  *
  * Analyzes the last completed impulse or corrective structure inside a WaveScenario,
- * computes multi-tier Fibonacci price extension targets, PRZ confluence bands,
- * TMW time windows, and dynamic horizontal chart layers.
+ * computes multi-tier Fibonacci price extension targets, horizontal PRZ & TMV zones,
+ * and dynamic horizontal chart layers.
  */
 
 import {
@@ -22,8 +22,8 @@ import {
   StructureClass,
   TargetItem,
   TmvPrzOverlapResult,
-  TmwZone,
   TmvTierSummary,
+  TmvZone,
   WaveDirection,
   WaveRole,
   WaveScenario
@@ -152,6 +152,7 @@ export class TargetProjectionEngine {
     projectionPairNoteFa: string;
     forbidWave5RetracementFa?: string;
     wave3ExtensionEffectFa?: string;
+    tmvPrimeApproxIdealWarningFa?: string;
   } {
     const verts = scenario.vertices;
     const isCorrective = this.isCorrectivePattern(scenario.patternType);
@@ -205,12 +206,13 @@ export class TargetProjectionEngine {
       }
     }
 
+    let tmvSummary: TmvTierSummary | undefined;
     const effectiveIdealFactor = wave3ExtendedReductionRatio ?? 1.0;
     const short0618 = roundPrice(anchorPrice + sign * baseSpan * 0.618);
     const ideal100 = roundPrice(anchorPrice + sign * baseSpan * effectiveIdealFactor);
     const alternate1618 = roundPrice(anchorPrice + sign * baseSpan * 1.618);
 
-    const tmvSummary: TmvTierSummary = {
+    tmvSummary = {
       prime,
       short0618,
       ideal100,
@@ -219,6 +221,11 @@ export class TargetProjectionEngine {
       basisPairLabel,
       basisFa
     };
+
+    const tmvPrimeApproxIdealWarningFa =
+      Math.abs(ideal100 - prime) / Math.max(0.01, baseSpan) <= 0.03
+        ? 'حالت نادر جدول ۱۰ (۱۰.۱۵): تراز TMV Prime و TMV Ideal تقریباً بر هم منطبق هستند (اصلاح بسیار کم‌عمق موج قبل).'
+        : undefined;
 
     const primaryPrz = przZones.find(z => z.isPrimary) || przZones[0];
     let overlapReport: TmvPrzOverlapResult | undefined;
@@ -229,7 +236,7 @@ export class TargetProjectionEngine {
           type: 'FULL',
           confidence: 0.9,
           gapPct: 0,
-          noteFa: 'همپوشانی کامل: تراز TMV Ideal دقیقاً درون محدوده PRZ قیمتی قرار گرفته است (اعتبار ۹۰٪).'
+          noteFa: 'همپوشانی کامل: تراز TMV Ideal دقیقاً درون محدوده PRZ قیمتی قرار گرفته است (اعتبار ۹۰٪ — جدول ۱۰.۱۶).'
         };
       } else {
         const dist = ideal100 < primaryPrz.lowPrice ? primaryPrz.lowPrice - ideal100 : ideal100 - primaryPrz.highPrice;
@@ -246,7 +253,7 @@ export class TargetProjectionEngine {
             type: 'NONE',
             confidence: 0.45,
             gapPct,
-            noteFa: `عدم همپوشانی: فاصله ${gapPct}٪ بین TMV Ideal و PRZ اصلی وجود دارد؛ نیاز به تایید بیشتر.`
+            noteFa: `عدم همپوشانی مستقیم (جدول ۱۰.۱۷): فاصله ${gapPct}٪ بین ناحیه چرخش PRZ و هدف حرکت TMV Ideal — PRZ محل چرخش اصلاحی و TMV مقصد حرکت بعدی است.`
           };
         }
       }
@@ -257,7 +264,8 @@ export class TargetProjectionEngine {
       overlapReport,
       projectionPairNoteFa: basisFa,
       forbidWave5RetracementFa,
-      wave3ExtensionEffectFa
+      wave3ExtensionEffectFa,
+      tmvPrimeApproxIdealWarningFa
     };
   }
 
@@ -869,7 +877,7 @@ export class TargetProjectionEngine {
 
   /**
    * Produces the unified ScenarioProjectionReport including completed structure analysis,
-   * multi-tier Fibonacci extension layers, PRZ, TMW, and ranked price targets.
+   * multi-tier Fibonacci extension layers, horizontal PRZ, horizontal TMV, and ranked price targets.
    */
   public static projectScenario(
     scenario: WaveScenario,
@@ -889,12 +897,12 @@ export class TargetProjectionEngine {
         scenarioId: scenario.id,
         lastLegLabel: 'نقطه کافی نیست',
         lastLegPatternPhaseFa: patternNameFa,
-        expectedNextMoveFa: 'برای محاسبه تارگت، لایه‌های فیبوناچی، PRZ و TMW حداقل ۲ نقطه پیوت لازم است.',
+        expectedNextMoveFa: 'برای محاسبه تارگت، لایه‌های فیبوناچی، PRZ و TMV حداقل ۲ نقطه پیوت لازم است.',
         nextDirection: scenario.direction,
         invalidationPrice: scenario.invalidationPrice || 0,
         targets: [],
         przZones: [],
-        tmwZones: [],
+        tmvZones: [],
         completedStructure: null,
         extensionLayers: []
       };
@@ -913,7 +921,6 @@ export class TargetProjectionEngine {
 
     const lastLegLabel = `موج ${prevV.label} ← ${lastV.label}`;
     const basePrice = lastV.price;
-    const refCandleIdx = lastV.candleIndex;
     const invalidationPrice = v0.price;
 
     const pctDist = (targetPrice: number) =>
@@ -954,7 +961,10 @@ export class TargetProjectionEngine {
       contributingRatios: string[],
       dir: WaveDirection,
       confidence: number,
-      isPrimary = true
+      isPrimary = true,
+      startCandleIndex?: number,
+      endCandleIndex?: number,
+      waveLabel?: string
     ): PrzZone => {
       const lowPrice = Math.max(0.1, roundPrice(Math.min(pA, pB)));
       const highPrice = Math.max(lowPrice + 0.1, roundPrice(Math.max(pA, pB)));
@@ -967,43 +977,17 @@ export class TargetProjectionEngine {
         contributingRatios,
         direction: dir,
         confidence,
-        isPrimary
-      };
-    };
-
-    const mkTmw = (
-      id: string,
-      labelFa: string,
-      anchorIdx: number,
-      startOffsetCandles: number,
-      endOffsetCandles: number,
-      ratioLabel: string,
-      confidence: number,
-      isPrimary = true
-    ): TmwZone => {
-      const sOff = Math.max(2, Math.round(startOffsetCandles));
-      const eOff = Math.max(sOff + 3, Math.round(endOffsetCandles));
-      const startCandleIndex = Math.max(0, anchorIdx + sOff);
-      const endCandleIndex = Math.max(startCandleIndex + 2, anchorIdx + eOff);
-      return {
-        id,
-        labelFa,
+        isPrimary,
+        anchorCandleIndex: startCandleIndex,
         startCandleIndex,
         endCandleIndex,
-        ratioLabel,
-        durationCandles: endCandleIndex - startCandleIndex + 1,
-        confidence,
-        isPrimary
+        waveLabel
       };
     };
 
     const len1 = Math.max(1, Math.abs(v1.price - v0.price));
-    const dt1 = Math.max(3, Math.abs(v1.candleIndex - v0.candleIndex));
-    const dt2 = v2 ? Math.max(3, Math.abs(v2.candleIndex - v1.candleIndex)) : dt1;
-    const dt3 = v3 && v2 ? Math.max(3, Math.abs(v3.candleIndex - v2.candleIndex)) : dt1;
     const len3 = v3 && v2 ? Math.max(1, Math.abs(v3.price - v2.price)) : len1 * 1.618;
     const totalSpan = Math.max(1, Math.abs(lastV.price - v0.price));
-    const totalDt = Math.max(6, Math.abs(lastV.candleIndex - v0.candleIndex));
 
     const isCorrective = this.isCorrectivePattern(scenario.patternType);
     const isTriangle = this.isTrianglePattern(scenario.patternType);
@@ -1018,11 +1002,89 @@ export class TargetProjectionEngine {
 
     const targets: ProjectedTargetItem[] = [];
     const przZones: PrzZone[] = [];
-    const tmwZones: TmwZone[] = [];
 
     let lastLegPatternPhaseFa = patternNameFa;
     let expectedNextMoveFa = '';
     let nextDirection: WaveDirection = scenario.direction;
+
+    const maxCandleIdx = Math.max(1, candles.length - 1);
+    const activeStartIdx = Math.max(0, Math.min(prevV.candleIndex, lastV.candleIndex));
+    const activeEndIdx = Math.max(activeStartIdx + 2, maxCandleIdx);
+
+    const buildW2Prz = (primary: boolean, startIdx = activeStartIdx, endIdx = activeEndIdx): PrzZone => {
+      if (isCorrective) {
+        const isFlatPat = scenario.patternType.startsWith('FLAT_');
+        const bA = isFlatPat ? v1.price - sign * len1 * 0.786 : v1.price - sign * len1 * 0.5;
+        const bB = isFlatPat ? v0.price : v1.price - sign * len1 * 0.618;
+        return mkPrz(
+          'PRZ_WB',
+          isFlatPat ? 'PRZ موج B فلت (۷۸.۶٪–۱۰۰٪ A)' : 'PRZ موج B (۵۰٪–۶۱.۸٪ A)',
+          bA,
+          bB,
+          isFlatPat ? ['0.786 Ret A', '1.000 Ret A'] : ['0.500 Ret A', '0.618 Ret A'],
+          scenario.direction,
+          86,
+          primary,
+          startIdx,
+          endIdx,
+          'B'
+        );
+      }
+      const w2_618 = v1.price - sign * len1 * 0.618;
+      const w2_786 = v1.price - sign * len1 * 0.786;
+      return mkPrz(
+        'PRZ_W2_GOLD',
+        'PRZ طلایی موج ۲ (۶۱.۸٪–۷۸.۶٪)',
+        w2_618,
+        w2_786,
+        ['0.618 Ret W1', '0.786 Ret W1'],
+        scenario.direction,
+        92,
+        primary,
+        startIdx,
+        endIdx,
+        'W2'
+      );
+    };
+
+    const buildW4Prz = (primary: boolean, startIdx = activeStartIdx, endIdx = activeEndIdx): PrzZone => {
+      const w4_382 = v3.price - sign * len3 * 0.382;
+      const w4_500 = v3.price - sign * len3 * 0.5;
+      if (!isTerminal && !isDiagonal && v1) {
+        const crossesW1 = isBull ? w4_382 > v1.price && w4_500 <= v1.price : w4_382 < v1.price && w4_500 >= v1.price;
+        if (crossesW1) {
+          const safeEdge = isBull
+            ? Math.max(v1.price + 0.1, w4_382 - (w4_382 - v1.price) * 0.92)
+            : Math.min(v1.price - 0.1, w4_382 + (v1.price - w4_382) * 0.92);
+          return mkPrz(
+            'PRZ_W4',
+            'PRZ موج ۴ (۳۸.۲٪ تا مرز موج ۱)',
+            w4_382,
+            safeEdge,
+            ['0.382 Ret W3', 'مرز قله موج ۱'],
+            scenario.direction,
+            88,
+            primary,
+            startIdx,
+            endIdx,
+            'W4'
+          );
+        }
+      }
+      return mkPrz(
+        'PRZ_W4',
+        'PRZ موج ۴ (۳۸.۲٪–۵۰٪ موج ۳)',
+        w4_382,
+        w4_500,
+        ['0.382 Ret W3', '0.500 Ret W3'],
+        scenario.direction,
+        89,
+        primary,
+        startIdx,
+        endIdx,
+        'W4'
+      );
+    };
 
     if (n === 2) {
       nextDirection = oppositeDir;
@@ -1036,40 +1098,27 @@ export class TargetProjectionEngine {
 
       targets.push(
         mkTarget('T_W2_382', 'اصلاح کم‌عمق ۳۸.۲٪', '0.382 Ret W1', r382, 'اصلاح اولیه در روندهای پرقدرت', 'بازگشت ۰.۳۸۲ از طول گام ۰←۱', 'موج ۲ (سریع)', 'FIB_RETRACEMENT', 74),
-        mkTarget('T_W2_500', 'تراز طلایی بهاری ۵۰٪', '0.500 Ret W1', r500, 'نقطه تعادل مطلوب اصلاح موج ۲ (C09/N2)', 'نصف بازگشت گام ۰←۱', 'موج ۲ (متعادل)', 'FIB_RETRACEMENT', 88),
-        mkTarget('T_W2_618', 'حمایت/مقاومت ۶۱.۸٪ موج ۲', '0.618 Ret W1', r618, 'تارگت کلاسیک انتهای موج ۲ پیش از موج ۳', 'نسبت طلایی ۰.۶۱۸ گام ۰←۱', 'موج ۲ (ایده‌آل)', 'FIB_RETRACEMENT', 92),
-        mkTarget('T_W2_786', 'آخرین سنگر ۷۸.۶٪', '0.786 Ret W1', r786, 'حداکثر اصلاح مجاز پیش از نقض قانون ۱', 'آستانه بازگشت عمیق پیش از مبدأ', 'موج ۲ (عمیق)', 'FIB_RETRACEMENT', 66)
+        mkTarget('T_W2_500', 'تراز Fallback ۵۰٪ موج ۲', '0.500 Ret W1', r500, 'نقطه تعادل ثانویه اصلاح موج ۲ (C09/N2)', 'نصف بازگشت گام ۰←۱', 'موج ۲ (متعادل)', 'FIB_RETRACEMENT', 78),
+        mkTarget('T_W2_618', 'حمایت/مقاومت طلایی ۶۱.۸٪ موج ۲', '0.618 Ret W1', r618, 'تارگت ایده‌آل انتهای موج ۲ پیش از موج ۳ (جدول ۹.۱)', 'نسبت طلایی ۰.۶۱۸ گام ۰←۱', 'موج ۲ (ایده‌آل)', 'FIB_RETRACEMENT', 93),
+        mkTarget('T_W2_786', 'آخرین سنگر ۷۸.۶٪ موج ۲', '0.786 Ret W1', r786, 'ناحیه PRZ با شتاب‌گیری پیش از نقض قانون ۱', 'آستانه بازگشت عمیق پیش از مبدأ', 'موج ۲ (شتاب)', 'FIB_RETRACEMENT', 85)
       );
-      przZones.push(mkPrz('PRZ_W2_GOLD', 'PRZ بازگشت طلایی موج ۲', r500, r618, ['0.500 Ret W1', '0.618 Ret W1'], nextDirection, 91, true));
-      tmwZones.push(mkTmw('TMW_W2', 'پنجره زمانی تکمیل موج ۲', refCandleIdx, dt1 * 0.618, dt1 * 1.0, '0.618–1.000 Δt(W1)', 87, true));
+      przZones.push(buildW2Prz(true));
     } else if (n === 3) {
       nextDirection = scenario.direction;
       if (isCorrective) {
         lastLegPatternPhaseFa = `پایان موج ${v2.label} اصلاحی (${patternNameFa})`;
-        expectedNextMoveFa = `${parentPrefix}حرکت موج ${scenario.patternType === 'COMPLEX_COMBINATION' ? 'Y' : 'C'} جهت پوشش ۱۰۰٪ موج ${v2.label}`;
+        expectedNextMoveFa = `${parentPrefix}چرخش از PRZ موج ${v2.label} به‌سمت تارگت TMV موج ${scenario.patternType === 'COMPLEX_COMBINATION' ? 'Y' : 'C'}`;
 
         const c100 = v2.price + sign * len1 * 1.0;
         const c1272 = v2.price + sign * len1 * 1.272;
         const c1618 = v2.price + sign * len1 * 1.618;
 
         targets.push(
-          mkTarget('T_C_100', 'برابری موج C با موج A', '1.000 Eq A', c100, 'هدف استاندارد تکمیل زیگزاگ / فلت متعارف', 'تصویر ۱۰۰٪ موج A از انتهای B', 'موج C / Y', 'WAVE_EQUALITY', 90),
+          mkTarget('T_C_100', 'برابری موج C با موج A (TMV Ideal)', '1.000 Eq A', c100, 'هدف استاندارد تکمیل زیگزاگ / فلت متعارف', 'تصویر ۱۰۰٪ موج A از انتهای B', 'موج C / Y', 'WAVE_EQUALITY', 90),
           mkTarget('T_C_1272', 'گسترش ۱.۲۷۲ موج C', '1.272 Ext A', c1272, 'هدف متداول فلت و زیگزاگ کشیده', 'ضریب ۱.۲۷۲ موج A از B', 'موج C (گسترده)', 'FIB_EXTENSION', 81),
-          mkTarget('T_C_1618', 'کشیدگی ۱.۶۱۸ موج C', '1.618 Ext A', c1618, 'حداکثر اکستنشن مومنتومی موج C', 'ضریب ۱.۶۱۸ موج A از B', 'موج C (ممتد)', 'FIB_EXTENSION', 69)
+          mkTarget('T_C_1618', 'کشیدگی ۱.۶۱۸ موج C (TMV Alt)', '1.618 Ext A', c1618, 'حداکثر اکستنشن مومنتومی موج C', 'ضریب ۱.۶۱۸ موج A از B', 'موج C (ممتد)', 'FIB_EXTENSION', 69)
         );
-        przZones.push(
-          mkPrz(
-            'PRZ_WC',
-            'PRZ تکمیل موج C',
-            scenario.patternType === 'FLAT_EXPANDED' ? c1272 : c100,
-            scenario.patternType === 'FLAT_EXPANDED' ? c1618 : c1272,
-            scenario.patternType === 'FLAT_EXPANDED' ? ['1.272 Ext A', '1.618 Ext A'] : ['1.000 Eq A', '1.272 Ext A'],
-            nextDirection,
-            88,
-            true
-          )
-        );
-        tmwZones.push(mkTmw('TMW_WC', 'پنجره زمانی پایان موج C', refCandleIdx, dt1 * 0.618, dt1 * 1.0, '0.618–1.000 Δt(A)', 85, true));
+        przZones.push(buildW2Prz(true));
       } else if (scenario.patternType === 'ANTI_CYCLE') {
         lastLegPatternPhaseFa = 'شروع فاز دوم ۵ موجی آنتی‌سیکل';
         expectedNextMoveFa = `${parentPrefix}پوشش ۱۰۰٪+ فاز اول در الگوی آنتی‌سیکل ۳-۵ (C21)`;
@@ -1083,62 +1132,70 @@ export class TargetProjectionEngine {
           mkTarget('T_AC_1272', 'هدف ۱.۲۷۲ آنتی‌سیکل', '1.272 Ext', ac1272, 'هدف میان‌مدت فاز دوم', 'ضریب ۱.۲۷۲ از مبدأ فاز دوم', 'فاز دوم ۳-۵', 'FIB_EXTENSION', 82),
           mkTarget('T_AC_1618', 'هدف طلایی ۱.۶۱۸ آنتی‌سیکل', '1.618 Ext', ac1618, 'هدف کشیده فاز دوم', 'ضریب ۱.۶۱۸ موج پایه', 'فاز دوم (ممتد)', 'FIB_EXTENSION', 73)
         );
-        przZones.push(mkPrz('PRZ_AC', 'PRZ تلاقی آنتی‌سیکل', ac100, ac1272, ['1.000 Cover', '1.272 Ext'], nextDirection, 86, true));
-        tmwZones.push(mkTmw('TMW_AC', 'پنجره زمانی آنتی‌سیکل', refCandleIdx, dt1 * 1.0, dt1 * 1.618, '1.000–1.618 Δt(P1)', 82, true));
+        const acBase786 = v1.price - sign * len1 * 0.786;
+        przZones.push(
+          mkPrz(
+            'PRZ_AC',
+            'PRZ مبدأ آنتی‌سیکل (۷۸.۶٪–۱۰۰٪)',
+            acBase786,
+            v0.price,
+            ['0.786 Ret W1', '1.000 Cover'],
+            scenario.direction,
+            86,
+            true,
+            activeStartIdx,
+            activeEndIdx,
+            'AC'
+          )
+        );
       } else {
         lastLegPatternPhaseFa = `پایان موج ${v2.label} و آغاز موج ۳ (${patternNameFa})`;
-        expectedNextMoveFa = `${parentPrefix}موج ۳ شتابدار پیشرو با هدف ایده‌آل ۱.۶۱۸ برابر موج ۱`;
+        expectedNextMoveFa = `${parentPrefix}چرخش از PRZ موج ۲ (۶۱.۸٪–۷۸.۶٪) به‌سمت هدف حرکت TMV موج ۳`;
 
         const w3_100 = v2.price + sign * len1 * 1.0;
-        const w3_1272 = v2.price + sign * len1 * 1.272;
         const w3_1618 = v2.price + sign * len1 * 1.618;
         const w3_2618 = v2.price + sign * len1 * 2.618;
 
         targets.push(
-          mkTarget('T_W3_100', 'حداقل برابری موج ۳ و ۱', '1.000 Eq W1', w3_100, 'مرز پایه جلوگیری از کوتاه‌شدگی موج ۳', 'طول ۱.۰۰ برابر موج ۱ از کف ۲', 'موج ۳ (پایه)', 'WAVE_EQUALITY', 80),
-          mkTarget('T_W3_1618', 'هدف ایده‌آل ۱.۶۱۸ موج ۳', '1.618 Ext W1', w3_1618, 'تارگت استاندارد موج ۳ در سیکل بهاری (C10)', 'اکستنشن ۱.۶۱۸ موج ۱ از کف موج ۲', 'موج ۳ (ایده‌آل)', 'FIB_EXTENSION', isTerminal || isDiagonal ? 79 : 94),
+          mkTarget('T_W3_100', 'برابری موج ۳ و ۱ (TMV Ideal)', '1.000 Eq W1', w3_100, 'مرز پایه جلوگیری از کوتاه‌شدگی موج ۳', 'طول ۱.۰۰ برابر موج ۱ از کف ۲', 'موج ۳ (پایه)', 'WAVE_EQUALITY', 86),
+          mkTarget('T_W3_1618', 'هدف طلایی ۱.۶۱۸ موج ۳ (TMV Alt)', '1.618 Ext W1', w3_1618, 'تارگت استاندارد موج ۳ در سیکل بهاری (C10)', 'اکستنشن ۱.۶۱۸ موج ۱ از کف موج ۲', 'موج ۳ (ایده‌آل)', 'FIB_EXTENSION', isTerminal || isDiagonal ? 79 : 94),
           mkTarget('T_W3_2618', 'تارگت ممتد ۲.۶۱۸ موج ۳', '2.618 Ext W1', w3_2618, 'سناریوی موج ۳ ممتد (N6 / کشیدگی شدید)', 'اکستنشن ۲.۶۱۸ موج ۱ از کف موج ۲', 'موج ۳ (ممتد)', 'FIB_EXTENSION', isTerminal ? 48 : 72)
         );
-        przZones.push(
-          mkPrz(
-            'PRZ_W3',
-            isTerminal || isDiagonal ? 'PRZ موج ۳ ترمینال/قطری' : 'PRZ طلایی موج ۳',
-            isTerminal || isDiagonal ? w3_100 : w3_1272,
-            isTerminal || isDiagonal ? w3_1272 : w3_1618,
-            isTerminal || isDiagonal ? ['1.000 Eq W1', '1.272 Ext W1'] : ['1.272 Ext W1', '1.618 Ext W1'],
-            nextDirection,
-            90,
-            true
-          )
-        );
-        tmwZones.push(mkTmw('TMW_W3', 'پنجره زمانی اوج موج ۳', refCandleIdx, dt1 * 1.0, dt1 * 1.618, '1.000–1.618 Δt(W1)', 88, true));
+        przZones.push(buildW2Prz(true));
       }
     } else if (n === 4) {
       if (isCorrective) {
         const isStillDeveloping = !lastV.isConfirmed;
         nextDirection = oppositeDir;
         lastLegPatternPhaseFa = `${isStillDeveloping ? 'تکمیل گام آخر' : 'پایان کامل'} اصلاح ${lastV.label}`;
-        expectedNextMoveFa = `${parentPrefix}طبق قانون C17 (C→1)، پس از اتمام ${lastV.label} چرخش به‌سمت موج ۱ جدید پیش‌بینی می‌شود`;
+        expectedNextMoveFa = `${parentPrefix}طبق قانون C17 (C→1)، پس از اتمام ${lastV.label} چرخش به‌سمت PRZ ۳۸.۲٪–۶۱.۸٪ و موج ۱ جدید پیش‌بینی می‌شود`;
 
         const spanAC = Math.max(1, Math.abs(v3.price - v0.price));
         const rev382 = v3.price - sign * spanAC * 0.382;
         const rev618 = v3.price - sign * spanAC * 0.618;
         const rev100 = v3.price - sign * spanAC * 1.0;
 
-        if (isStillDeveloping) {
-          const c100 = v2.price + sign * len1 * 1.0;
-          const c1618 = v2.price + sign * len1 * 1.618;
-          przZones.push(mkPrz('PRZ_C_DEV', `PRZ تکمیل ${lastV.label}`, c100, c1618, ['1.000 Eq A', '1.618 Ext A'], scenario.direction, 86, true));
-        } else {
-          przZones.push(mkPrz('PRZ_POST_C', 'PRZ بازگشت پس از پایان اصلاح', rev382, rev618, ['0.382 Net(0→C)', '0.618 Net(0→C)'], nextDirection, 87, true));
-        }
+        przZones.push(
+          mkPrz(
+            'PRZ_POST_C',
+            'PRZ بازگشت پس از اصلاح C (۳۸.۲٪–۶۱.۸٪)',
+            rev382,
+            rev618,
+            ['0.382 Ret (0→C)', '0.618 Ret (0→C)'],
+            nextDirection,
+            87,
+            true,
+            activeStartIdx,
+            activeEndIdx,
+            'C→1'
+          )
+        );
 
         targets.push(
           mkTarget('T_C1_382', 'هدف اولیه موج ۱ جدید', '0.382 Ret (0→C)', rev382, 'اولین واکنش بازگشتی پس از تکمیل گام آخر', 'بازگشت ۳۸.۲٪ کل ساختار اصلاحی', 'موج ۱ جدید', 'FIB_RETRACEMENT', 85),
           mkTarget('T_C1_618', 'هدف میانی بازگشت اصلاحی', '0.618 Ret (0→C)', rev618, 'شکست ساختار و تأیید چرخش روند', 'بازگشت ۶۱.۸٪ ساختار ۰←C', 'چرخش تأییدشده', 'FIB_RETRACEMENT', 89),
           mkTarget('T_C1_100', 'پوشش کامل ۱۰۰٪ اصلاح', '1.000 Cover', rev100, 'هدف کامل بازگشت تا مبدأ اصلاح (۰)', 'برابری ۱۰۰٪ موج قبلی', 'برابری کامل', 'WAVE_EQUALITY', 76)
         );
-        tmwZones.push(mkTmw('TMW_POST_C', 'پنجره زمانی چرخش پس از C', refCandleIdx, totalDt * 0.382, totalDt * 0.618, '0.382–0.618 Δt(0→C)', 84, true));
       } else if (isTriangle) {
         nextDirection = oppositeDir;
         lastLegPatternPhaseFa = 'پایان موج C مثلث و آغاز موج D';
@@ -1149,12 +1206,25 @@ export class TargetProjectionEngine {
           mkTarget('T_TRI_D618', 'هدف ۶۱.۸٪ موج D', '0.618 Ret C', d618, 'نسبت استاندارد اضلاع مثلث همگرا', 'بازگشت ۰.۶۱۸ از گام B←C', 'موج D مثلث', 'FIB_RETRACEMENT', 86),
           mkTarget('T_TRI_D786', 'هدف ۷۸.۶٪ موج D', '0.786 Ret C', d786, 'مرز بالایی اصلاح موج D مثلث', 'بازگشت ۰.۷۸۶ از گام B←C', 'موج D مثلث', 'FIB_RETRACEMENT', 79)
         );
-        przZones.push(mkPrz('PRZ_TRI_D', 'PRZ موج D مثلث', d618, d786, ['0.618 Ret C', '0.786 Ret C'], nextDirection, 84, true));
-        tmwZones.push(mkTmw('TMW_TRI_D', 'پنجره زمانی موج D', refCandleIdx, dt3 * 0.618, dt3 * 1.0, '0.618–1.000 Δt(C)', 81, true));
+        przZones.push(
+          mkPrz(
+            'PRZ_TRI_D',
+            'PRZ موج D مثلث (۶۱.۸٪–۷۸.۶٪ C)',
+            d618,
+            d786,
+            ['0.618 Ret C', '0.786 Ret C'],
+            scenario.direction,
+            84,
+            true,
+            activeStartIdx,
+            activeEndIdx,
+            'D'
+          )
+        );
       } else {
         nextDirection = oppositeDir;
         lastLegPatternPhaseFa = `پایان موج ${v3.label} و آغاز موج ۴`;
-        expectedNextMoveFa = `${parentPrefix}اصلاح موج ۴ به‌سمت PRZ ۳۸.۲٪ موج ۳ (${
+        expectedNextMoveFa = `${parentPrefix}اصلاح موج ۴ به‌سمت PRZ ۳۸.۲٪–۵۰٪ موج ۳ (${
           isTerminal || isDiagonal ? 'ورود به حریم موج ۱ مجاز است' : 'نباید وارد حریم موج ۱ شود'
         })`;
 
@@ -1163,31 +1233,17 @@ export class TargetProjectionEngine {
         const w4_500 = v3.price - sign * len3 * 0.5;
 
         targets.push(
-          mkTarget('T_W4_236', 'اصلاح کم‌عمق ۲۳.۶٪ موج ۴', '0.236 Ret W3', w4_236, 'موج ۴ کم‌عمق در روندهای پرشتاب', 'بازگشت ۲۳.۶٪ گام ۲←۳', 'موج ۴ (سریع)', 'FIB_RETRACEMENT', 76),
-          mkTarget('T_W4_382', 'هدف کلاسیک ۳۸.۲٪ موج ۴', '0.382 Ret W3', w4_382, 'ایده‌آل‌ترین ناحیه پایان موج ۴ (C09)', 'بازگشت ۳۸.۲٪ گام ۲←۳', 'موج ۴ (ایده‌آل)', 'FIB_RETRACEMENT', 91),
-          mkTarget('T_W4_500', 'مرز عمیق ۵۰٪ موج ۴', '0.500 Ret W3', w4_500, 'اصلاح عمیق موج ۴ در ترمینال یا تست T-4.32', 'بازگشت ۵۰٪ گام ۲←۳', 'موج ۴ (عمیق)', 'FIB_RETRACEMENT', isTerminal || isDiagonal ? 84 : 68)
+          mkTarget('T_W4_236', 'اصلاح کم‌عمق ۲۳.۶٪ موج ۴', '0.236 Ret W3', w4_236, 'موج ۴ کم‌عمق در روندهای پرشتاب', 'بازگشت ۲۳.۶٪ گام ۲←۳', 'موج ۴ (سریع)', 'FIB_RETRACEMENT', 74),
+          mkTarget('T_W4_382', 'هدف کلاسیک ۳۸.۲٪ موج ۴ (PRZ)', '0.382 Ret W3', w4_382, 'ایده‌آل‌ترین ناحیه پایان موج ۴ (جدول ۹.۲)', 'بازگشت ۳۸.۲٪ گام ۲←۳', 'موج ۴ (ایده‌آل)', 'FIB_RETRACEMENT', 92),
+          mkTarget('T_W4_500', 'مرز عمیق ۵۰٪ موج ۴ (PRZ)', '0.500 Ret W3', w4_500, 'اصلاح ۵۰٪ موج ۳ در ساختار موج ۴', 'بازگشت ۵۰٪ گام ۲←۳', 'موج ۴ (مرزی)', 'FIB_RETRACEMENT', isTerminal || isDiagonal ? 86 : 78)
         );
-        przZones.push(
-          mkPrz(
-            'PRZ_W4',
-            'PRZ تکمیل موج ۴',
-            isTerminal || isDiagonal ? w4_382 : w4_236,
-            isTerminal || isDiagonal ? w4_500 : w4_382,
-            isTerminal || isDiagonal ? ['0.382 Ret W3', '0.500 Ret W3'] : ['0.236 Ret W3', '0.382 Ret W3'],
-            nextDirection,
-            89,
-            true
-          )
-        );
-        tmwZones.push(
-          mkTmw('TMW_W4', 'پنجره زمانی موج ۴ (تناوب با ۲)', refCandleIdx, dt2 * 1.0, Math.max(dt2 * 1.618, dt3 * 0.618), '1.000–1.618 Δt(W2)', 86, true)
-        );
+        przZones.push(buildW4Prz(true));
       }
     } else if (n === 5) {
       if (isTriangle) {
         nextDirection = scenario.direction;
         lastLegPatternPhaseFa = 'پایان موج D مثلث و آغاز موج E نهایی';
-        expectedNextMoveFa = `${parentPrefix}تکمیل ضلع آخر مثلث (موج E) پیش از حرکت پرتابی`;
+        expectedNextMoveFa = `${parentPrefix}تکمیل ضلع آخر مثلث (موج E) در PRZ ۶۱.۸٪–۷۸.۶٪ پیش از حرکت پرتابی`;
         const len4 = Math.max(1, Math.abs(v4.price - v3.price));
         const e618 = v4.price + sign * len4 * 0.618;
         const e786 = v4.price + sign * len4 * 0.786;
@@ -1195,15 +1251,28 @@ export class TargetProjectionEngine {
           mkTarget('T_TRI_E618', 'هدف ۶۱.۸٪ موج E', '0.618 Ret D', e618, 'نقطه پایان متداول مثلث همگرا', 'بازگشت ۰.۶۱۸ گام C←D', 'موج E مثلث', 'FIB_RETRACEMENT', 88),
           mkTarget('T_TRI_E786', 'هدف ۷۸.۶٪ موج E', '0.786 Ret D', e786, 'آستانه خط روند مثلث', 'بازگشت ۰.۷۸۶ گام C←D', 'موج E مثلث', 'FIB_RETRACEMENT', 79)
         );
-        przZones.push(mkPrz('PRZ_TRI_E', 'PRZ پایان موج E', e618, e786, ['0.618 Ret D', '0.786 Ret D'], nextDirection, 86, true));
-        tmwZones.push(mkTmw('TMW_TRI_E', 'پنجره زمانی موج E', refCandleIdx, dt3 * 0.5, dt3 * 0.85, '0.500–0.850 Δt(D)', 83, true));
+        przZones.push(
+          mkPrz(
+            'PRZ_TRI_E',
+            'PRZ پایان موج E مثلث',
+            e618,
+            e786,
+            ['0.618 Ret D', '0.786 Ret D'],
+            scenario.direction,
+            86,
+            true,
+            activeStartIdx,
+            activeEndIdx,
+            'E'
+          )
+        );
       } else {
         nextDirection = scenario.direction;
         const span03 = Math.max(1, Math.abs(v3.price - v0.price));
 
         if (isTerminal) {
           lastLegPatternPhaseFa = 'آماده تکمیل موج ۵ کوتاه‌شده (ترمینال TMV)';
-          expectedNextMoveFa = `${parentPrefix}موج ۵ ترمینال باید کوتاه‌تر از موج ۳ (${Math.round(len3).toLocaleString()}) بماند (قاعده N5 TMV)`;
+          expectedNextMoveFa = `${parentPrefix}موج ۵ ترمینال از PRZ موج ۴ به‌سمت هدف TMV کوتاه‌تر از موج ۳ (${Math.round(len3).toLocaleString()}) حرکت می‌کند`;
 
           const w5_618 = v4.price + sign * Math.min(len1 * 0.618, len3 * 0.88);
           const w5_tmv = v4.price + sign * Math.min(span03 * 0.382, len3 * 0.92);
@@ -1214,7 +1283,6 @@ export class TargetProjectionEngine {
             mkTarget('T_W5_TMV_0382', 'تلاقی TMV (۰.۳۸۲ از کل ۰←۳)', '0.382 (0→3) TMV', w5_tmv, 'ناحیه تلاقی اصلی برای کوتاه‌شدگی ترمینال', 'نسبت ۰.۳۸۲ بازه ۰←۳ از کف ۴', 'موج ۵ (TMV)', 'TMV', 87),
             mkTarget('T_W5_TMV_CAP', 'سقف مجاز موج ۵ ترمینال', '0.92 L3 Cap', w5_cap, 'حداکثر پیشروی مجاز پیش از نقض کوتاه‌شدگی', 'محدودیت L5 < L3 در ترمینال', 'مرز سقف TMV', 'WAVE_EQUALITY', 72)
           );
-          przZones.push(mkPrz('PRZ_W5_TMV', 'PRZ ناحیه TMV موج ۵', w5_618, w5_tmv, ['0.618 W1', '0.382 (0→3)'], nextDirection, 91, true));
         } else if (isAntiTerminal) {
           lastLegPatternPhaseFa = 'آماده موج ۵ ممتد و کشیده (آنتی‌نرمینال)';
           expectedNextMoveFa = `${parentPrefix}انتظار کشیدگی موج ۵ بزرگ‌تر از طول موج ۳ در ساختار آنتی‌ترمینال`;
@@ -1228,10 +1296,9 @@ export class TargetProjectionEngine {
             mkTarget('T_W5_AT_1272', 'هدف ۱.۲۷۲ موج ۳ برای موج ۵', '1.272 W3', w5_ext1272, 'نسبت میانی پیشروی آنتی‌ترمینال (L5 > L3)', 'ضریب ۱.۲۷۲ موج ۳ از کف ۴', 'موج ۵ ممتد', 'FIB_EXTENSION', 89),
             mkTarget('T_W5_AT_1618', 'کشیدگی ۱.۶۱۸ موج ۱', '1.618 W1', w5_ext1618, 'تارگت اکستنشن نهایی آنتی‌ترمینال', 'اکستنشن ۱.۶۱۸ گام ۱ از کف ۴', 'موج ۵ نهایی', 'FIB_EXTENSION', 78)
           );
-          przZones.push(mkPrz('PRZ_W5_AT', 'PRZ کشیدگی موج ۵', w5_ext100, w5_ext1272, ['1.000 (0→3)', '1.272 W3'], nextDirection, 88, true));
         } else {
           lastLegPatternPhaseFa = `آماده تکمیل گام آخر: موج ۵ (${patternNameFa})`;
-          expectedNextMoveFa = `${parentPrefix}پیشروی موج ۵ از کف ۴ به‌سمت تلاقی برابری با موج ۱ و ۰.۶۱۸ مسیر ۰←۳`;
+          expectedNextMoveFa = `${parentPrefix}پیشروی موج ۵ از PRZ موج ۴ به‌سمت هدف TMV و برابری با موج ۱`;
 
           const w5_618w1 = v4.price + sign * len1 * 0.618;
           const w5_eq1 = v4.price + sign * len1 * 1.0;
@@ -1242,13 +1309,11 @@ export class TargetProjectionEngine {
             mkTarget('T_W5_EQ1', 'هدف کلاسیک برابری موج ۵ و ۱', '1.000 Eq W1', w5_eq1, 'متداول‌ترین هدف موج ۵ در سیکل ایده‌آل (C08)', 'برابری کامل گام ۴←۵ با ۰←۱', 'موج ۵ (ایده‌آل)', 'WAVE_EQUALITY', 93),
             mkTarget('T_W5_0618_03', 'تارگت تلاقی طلایی ۰.۶۱۸ (۰←۳)', '0.618 (0→3)', w5_618_03, 'نسبت طلایی موج ۵ بر مبنای کل پیشروی ۱ تا ۳', 'ضریب ۰.۶۱۸ فاصله ۰ تا ۳ از کف ۴', 'موج ۵ (تلاقی)', 'FIB_EXTENSION', 89)
           );
-          przZones.push(mkPrz('PRZ_W5', 'PRZ تلاقی موج ۵', w5_eq1, w5_618_03, ['1.000 Eq W1', '0.618 (0→3)'], nextDirection, 92, true));
         }
-        tmwZones.push(mkTmw('TMW_W5', 'پنجره زمانی تکمیل موج ۵', refCandleIdx, dt1 * 0.618, dt1 * 1.272, '0.618–1.272 Δt(W1)', 87, true));
+        przZones.push(buildW4Prz(true));
       }
     } else {
       const v5 = verts[5];
-      const dt45 = Math.max(3, Math.abs(lastV.candleIndex - v4.candleIndex));
       const isDevelopingLastLeg = !lastV.isConfirmed;
 
       if (isTriangle) {
@@ -1258,18 +1323,34 @@ export class TargetProjectionEngine {
         const thrust100 = lastV.price + sign * widest * 1.0;
 
         lastLegPatternPhaseFa = `پایان ضلع آخر مثلث (${lastLegLabel})`;
-        expectedNextMoveFa = `${parentPrefix}حرکت پرتابی پرشتاب (Triangle Thrust) هم‌راستا با روند پس از شکست ضلع E`;
+        expectedNextMoveFa = `${parentPrefix}حرکت پرتابی پرشتاب (Triangle Thrust) هم‌راستا با روند پس از PRZ پایان ضلع E`;
 
         targets.push(
           mkTarget('T_THRUST_786', 'تارگت پرتابی ۷۸.۶٪ مثلث', '0.786 Thrust', thrust786, 'هدف اولیه پرتاب پس از تکمیل موج E', 'ضریب ۷۸.۶٪ عریض‌ترین ضلع مثلث از E', 'پرتاب پس از E', 'FIB_EXTENSION', 85),
           mkTarget('T_THRUST_100', 'تارگت کامل ۱۰۰٪ مثلث', '1.000 Thrust', thrust100, 'هدف استاندارد پرتاب مثلث از نقطه شکست E', 'برابری با عریض‌ترین دهانه مثلث', 'پرتاب کامل', 'WAVE_EQUALITY', 91)
         );
-        przZones.push(mkPrz('PRZ_THRUST', 'PRZ هدف پرتاب مثلث', thrust786, thrust100, ['0.786 Thrust', '1.000 Thrust'], nextDirection, 89, true));
-        tmwZones.push(mkTmw('TMW_THRUST', 'پنجره زمانی پرتاب مثلث', refCandleIdx, totalDt * 0.25, totalDt * 0.45, '0.25–0.45 Δt(Tri)', 84, true));
+        const len4 = Math.max(1, Math.abs(v4.price - v3.price));
+        const e618 = v4.price + sign * len4 * 0.618;
+        const e786 = v4.price + sign * len4 * 0.786;
+        przZones.push(
+          mkPrz(
+            'PRZ_TRI_E',
+            'PRZ پایان موج E مثلث',
+            e618,
+            e786,
+            ['0.618 Ret D', '0.786 Ret D'],
+            scenario.direction,
+            88,
+            true,
+            activeStartIdx,
+            activeEndIdx,
+            'E'
+          )
+        );
       } else if (isTerminal) {
         nextDirection = oppositeDir;
         lastLegPatternPhaseFa = `گام آخر ترمینال (${lastLegLabel})`;
-        expectedNextMoveFa = `${parentPrefix}پس از اتمام ترمینال، بازگشت سریع اصلاحی ابتدا به کف موج ۴ (${v4.price.toLocaleString()}) و سپس ۵۰٪ سیکل محتمل است`;
+        expectedNextMoveFa = `${parentPrefix}پس از اتمام ترمینال، بازگشت سریع اصلاحی ابتدا به کف موج ۴ (${v4.price.toLocaleString()}) و PRZ 38.2%–50% سیکل محتمل است`;
 
         if (isDevelopingLastLeg) {
           const span03 = Math.max(1, Math.abs(v3.price - v0.price));
@@ -1286,14 +1367,28 @@ export class TargetProjectionEngine {
           mkTarget('T_TERM_50', 'اصلاح ۵۰٪ کل ساختار ترمینال', '0.500 Ret (0→5)', r500Total, 'هدف میانی اصلاح متعاقب ترمینال', 'بازگشت ۵۰٪ کل بازه ۰ تا ۵', 'تداوم اصلاح A-B-C', 'FIB_RETRACEMENT', 82),
           mkTarget('T_TERM_W2', 'تارگت ثانویه محدوده موج ۲', 'Wave 2 Base', v2.price, 'در ترمینال‌های عمیق، اصلاح تا مبدأ موج ۳ امتداد می‌یابد', 'حمایت/مقاومت ساختاری انتهای موج ۲', 'تکمیل اصلاح کلان', 'FIB_RETRACEMENT', 68)
         );
-        przZones.push(mkPrz('PRZ_TERM_REV', 'PRZ بازگشت پس از ترمینال', v4.price, r382Total, ['Wave 4 Base', '0.382 Ret (0→5)'], nextDirection, 91, true));
-        tmwZones.push(mkTmw('TMW_TERM_REV', 'پنجره زمانی بازگشت ترمینال', refCandleIdx, Math.max(3, dt45 * 0.382), Math.max(6, dt45 * 0.786), '0.382–0.786 Δt(W5)', 88, true));
+        const snapClose = Math.abs(v4.price - r382Total) <= totalSpan * 0.22;
+        przZones.push(
+          mkPrz(
+            'PRZ_TERM_REV',
+            'PRZ بازگشت پس از ترمینال',
+            snapClose ? v4.price : r382Total,
+            snapClose ? r382Total : r500Total,
+            snapClose ? ['Wave 4 Base', '0.382 Ret (0→5)'] : ['0.382 Ret (0→5)', '0.500 Ret (0→5)'],
+            nextDirection,
+            91,
+            true,
+            activeStartIdx,
+            activeEndIdx,
+            'W5→A'
+          )
+        );
       } else {
         nextDirection = oppositeDir;
         lastLegPatternPhaseFa = `${isDevelopingLastLeg ? 'گام آخر در حال تکمیل' : 'انتهای گام آخر'}: ${lastLegLabel} (${patternNameFa})`;
         expectedNextMoveFa = `${parentPrefix}طبق قانون C17 (۵→A)، ${
-          isDevelopingLastLeg ? 'تکمیل محدوده پایانی گام آخر و سپس ' : ''
-        }آغاز موج اصلاحی A به‌سمت ناحیه PRZ موج ۴ و ۰.۳۸۲ سیکل`;
+          isDevelopingLastLeg ? 'پس از پایان گام ۵ (در محدوده TMV) ' : ''
+        }آغاز موج اصلاحی A به‌سمت ناحیه PRZ 38.2%–50.0% سیکل (تراز موج ۴)`;
 
         if (isDevelopingLastLeg) {
           const span03 = Math.max(1, Math.abs(v3.price - v0.price));
@@ -1301,10 +1396,7 @@ export class TargetProjectionEngine {
             ? v4.price + sign * len3 * 1.272
             : v4.price + sign * Math.max(len1, span03 * 0.618);
           targets.push(
-            mkTarget('T_CUR_W5', `تارگت تکمیل گام ${lastV.label}`, isAntiTerminal ? '1.272 W3' : '0.618 (0→3)', w5Proj, 'هدف نهایی پیشروی پیش از ورود به چرخه اصلاحی A-B-C', `ادامه گام آخر ${lastLegLabel} تا نقطه تعادل`, `تکمیل ${lastV.label}`, 'FIB_EXTENSION', 84)
-          );
-          przZones.push(
-            mkPrz('PRZ_CUR_W5', `PRZ تکمیل ${lastV.label}`, lastV.price, w5Proj, ['Last Leg Target', isAntiTerminal ? '1.272 W3' : '0.618 (0→3)'], scenario.direction, 83, false)
+            mkTarget('T_CUR_W5', `تارگت تکمیل گام ${lastV.label} (TMV)`, isAntiTerminal ? '1.272 W3' : '0.618 (0→3)', w5Proj, 'هدف نهایی پیشروی پیش از ورود به چرخه اصلاحی A-B-C', `ادامه گام آخر ${lastLegLabel} تا هدف TMV`, `تکمیل ${lastV.label}`, 'FIB_EXTENSION', 84)
           );
         }
 
@@ -1315,15 +1407,24 @@ export class TargetProjectionEngine {
 
         targets.push(
           mkTarget('T_A_236', 'هدف نخست موج A اصلاحی', '0.236 Ret (0→5)', r236Total, 'نخستین سطح واکنش در اصلاح پس از اتمام سیکل ۵ موجی', 'بازگشت ۲۳.۶٪ کل دامنه ۰ تا ۵', 'موج A (اولیه)', 'FIB_RETRACEMENT', 86),
-          mkTarget('T_A_PRZ', 'هدف اصلی موج A (تلاقی با موج ۴)', '0.382 Ret / W4', revW4Area, 'طبق اصول الیوت موج A معمولاً تا تراز ۳۸.۲٪ یا محدوده موج ۴ قبلی اصلاح می‌کند', 'هم‌پوشانی فیبو ۰.۳۸۲ کل سیکل با کف موج ۴', 'موج A (اصلی)', 'FIB_RETRACEMENT', 92),
-          mkTarget('T_ABC_500', 'هدف اصلاح کامل A-B-C (۵۰٪)', '0.500 Ret (0→5)', r500Total, 'ناحیه تعادل عمیق‌تر در صورت تشکیل زیگزاگ اصلاحی قدرتمند', 'بازگشت ۵۰٪ کل سیکل صعودی/نزولی', 'موج C اصلاحی', 'FIB_RETRACEMENT', 79)
+          mkTarget('T_A_PRZ', 'هدف اصلی موج A (PRZ 38.2%)', '0.382 Ret (0→5)', revW4Area, 'طبق اصول الیوت موج A معمولاً تا تراز ۳۸.۲٪ کل سیکل یا محدوده موج ۴ قبلی اصلاح می‌کند', 'تراز رتریسمنت ۰.۳۸۲ کل سیکل ۰→۵', 'موج A (اصلی)', 'FIB_RETRACEMENT', 92),
+          mkTarget('T_ABC_500', 'هدف اصلاح ۵۰٪ (0→5)', '0.500 Ret (0→5)', r500Total, 'حد پایینی PRZ بازگشت موج A / شروع اصلاح', 'بازگشت ۵۰٪ کل سیکل صعودی/نزولی', 'موج A / C اصلاحی', 'FIB_RETRACEMENT', 84)
         );
-        przZones.push(
-          mkPrz('PRZ_WAVE_A', 'PRZ بازگشت موج A (تلاقی ۰.۳۸۲ و موج ۴)', Math.min(v4.price, r382Total), Math.max(v4.price, r382Total), ['Wave 4 Territory', '0.382 Ret (0→5)'], nextDirection, 91, true)
+
+        const przWaveA = mkPrz(
+          'PRZ_WAVE_A',
+          'PRZ بازگشت موج A (۳۸.۲٪–۵۰٪ کل سیکل)',
+          revW4Area,
+          r500Total,
+          ['0.382 Ret (0→5)', '0.500 Ret (0→5)'],
+          nextDirection,
+          91,
+          true,
+          activeStartIdx,
+          activeEndIdx,
+          '5→A'
         );
-        tmwZones.push(
-          mkTmw('TMW_WAVE_A', 'پنجره زمانی تکمیل موج A', refCandleIdx, Math.max(4, totalDt * 0.18), Math.max(8, totalDt * 0.34), '0.18–0.34 Δt(0→5)', 88, true)
-        );
+        przZones.push(przWaveA);
       }
     }
 
@@ -1332,13 +1433,73 @@ export class TargetProjectionEngine {
       overlapReport,
       projectionPairNoteFa,
       forbidWave5RetracementFa,
-      wave3ExtensionEffectFa
+      wave3ExtensionEffectFa,
+      tmvPrimeApproxIdealWarningFa
     } = this.computeTmvTiersAndOverlap(scenario, przZones);
 
     const retracementTable =
       verts.length >= 2
         ? this.getRetracementImportanceLevels(verts[0].price, verts[1].price, scenario.direction)
         : undefined;
+
+    // Build Horizontal TMV Zones strictly anchored to the active Target prices from the rules/projection engine
+    const tmvZones: TmvZone[] = [];
+    const activeForwardTargets = targets.filter(t => !t.isInvalidation);
+    const ruleEngineTargets = (scenario.targets || []).filter(t => !t.isInvalidation);
+    const mergedTargetPool = activeForwardTargets.length > 0 ? activeForwardTargets : ruleEngineTargets;
+
+    if (mergedTargetPool.length > 0 && scenario.patternType !== 'ENDING_DIAGONAL' && scenario.patternType !== 'ANTI_DIAGONAL') {
+      const sortedByConf = [...mergedTargetPool].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+      const sortedByPrice = [...mergedTargetPool].sort((a, b) => a.price - b.price);
+
+      const coreCluster = sortedByPrice.filter(t => (t.confidence ?? 80) >= 65);
+      const bandPool = coreCluster.length >= 2 ? coreCluster : sortedByPrice;
+
+      const bandMin = bandPool[0].price;
+      const bandMax = bandPool[bandPool.length - 1].price;
+      let lowPrice = Math.max(0.1, roundPrice(bandMin));
+      let highPrice = Math.max(lowPrice + 0.1, roundPrice(bandMax));
+
+      if (Math.abs(highPrice - lowPrice) / Math.max(1, bandMin) < 0.012) {
+        const pad = Math.max(0.5, bandMin * 0.018);
+        lowPrice = Math.max(0.1, roundPrice(bandMin - pad));
+        highPrice = roundPrice(bandMin + pad);
+      }
+
+      const activeWaveSpan = Math.max(2, Math.abs(lastV.candleIndex - prevV.candleIndex));
+      const tmvLookback = Math.max(2, Math.min(Math.round(activeWaveSpan * 0.35), Math.floor(maxCandleIdx * 0.2)));
+      const tmvStartCandle = Math.max(0, Math.min(maxCandleIdx - 3, lastV.candleIndex - tmvLookback));
+      const tmvEndCandle = maxCandleIdx;
+
+      const idealPrice = sortedByConf[0].price;
+      const primePrice = sortedByPrice[0].price;
+      const short0618Price = sortedByConf[Math.min(1, sortedByConf.length - 1)].price;
+      const alternate1618Price = sortedByPrice[sortedByPrice.length - 1].price;
+      const basisPairLabel = (n === 3 || n === 5) && !isTriangle && tmvSummary ? tmvSummary.basisPairLabel : lastLegLabel;
+
+      tmvZones.push({
+        id: `TMV_HORIZ_${scenario.id}`,
+        labelFa: `ناحیه افقی اهداف TMV (${basisPairLabel})`,
+        lowPrice,
+        highPrice,
+        primePrice,
+        short0618Price,
+        ideal100Price: idealPrice,
+        alternate1618Price,
+        direction: nextDirection,
+        basisPairLabel,
+        isPrimary: true,
+        anchorCandleIndex: lastV.candleIndex,
+        startCandleIndex: tmvStartCandle,
+        endCandleIndex: tmvEndCandle,
+        targetPrices: bandPool.map(t => ({
+          id: t.id,
+          label: t.label,
+          ratioLabel: t.ratioLabel,
+          price: t.price
+        }))
+      });
+    }
 
     return {
       scenarioId: scenario.id,
@@ -1349,7 +1510,7 @@ export class TargetProjectionEngine {
       invalidationPrice,
       targets,
       przZones,
-      tmwZones,
+      tmvZones,
       completedStructure,
       extensionLayers,
       tmvSummary,
@@ -1357,7 +1518,8 @@ export class TargetProjectionEngine {
       retracementTable,
       projectionPairNoteFa,
       forbidWave5RetracementFa,
-      wave3ExtensionEffectFa
+      wave3ExtensionEffectFa,
+      tmvPrimeApproxIdealWarningFa
     };
   }
 }

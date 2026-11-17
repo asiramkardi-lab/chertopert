@@ -34,7 +34,9 @@ import {
   ChevronLeft,
   CornerDownLeft,
   ShieldCheck,
-  Activity
+  Activity,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
 
 export type ChartInteractionMode = 'EDIT' | 'ADD_VERTEX' | 'DRAW_SCRATCH' | 'PICK_BOTTOM';
@@ -75,8 +77,8 @@ interface ChartStudioProps {
   onValidateActiveScenario?: (scenarioId: string, summary: ValidationSummary) => void;
   showPRZ?: boolean;
   onToggleShowPRZ?: () => void;
-  showTMW?: boolean;
-  onToggleShowTMW?: () => void;
+  showTMV?: boolean;
+  onToggleShowTMV?: () => void;
   hideZoneControls?: boolean;
   highlightedLegIndex?: number | null;
 }
@@ -112,8 +114,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   onValidateActiveScenario,
   showPRZ: controlledShowPRZ,
   onToggleShowPRZ,
-  showTMW: controlledShowTMW,
-  onToggleShowTMW,
+  showTMV: controlledShowTMV,
+  onToggleShowTMV,
   hideZoneControls = false,
   highlightedLegIndex = null
 }) => {
@@ -133,7 +135,11 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [showFibLayers, setShowFibLayers] = useState<boolean>(true);
   const [hoveredExtLayerId, setHoveredExtLayerId] = useState<string | null>(null);
   const [internalShowPRZ, setInternalShowPRZ] = useState<boolean>(true);
-  const [internalShowTMW, setInternalShowTMW] = useState<boolean>(true);
+  const [internalShowTMV, setInternalShowTMV] = useState<boolean>(true);
+  const [tmvSpanMode, setTmvSpanMode] = useState<'COMPACT' | 'ANALYSIS' | 'FULL'>('ANALYSIS');
+  const [tmvCustomRatio, setTmvCustomRatio] = useState<number | null>(null);
+  const [draggingTmvEdge, setDraggingTmvEdge] = useState<boolean>(false);
+  const [priceZoom, setPriceZoom] = useState<number>(1);
   const [showVolume, setShowVolume] = useState<boolean>(true);
   const [showTrendStrength, setShowTrendStrength] = useState<boolean>(true);
   const [snapToCandleExtreme, setSnapToCandleExtreme] = useState<boolean>(true);
@@ -158,15 +164,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const suppressNextViolationToastRef = useRef<boolean>(false);
 
   const effectiveShowPRZ = !hideZoneControls && (controlledShowPRZ ?? internalShowPRZ);
-  const effectiveShowTMW = !hideZoneControls && (controlledShowTMW ?? internalShowTMW);
+  const effectiveShowTMV = !hideZoneControls && (controlledShowTMV ?? internalShowTMV);
   const effectiveShowFibLayers = !hideZoneControls && showFibLayers;
   const togglePRZ = () => {
     if (onToggleShowPRZ) onToggleShowPRZ();
     else setInternalShowPRZ(p => !p);
   };
-  const toggleTMW = () => {
-    if (onToggleShowTMW) onToggleShowTMW();
-    else setInternalShowTMW(p => !p);
+  const toggleTMV = () => {
+    if (onToggleShowTMV) onToggleShowTMV();
+    else setInternalShowTMV(p => !p);
   };
 
   const diagnosticOpen = Boolean(diagnosticOpenById[activeScenario.id]);
@@ -176,33 +182,38 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [dimensions, setDimensions] = useState({ width: 900, height: 600 });
 
   useEffect(() => {
-    const updateSize = () => {
-      if (containerRef.current) {
-        const { clientWidth, clientHeight } = containerRef.current;
-        if (clientWidth > 0 && clientHeight > 0) {
-          setDimensions({
-            width: Math.max(480, clientWidth),
-            height: Math.max(400, clientHeight)
-          });
-        }
+    let rafId = 0;
+    const measure = () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const nextW = Math.max(360, Math.round(rect.width || containerRef.current.clientWidth));
+      const nextH = Math.max(300, Math.round(rect.height || containerRef.current.clientHeight));
+      if (nextW > 0 && nextH > 0) {
+        setDimensions(prev => (prev.width === nextW && prev.height === nextH ? prev : { width: nextW, height: nextH }));
       }
     };
-    updateSize();
+    const updateSize = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(measure);
+    };
+    measure();
     const ro = new ResizeObserver(updateSize);
     if (containerRef.current) ro.observe(containerRef.current);
     window.addEventListener('resize', updateSize);
     return () => {
+      cancelAnimationFrame(rafId);
       ro.disconnect();
       window.removeEventListener('resize', updateSize);
     };
-  }, []);
+  }, [candles.length > 0, showVolume]);
 
-  // Reset selected vertex popover & hovered leg when active scenario, timeframe, or mode changes
+  // Reset selected vertex popover, hovered leg & custom TMV width when active scenario, timeframe, or mode changes
   useEffect(() => {
     setSelectedVertexIndex(null);
     setHoveredLeg(null);
     setHoveredExtLayerId(null);
     setDrillNotice(null);
+    setTmvCustomRatio(null);
     dragMovedRef.current = false;
     setDragMoved(false);
   }, [activeScenario.id, interactionMode, timeframe]);
@@ -496,7 +507,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const padding = { top: 48, right: 86, bottom: showVolume ? 74 : 40, left: 22 };
   const volumeHeight = showVolume ? 58 : 0;
 
-  // Dynamic completed-structure Fibonacci extensions, PRZ, TMW & Targets via TargetProjectionEngine
+  // Dynamic completed-structure Fibonacci extensions, PRZ, TMV & Targets via TargetProjectionEngine
   const projectionReport = useMemo(() => {
     if (hideZoneControls || activeScenario.vertices.length < 2) return null;
     return TargetProjectionEngine.projectScenario(activeScenario, candles, parentRole, parentWaveLabel);
@@ -507,16 +518,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     return TrendStrengthIndicator.analyzeScenario(activeScenario, candles);
   }, [activeScenario, candles]);
 
-  // Extra future candle slots on the right edge when TMW time-window extends beyond last candle
-  const maxPlotIndex = useMemo(() => {
-    const baseMax = Math.max(1, candles.length - 1);
-    if (!effectiveShowTMW || !projectionReport || projectionReport.tmwZones.length === 0) {
-      return baseMax;
-    }
-    const maxTmwEnd = Math.max(...projectionReport.tmwZones.map(z => z.endCandleIndex));
-    const tail = Math.min(28, Math.max(0, maxTmwEnd - (candles.length - 1) + 2));
-    return baseMax + tail;
-  }, [candles.length, effectiveShowTMW, projectionReport]);
+  const maxPlotIndex = Math.max(1, candles.length - 1);
 
   // Price bounds including overlays, bounded PRZ/targets, and absolute bottom
   const { minPrice, maxPrice, priceRange, maxVolume } = useMemo(() => {
@@ -534,8 +536,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     let min = candleMin;
     let max = candleMax;
     const candleSpan = Math.max(1, candleMax - candleMin);
-    const guardLow = candleMin - candleSpan * 0.45;
-    const guardHigh = candleMax + candleSpan * 0.45;
+    const guardLow = candleMin - candleSpan * 0.55;
+    const guardHigh = candleMax + candleSpan * 0.55;
+    const przGuardLow = candleMin - candleSpan * 0.75;
+    const przGuardHigh = candleMax + candleSpan * 0.75;
 
     activeScenario.vertices.forEach(v => {
       if (v.price < min) min = v.price;
@@ -560,10 +564,25 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     }
     if (effectiveShowPRZ && projectionReport) {
       projectionReport.przZones.forEach(z => {
-        if (z.lowPrice >= guardLow && z.highPrice <= guardHigh) {
-          if (z.lowPrice < min) min = z.lowPrice;
-          if (z.highPrice > max) max = z.highPrice;
+        if (z.highPrice >= przGuardLow && z.lowPrice <= przGuardHigh) {
+          const clampedLow = Math.max(przGuardLow, z.lowPrice);
+          const clampedHigh = Math.min(przGuardHigh, z.highPrice);
+          if (clampedLow < min) min = clampedLow;
+          if (clampedHigh > max) max = clampedHigh;
         }
+      });
+    }
+    if (effectiveShowTMV && projectionReport) {
+      const tmvGuardLow = candleMin - candleSpan * 0.95;
+      const tmvGuardHigh = candleMax + candleSpan * 0.95;
+      projectionReport.tmvZones.forEach(z => {
+        const prices = [z.lowPrice, z.highPrice, ...(z.targetPrices?.map(tp => tp.price) || [])];
+        prices.forEach(p => {
+          if (p >= tmvGuardLow && p <= tmvGuardHigh) {
+            if (p < min) min = p;
+            if (p > max) max = p;
+          }
+        });
       });
     }
     if (absoluteBottom) {
@@ -571,14 +590,18 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       if (absoluteBottom.price > max) max = absoluteBottom.price;
     }
 
-    const range = max - min || 1;
+    const baseRange = Math.max(1, max - min);
+    const mid = (max + min) / 2;
+    const zoomedRange = baseRange / Math.max(0.5, Math.min(2.5, priceZoom));
+    const zoomedMin = mid - zoomedRange / 2;
+    const zoomedMax = mid + zoomedRange / 2;
     return {
-      minPrice: min - range * 0.06,
-      maxPrice: max + range * 0.09,
-      priceRange: range * 1.15,
+      minPrice: Math.max(0, zoomedMin - zoomedRange * 0.06),
+      maxPrice: zoomedMax + zoomedRange * 0.09,
+      priceRange: zoomedRange * 1.15,
       maxVolume: maxVol || 1
     };
-  }, [candles, activeScenario, showTargets, hideZoneControls, effectiveShowPRZ, effectiveShowFibLayers, projectionReport, absoluteBottom]);
+  }, [candles, activeScenario, showTargets, hideZoneControls, effectiveShowPRZ, effectiveShowTMV, effectiveShowFibLayers, projectionReport, absoluteBottom, priceZoom]);
 
   const getX = (index: number) => {
     const usableWidth = width - padding.left - padding.right;
@@ -671,6 +694,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     const { mouseX, mouseY } = getSvgCoords(e);
     setMousePos({ x: mouseX, y: mouseY });
 
+    if (draggingTmvEdge) {
+      const endX = width - padding.right;
+      const plotW = Math.max(1, endX - padding.left);
+      const clampedX = Math.max(padding.left, Math.min(endX - 72, mouseX));
+      const ratio = Math.max(0.12, Math.min(1, (endX - clampedX) / plotW));
+      setTmvCustomRatio(ratio);
+      return;
+    }
+
     const dist = dragStartPosRef.current
       ? Math.hypot(e.clientX - dragStartPosRef.current.x, e.clientY - dragStartPosRef.current.y)
       : 0;
@@ -716,6 +748,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     }
     setDraggingVertexIndex(null);
     setDraggingBottom(false);
+    setDraggingTmvEdge(false);
     dragStartPosRef.current = null;
     frozenBoundsRef.current = null;
   };
@@ -726,7 +759,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   mouseUpRef.current = handleMouseUp;
 
   useEffect(() => {
-    if (draggingVertexIndex === null && !draggingBottom) return;
+    if (draggingVertexIndex === null && !draggingBottom && !draggingTmvEdge) return;
     const onWinMove = (ev: MouseEvent) => mouseMoveRef.current(ev);
     const onWinUp = () => mouseUpRef.current();
     window.addEventListener('mousemove', onWinMove);
@@ -735,7 +768,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       window.removeEventListener('mousemove', onWinMove);
       window.removeEventListener('mouseup', onWinUp);
     };
-  }, [draggingVertexIndex, draggingBottom]);
+  }, [draggingVertexIndex, draggingBottom, draggingTmvEdge]);
 
   const handleSvgClick = (e: React.MouseEvent) => {
     if (!containerRef.current) return;
@@ -1040,51 +1073,114 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </button>
 
           {!hideZoneControls && (
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
-              <button
-                onClick={togglePRZ}
-                title="نمایش یا مخفی کردن ناحیه پتانسیل بازگشت قیمتی (PRZ)"
-                className={`px-2 py-1 text-[11px] font-mono font-bold rounded-md transition-colors ${
-                  effectiveShowPRZ
-                    ? 'bg-amber-500/20 text-amber-300'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 shrink-0">
+                <button
+                  onClick={togglePRZ}
+                  title="نمایش یا مخفی کردن مستطیل افقی پتانسیل بازگشت قیمتی (PRZ)"
+                  className={`px-2 py-1 text-[11px] font-mono font-bold rounded-md whitespace-nowrap transition-colors ${
+                    effectiveShowPRZ
+                      ? 'bg-amber-500/20 text-amber-300'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  PRZ
+                </button>
+                <button
+                  onClick={toggleTMV}
+                  title="نمایش یا مخفی کردن نوارهای افقی اهداف (TMV)"
+                  className={`px-2 py-1 text-[11px] font-mono font-bold rounded-md whitespace-nowrap transition-colors ${
+                    effectiveShowTMV
+                      ? 'bg-sky-500/20 text-sky-300'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  TMV
+                </button>
+                <button
+                  onClick={() => setShowFibLayers(prev => !prev)}
+                  title="نمایش یا مخفی کردن لایه‌های افقی اکستنشن فیبوناچی بر اساس آخرین ساختار تکمیل‌شده"
+                  className={`px-2 py-1 text-[11px] rounded-md whitespace-nowrap transition-colors ${
+                    effectiveShowFibLayers
+                      ? 'bg-emerald-500/20 text-emerald-200 font-semibold'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  لایه‌های فیبو
+                </button>
+                <button
+                  onClick={() => setShowTargets(!showTargets)}
+                  title="نمایش یا مخفی کردن خطوط تارگت و سطح ابطال"
+                  className={`px-2 py-1 text-[11px] rounded-md whitespace-nowrap transition-colors ${
+                    showTargets
+                      ? 'bg-indigo-500/25 text-indigo-200 font-semibold'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  اهداف
+                </button>
+              </div>
+
+              {effectiveShowTMV && (
+                <div
+                  className="flex items-center bg-slate-950 border border-sky-500/25 rounded-lg p-0.5 shrink-0"
+                  title="تنظیم عرض افقی نوار TMV متناسب با بازه زمانی تحلیل (یا با کشیدن لبه چپ نوار روی چارت)"
+                >
+                  <span className="px-1.5 text-[10px] text-sky-300/80 whitespace-nowrap">عرض TMV:</span>
+                  {(
+                    [
+                      { id: 'COMPACT', label: 'کوتاه' },
+                      { id: 'ANALYSIS', label: 'بازه تحلیل' },
+                      { id: 'FULL', label: 'کامل' }
+                    ] as const
+                  ).map(opt => {
+                    const isActive = tmvCustomRatio === null && tmvSpanMode === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => {
+                          setTmvCustomRatio(null);
+                          setTmvSpanMode(opt.id);
+                        }}
+                        className={`px-1.5 py-0.5 text-[10.5px] rounded-md whitespace-nowrap transition-colors ${
+                          isActive
+                            ? 'bg-sky-500/25 text-sky-200 font-semibold'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div
+                className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 shrink-0"
+                title="تغییر اسکیل قیمتی چارت و بروزرسانی PRZ/TMV"
               >
-                PRZ
-              </button>
-              <button
-                onClick={toggleTMW}
-                title="نمایش یا مخفی کردن پنجره زمانی بازگشت (TMW)"
-                className={`px-2 py-1 text-[11px] font-mono font-bold rounded-md transition-colors ${
-                  effectiveShowTMW
-                    ? 'bg-cyan-500/20 text-cyan-300'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                TMW
-              </button>
-              <button
-                onClick={() => setShowFibLayers(prev => !prev)}
-                title="نمایش یا مخفی کردن لایه‌های افقی اکستنشن فیبوناچی بر اساس آخرین ساختار تکمیل‌شده"
-                className={`px-2 py-1 text-[11px] rounded-md transition-colors ${
-                  effectiveShowFibLayers
-                    ? 'bg-emerald-500/20 text-emerald-200 font-semibold'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                لایه‌های فیبو
-              </button>
-              <button
-                onClick={() => setShowTargets(!showTargets)}
-                title="نمایش یا مخفی کردن خطوط تارگت و سطح ابطال"
-                className={`px-2 py-1 text-[11px] rounded-md transition-colors ${
-                  showTargets
-                    ? 'bg-indigo-500/25 text-indigo-200 font-semibold'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                اهداف
-              </button>
+                <button
+                  onClick={() => setPriceZoom(z => Math.max(0.6, Math.round((z - 0.15) * 100) / 100))}
+                  className="p-1 text-slate-400 hover:text-white rounded-md transition-colors"
+                  title="بزرگ‌تر کردن دامنه قیمت (Zoom Out)"
+                >
+                  <ZoomOut className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => setPriceZoom(1)}
+                  className="px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-slate-300 hover:text-white whitespace-nowrap"
+                  title="بازنشانی اسکیل قیمتی به حالت استاندارد"
+                >
+                  {Math.round(priceZoom * 100)}%
+                </button>
+                <button
+                  onClick={() => setPriceZoom(z => Math.min(2.4, Math.round((z + 0.15) * 100) / 100))}
+                  className="p-1 text-slate-400 hover:text-white rounded-md transition-colors"
+                  title="تمرکز بیشتر روی اسکیل قیمتی (Zoom In)"
+                >
+                  <ZoomIn className="w-3 h-3" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -1236,7 +1332,9 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         ref={containerRef}
         onClick={handleSvgClick}
         className={`flex-1 w-full h-full min-h-[380px] relative overflow-hidden ${
-          draggingVertexIndex !== null || draggingBottom
+          draggingTmvEdge
+            ? 'cursor-ew-resize'
+            : draggingVertexIndex !== null || draggingBottom
             ? 'cursor-grabbing'
             : interactionMode === 'ADD_VERTEX' || interactionMode === 'DRAW_SCRATCH' || interactionMode === 'PICK_BOTTOM'
             ? 'cursor-crosshair'
@@ -1253,20 +1351,25 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
               <stop offset="100%" stopColor="#ef4444" stopOpacity="0.05" />
             </linearGradient>
-            <linearGradient id="tmwCorridorGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.16" />
-              <stop offset="50%" stopColor="#6366f1" stopOpacity="0.08" />
-              <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.14" />
-            </linearGradient>
             <linearGradient id="przBullGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.18" />
-              <stop offset="50%" stopColor="#10b981" stopOpacity="0.10" />
-              <stop offset="100%" stopColor="#10b981" stopOpacity="0.20" />
+              <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.18" />
+              <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.10" />
+              <stop offset="100%" stopColor="#fbbf24" stopOpacity="0.20" />
             </linearGradient>
             <linearGradient id="przBearGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.18" />
-              <stop offset="50%" stopColor="#f43f5e" stopOpacity="0.11" />
-              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.22" />
+              <stop offset="0%" stopColor="#fb923c" stopOpacity="0.18" />
+              <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.10" />
+              <stop offset="100%" stopColor="#fb923c" stopOpacity="0.20" />
+            </linearGradient>
+            <linearGradient id="tmvBullZoneGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.16" />
+              <stop offset="50%" stopColor="#6366f1" stopOpacity="0.11" />
+              <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.20" />
+            </linearGradient>
+            <linearGradient id="tmvBearZoneGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#a855f7" stopOpacity="0.16" />
+              <stop offset="50%" stopColor="#6366f1" stopOpacity="0.10" />
+              <stop offset="100%" stopColor="#ec4899" stopOpacity="0.18" />
             </linearGradient>
             <linearGradient id="fibLayerPrimary" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#10b981" stopOpacity="0.26" />
@@ -1442,94 +1545,6 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               );
             })}
 
-          {/* TMW Vertical Time Window Corridors & Future Projection Divider */}
-          {maxPlotIndex > candles.length - 1 && candles.length > 0 && (
-            <g pointerEvents="none">
-              <rect
-                x={getX(candles.length - 1)}
-                y={padding.top}
-                width={Math.max(0, width - padding.right - getX(candles.length - 1))}
-                height={Math.max(0, height - padding.top - padding.bottom - volumeHeight)}
-                fill="#020617"
-                fillOpacity="0.28"
-              />
-              <line
-                x1={getX(candles.length - 1)}
-                y1={padding.top}
-                x2={getX(candles.length - 1)}
-                y2={height - padding.bottom - volumeHeight}
-                stroke="#475569"
-                strokeWidth="1"
-                strokeDasharray="3 4"
-              />
-            </g>
-          )}
-
-          {effectiveShowTMW &&
-            projectionReport?.tmwZones.map(tmw => {
-              const xStart = Math.max(padding.left, getX(tmw.startCandleIndex));
-              const xEnd = Math.min(width - padding.right, getX(tmw.endCandleIndex));
-              const zoneW = Math.max(12, xEnd - xStart);
-              const plotHeight = Math.max(0, height - padding.top - padding.bottom - volumeHeight);
-              const cx = xStart + zoneW / 2;
-
-              return (
-                <g key={tmw.id} pointerEvents="none">
-                  <rect
-                    x={xStart}
-                    y={padding.top}
-                    width={zoneW}
-                    height={plotHeight}
-                    fill="url(#tmwCorridorGrad)"
-                  />
-                  <line
-                    x1={xStart}
-                    y1={padding.top}
-                    x2={xStart}
-                    y2={padding.top + plotHeight}
-                    stroke="#22d3ee"
-                    strokeOpacity="0.55"
-                    strokeWidth="1.2"
-                    strokeDasharray="4 4"
-                  />
-                  <line
-                    x1={xStart + zoneW}
-                    y1={padding.top}
-                    x2={xStart + zoneW}
-                    y2={padding.top + plotHeight}
-                    stroke="#22d3ee"
-                    strokeOpacity="0.55"
-                    strokeWidth="1.2"
-                    strokeDasharray="4 4"
-                  />
-                  {/* Crisp unboxed top time label */}
-                  <rect
-                    x={Math.max(padding.left + 2, Math.min(width - padding.right - 132, cx - 65))}
-                    y={padding.top + 6}
-                    width="130"
-                    height="20"
-                    rx="4"
-                    fill="#082f49"
-                    fillOpacity="0.92"
-                    stroke="#22d3ee"
-                    strokeOpacity="0.6"
-                    strokeWidth="0.9"
-                  />
-                  <text
-                    x={Math.max(padding.left + 67, Math.min(width - padding.right - 67, cx))}
-                    y={padding.top + 19}
-                    textAnchor="middle"
-                    fill="#cffafe"
-                    fontSize="9.5"
-                    fontWeight="700"
-                    fontFamily="JetBrains Mono, monospace"
-                  >
-                    TMW #{tmw.startCandleIndex + 1}–#{tmw.endCandleIndex + 1}
-                  </text>
-                </g>
-              );
-            })}
-
           {/* Candlesticks */}
           {candles.map((candle, i) => {
             const x = getX(i);
@@ -1620,383 +1635,674 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
 
-          {/* PRZ (Potential Reversal Zones) & Time-Price Confluence Box */}
-          {effectiveShowPRZ &&
-            projectionReport?.przZones.map(prz => {
-              const plotTop = padding.top;
-              const plotBottom = height - padding.bottom - volumeHeight;
-              const rawYTop = getY(prz.highPrice);
-              const rawYBot = getY(prz.lowPrice);
-              if (rawYBot < plotTop || rawYTop > plotBottom) return null;
-              const yTop = Math.max(plotTop, rawYTop);
-              const yBot = Math.min(plotBottom, rawYBot);
-              const bandH = Math.max(10, yBot - yTop);
-              const isBullZone = prz.direction === 'BULLISH';
-              const strokeCol = isBullZone ? '#10b981' : '#f59e0b';
-              const fillUrl = isBullZone ? 'url(#przBullGrad)' : 'url(#przBearGrad)';
-              const primaryTmw = effectiveShowTMW ? projectionReport.tmwZones[0] : null;
-              const tmwX1 = primaryTmw ? Math.max(padding.left, getX(primaryTmw.startCandleIndex)) : 0;
-              const tmwX2 = primaryTmw ? Math.min(width - padding.right, getX(primaryTmw.endCandleIndex)) : 0;
+          {/* Unified Horizontal Overlays (PRZ Bounding Box, Width-Adjustable TMV Target Ribbons, Fib Extension Layers, Targets) with Shared Zero-Overlap Collision Solver */}
+          {(() => {
+            const plotTop = padding.top;
+            const plotBottom = height - padding.bottom - volumeHeight;
+            const endX = width - padding.right;
+            const plotW = Math.max(80, endX - padding.left);
 
-              return (
-                <g key={prz.id} pointerEvents="none">
-                  <rect
-                    x={padding.left}
-                    y={yTop}
-                    width={Math.max(0, width - padding.right - padding.left)}
-                    height={bandH}
-                    fill={fillUrl}
-                  />
-                  <line
-                    x1={padding.left}
-                    y1={yTop}
-                    x2={width - padding.right}
-                    y2={yTop}
-                    stroke={strokeCol}
-                    strokeWidth="1.15"
-                    strokeDasharray="5 3"
-                    strokeOpacity="0.85"
-                  />
-                  <line
-                    x1={padding.left}
-                    y1={yTop + bandH}
-                    x2={width - padding.right}
-                    y2={yTop + bandH}
-                    stroke={strokeCol}
-                    strokeWidth="1.15"
-                    strokeDasharray="5 3"
-                    strokeOpacity="0.85"
-                  />
+            const usedAxisBadgeYs: number[] = [];
+            if (lastPriceY >= plotTop && lastPriceY <= plotBottom) {
+              usedAxisBadgeYs.push(lastPriceY);
+            }
+            if (absoluteBottom) {
+              const absY = getY(absoluteBottom.price);
+              if (absY >= plotTop && absY <= plotBottom) usedAxisBadgeYs.push(absY);
+            }
 
-                  {/* PRZ Label inside Left edge */}
-                  <rect
-                    x={padding.left + 8}
-                    y={yTop + 4}
-                    width="240"
-                    height="18"
-                    rx="4"
-                    fill="#020617"
-                    fillOpacity="0.82"
-                    stroke={strokeCol}
-                    strokeOpacity="0.55"
-                    strokeWidth="0.8"
-                  />
-                  <text
-                    x={padding.left + 14}
-                    y={yTop + 16}
-                    fill={isBullZone ? '#a7f3d0' : '#fde68a'}
-                    fontSize="9.5"
-                    fontWeight="700"
-                  >
-                    {prz.labelFa} · {prz.contributingRatios.join(' + ')}
-                  </text>
-
-                  {/* Right Axis PRZ Range Marker */}
-                  <rect
-                    x={width - padding.right + 2}
-                    y={yTop + bandH / 2 - 10}
-                    width="82"
-                    height="20"
-                    rx="4"
-                    fill={isBullZone ? '#064e3b' : '#451a03'}
-                    stroke={strokeCol}
-                    strokeWidth="0.9"
-                  />
-                  <text
-                    x={width - padding.right + 6}
-                    y={yTop + bandH / 2 + 3.5}
-                    fill={isBullZone ? '#6ee7b7' : '#fcd34d'}
-                    fontSize="9"
-                    fontWeight="bold"
-                    fontFamily="JetBrains Mono, monospace"
-                  >
-                    PRZ {prz.midPrice.toLocaleString()}
-                  </text>
-
-                  {/* Golden Time-Price Confluence Intersection Box (PRZ x TMW) */}
-                  {prz.isPrimary && primaryTmw && tmwX2 > tmwX1 && (
-                    <g>
-                      <rect
-                        x={tmwX1}
-                        y={yTop}
-                        width={tmwX2 - tmwX1}
-                        height={bandH}
-                        fill={strokeCol}
-                        fillOpacity="0.16"
-                        stroke="#f8fafc"
-                        strokeOpacity="0.75"
-                        strokeWidth="1.4"
-                        strokeDasharray="4 2"
-                      />
-                      <circle
-                        cx={(tmwX1 + tmwX2) / 2}
-                        cy={yTop + bandH / 2}
-                        r="4.5"
-                        fill={strokeCol}
-                        stroke="#ffffff"
-                        strokeWidth="1.5"
-                      />
-                    </g>
-                  )}
-                </g>
-              );
-            })}
-
-          {/* Dynamic Horizontal Fibonacci Extension Layers (TargetProjectionEngine) */}
-          {effectiveShowFibLayers &&
-            projectionReport?.extensionLayers &&
-            projectionReport.extensionLayers.length > 0 &&
-            (() => {
-              const plotTop = padding.top;
-              const plotBottom = height - padding.bottom - volumeHeight;
-              const endX = width - padding.right;
-              const usedAxisYs: number[] = [];
-              const visibleLayers = projectionReport.extensionLayers.filter(layer => {
-                const cy = getY(layer.price);
-                return cy >= plotTop + 4 && cy <= plotBottom - 4;
+            // Seed inline badge exclusion boxes with wave vertex labels so overlay tags never obscure wave counts
+            const usedInlineBadgeRects: Array<{ x: number; y: number; w: number; h: number }> =
+              activeScenario.vertices.map(v => {
+                const vx = getX(v.candleIndex);
+                const vy = getY(v.price);
+                const bY = Math.max(plotTop + 14, vy - 24);
+                return { x: vx - 22, y: bY - 14, w: 44, h: 26 };
               });
-              const hoveredLayer: FibonacciExtensionLayer | null =
-                visibleLayers.find(l => l.id === hoveredExtLayerId) || null;
 
-              const tierStyle = (tier: FibonacciExtensionLayer['tier']) => {
-                if (tier === 'PRIMARY') {
-                  return { stroke: '#10b981', fill: 'url(#fibLayerPrimary)', badgeBg: '#064e3b', badgeText: '#6ee7b7', dash: '8 3' };
-                }
-                if (tier === 'TMV') {
-                  return { stroke: '#f59e0b', fill: 'url(#fibLayerTmv)', badgeBg: '#451a03', badgeText: '#fde68a', dash: '6 3' };
-                }
-                if (tier === 'EXTREME') {
-                  return { stroke: '#c084fc', fill: 'url(#fibLayerExtreme)', badgeBg: '#3b0764', badgeText: '#e9d5ff', dash: '3 4' };
-                }
-                return { stroke: '#38bdf8', fill: 'url(#fibLayerSecondary)', badgeBg: '#0c4a6e', badgeText: '#bae6fd', dash: '5 4' };
-              };
+            const resolveTagY = (preferredY: number, x: number, w: number, boxH = 18): number => {
+              let y = Math.max(plotTop + 3, Math.min(plotBottom - boxH - 3, preferredY));
+              let guard = 0;
+              while (
+                guard < 12 &&
+                usedInlineBadgeRects.some(
+                  r =>
+                    y < r.y + r.h + 4 &&
+                    y + boxH + 4 > r.y &&
+                    x < r.x + r.w + 8 &&
+                    x + w + 8 > r.x
+                )
+              ) {
+                const step = (guard % 2 === 0 ? 1 : -1) * (Math.floor(guard / 2) + 1) * (boxH + 4);
+                const candidate = Math.max(plotTop + 3, Math.min(plotBottom - boxH - 3, preferredY + step));
+                y = candidate;
+                guard += 1;
+              }
+              usedInlineBadgeRects.push({ x, y, w, h: boxH });
+              return y;
+            };
 
-              return (
-                <g>
-                  {visibleLayers.map(layer => {
-                    const style = tierStyle(layer.tier);
-                    const centerY = getY(layer.price);
-                    const rawYTop = getY(layer.bandHigh);
-                    const rawYBot = getY(layer.bandLow);
-                    const yTop = Math.max(plotTop, Math.min(rawYTop, centerY - 3.5));
-                    const yBot = Math.min(plotBottom, Math.max(rawYBot, centerY + 3.5));
-                    const bandH = Math.max(7, yBot - yTop);
-                    const startX = Math.max(padding.left, Math.min(endX - 110, getX(layer.anchorCandleIndex)));
-                    const layerW = Math.max(40, endX - startX);
-                    const isHovered = hoveredExtLayerId === layer.id;
+            const resolveAxisY = (preferredY: number, minGap = 20): number | null => {
+              const clamped = Math.max(plotTop + 10, Math.min(plotBottom - 10, preferredY));
+              if (usedAxisBadgeYs.every(prevY => Math.abs(prevY - clamped) >= minGap)) {
+                usedAxisBadgeYs.push(clamped);
+                return clamped;
+              }
+              return null;
+            };
 
-                    const canPlaceAxisLabel =
-                      isHovered || usedAxisYs.every(prevY => Math.abs(prevY - centerY) >= 18);
-                    if (canPlaceAxisLabel && !isHovered) usedAxisYs.push(centerY);
+            // Compute TMV horizontal coordinates & rendered target prices for Target deduplication
+            const tmvTargetPricesForDedup: number[] = [];
+            const lastVerts = activeScenario.vertices;
+            const fallbackStartIdx =
+              lastVerts.length >= 2 ? Math.min(lastVerts[lastVerts.length - 2].candleIndex, lastVerts[lastVerts.length - 1].candleIndex) : 0;
+            const fallbackEndIdx = Math.max(1, candles.length - 1);
 
-                    const signedPct = layer.distancePct > 0 ? `+${layer.distancePct}%` : `${layer.distancePct}%`;
+            const targetPool = !hideZoneControls
+              ? projectionReport?.targets.length
+                ? projectionReport.targets
+                : activeScenario.targets
+              : [];
+
+            return (
+              <g>
+                {/* 1. PRZ Horizontal Rectangular Bounding Box (Anchored to Last Wave's Vertices) */}
+                {effectiveShowPRZ &&
+                  projectionReport &&
+                  projectionReport.przZones.map(prz => {
+                    const rawYTop = getY(prz.highPrice);
+                    const rawYBot = getY(prz.lowPrice);
+                    if (rawYBot < plotTop || rawYTop > plotBottom) return null;
+
+                    const yTop = Math.max(plotTop, Math.min(plotBottom - 10, rawYTop));
+                    const yBot = Math.min(plotBottom, Math.max(yTop + 10, rawYBot));
+                    const bandH = Math.max(10, yBot - yTop);
+
+                    const startIdx = prz.startCandleIndex ?? prz.anchorCandleIndex ?? fallbackStartIdx;
+                    const endIdx = prz.endCandleIndex ?? fallbackEndIdx;
+                    const rawXStart = getX(startIdx);
+                    const rawXEnd = getX(endIdx);
+                    const xStart = Math.max(padding.left, Math.min(endX - 72, Math.min(rawXStart, rawXEnd)));
+                    const xEnd = Math.max(xStart + 72, Math.min(endX, Math.max(rawXStart, rawXEnd)));
+                    const bandW = Math.max(72, xEnd - xStart);
+
+                    const isBullZone = prz.direction === 'BULLISH';
+                    const strokeCol = prz.isPrimary ? (isBullZone ? '#f59e0b' : '#fb923c') : '#d97706';
+                    const fillCol = isBullZone ? '#f59e0b' : '#fb923c';
+                    const dirTag = isBullZone ? '↑ حمایت' : '↓ مقاومت';
+                    const labelText = `${prz.labelFa} · ${dirTag} · ${prz.confidence}%`;
+                    const badgeW = Math.min(
+                      Math.max(140, bandW - 14),
+                      Math.max(175, labelText.length * 5.4 + 24)
+                    );
+                    const badgeX = Math.max(padding.left + 6, Math.min(xStart + 8, xEnd - badgeW - 6));
+                    const preferredLabelY = bandH >= 28 ? yTop + 5 : yTop - 21 >= plotTop ? yTop - 21 : yBot + 3;
+                    const labelY = resolveTagY(preferredLabelY, badgeX, badgeW, 18);
+                    const axisY = prz.isPrimary ? resolveAxisY(yTop + bandH / 2, 20) : null;
+                    const cornerSize = Math.min(8, bandH * 0.32, bandW * 0.12);
 
                     return (
-                      <g
-                        key={layer.id}
-                        onMouseEnter={() => setHoveredExtLayerId(layer.id)}
-                        onMouseLeave={() => setHoveredExtLayerId(null)}
-                        className="cursor-pointer"
-                        opacity={hoveredExtLayerId && !isHovered ? 0.36 : 1}
-                        style={{ transition: 'opacity 140ms ease' }}
-                      >
-                        {/* Invisible wide hit strip for effortless hover */}
+                      <g key={prz.id} pointerEvents="none" opacity={prz.isPrimary ? 1 : 0.65}>
+                        {/* Low-Opacity Horizontal Bounding Box Fill */}
                         <rect
-                          x={startX}
-                          y={centerY - 7}
-                          width={layerW}
-                          height={14}
-                          fill="transparent"
-                        />
-
-                        {/* Shaded Dynamic Horizontal Extension Band */}
-                        <rect
-                          x={startX}
+                          x={xStart}
                           y={yTop}
-                          width={layerW}
+                          width={bandW}
                           height={bandH}
-                          fill={style.fill}
-                          fillOpacity={isHovered ? 0.95 : layer.tier === 'PRIMARY' || layer.tier === 'TMV' ? 0.8 : 0.55}
-                          stroke={isHovered ? style.stroke : 'none'}
-                          strokeWidth={isHovered ? 0.9 : 0}
-                          strokeOpacity={0.65}
+                          rx="2"
+                          fill={fillCol}
+                          fillOpacity={prz.isPrimary ? 0.12 : 0.07}
+                          stroke={strokeCol}
+                          strokeWidth={prz.isPrimary ? '1.15' : '0.85'}
+                          strokeDasharray={prz.isPrimary ? '5 3' : '3 4'}
+                          strokeOpacity={prz.isPrimary ? '0.82' : '0.52'}
                         />
 
-                        {/* Extension Centerline */}
-                        <line
-                          x1={startX}
-                          y1={centerY}
-                          x2={endX}
-                          y2={centerY}
-                          stroke={style.stroke}
-                          strokeWidth={isHovered ? 2 : layer.tier === 'PRIMARY' || layer.tier === 'TMV' ? 1.35 : 1}
-                          strokeDasharray={isHovered ? undefined : style.dash}
-                          strokeOpacity={isHovered ? 1 : layer.tier === 'EXTREME' ? 0.65 : 0.85}
+                        {/* 4 Crisp Corner Brackets reinforcing Bounding Box geometry */}
+                        <path
+                          d={`M ${xStart} ${yTop + cornerSize} L ${xStart} ${yTop} L ${xStart + cornerSize} ${yTop}
+                              M ${xEnd - cornerSize} ${yTop} L ${xEnd} ${yTop} L ${xEnd} ${yTop + cornerSize}
+                              M ${xStart} ${yBot - cornerSize} L ${xStart} ${yBot} L ${xStart + cornerSize} ${yBot}
+                              M ${xEnd - cornerSize} ${yBot} L ${xEnd} ${yBot} L ${xEnd} ${yBot - cornerSize}`}
+                          fill="none"
+                          stroke={strokeCol}
+                          strokeWidth="1.8"
+                          strokeOpacity="0.95"
                         />
 
-                        {/* Anchor Launch Node on Left Edge */}
+                        {/* Anchor Vertex Marker on Left Edge of Last Wave */}
                         <circle
-                          cx={startX}
-                          cy={centerY}
-                          r={isHovered ? 4 : 2.8}
-                          fill={style.stroke}
-                          stroke="#080d1a"
+                          cx={xStart}
+                          cy={yTop + bandH / 2}
+                          r={prz.isPrimary ? 3.2 : 2.3}
+                          fill={strokeCol}
+                          stroke="#020617"
                           strokeWidth="1"
                         />
 
-                        {/* Left Ratio & Confidence Tag on Layer Origin */}
-                        {(canPlaceAxisLabel || isHovered) && (
-                          <g pointerEvents="none">
-                            <rect
-                              x={startX + 6}
-                              y={centerY - 9}
-                              width={isHovered ? 148 : 112}
-                              height={17}
-                              rx="4"
-                              fill="#020617"
-                              fillOpacity={isHovered ? 0.94 : 0.8}
-                              stroke={style.stroke}
-                              strokeOpacity={isHovered ? 0.9 : 0.45}
-                              strokeWidth="0.8"
-                            />
-                            <text
-                              x={startX + 12}
-                              y={centerY + 3}
-                              fill={style.badgeText}
-                              fontSize="9.2"
-                              fontWeight="700"
-                              fontFamily="JetBrains Mono, monospace"
-                            >
-                              {layer.ratioLabel}
-                              {isHovered ? ` · ${signedPct}` : ` · ${layer.confidence}%`}
-                            </text>
-                          </g>
-                        )}
+                        {/* Compact PRZ Label Badge */}
+                        <rect
+                          x={badgeX}
+                          y={labelY}
+                          width={badgeW}
+                          height="18"
+                          rx="4"
+                          fill="#020617"
+                          fillOpacity="0.9"
+                          stroke={strokeCol}
+                          strokeOpacity="0.72"
+                          strokeWidth="0.8"
+                        />
+                        <text
+                          x={badgeX + 7}
+                          y={labelY + 12}
+                          fill={isBullZone ? '#fde68a' : '#fed7aa'}
+                          fontSize="9"
+                          fontWeight="700"
+                        >
+                          {labelText}
+                        </text>
 
-                        {/* Right Price-Axis Layer Pill */}
-                        {canPlaceAxisLabel && (
-                          <g pointerEvents="none">
+                        {/* Right-Axis PRZ Mid-Price Pill */}
+                        {axisY !== null && (
+                          <>
+                            <line
+                              x1={endX - 1}
+                              y1={yTop}
+                              x2={endX - 1}
+                              y2={yBot}
+                              stroke={strokeCol}
+                              strokeWidth="2.2"
+                              strokeOpacity="0.88"
+                            />
                             <rect
                               x={endX + 2}
-                              y={centerY - 9}
+                              y={axisY - 9.5}
                               width="82"
-                              height="18"
+                              height="19"
                               rx="4"
-                              fill={style.badgeBg}
-                              stroke={style.stroke}
-                              strokeWidth={isHovered ? '1.3' : '0.85'}
+                              fill="#451a03"
+                              stroke={strokeCol}
+                              strokeWidth="0.95"
                             />
                             <text
                               x={endX + 6}
-                              y={centerY + 3.5}
-                              fill={style.badgeText}
-                              fontSize="9.2"
+                              y={axisY + 3.5}
+                              fill="#fde68a"
+                              fontSize="8.8"
                               fontWeight="bold"
                               fontFamily="JetBrains Mono, monospace"
                             >
-                              {layer.ratio}·{layer.price.toLocaleString()}
+                              PRZ {prz.midPrice.toLocaleString()}
                             </text>
-                          </g>
+                          </>
                         )}
                       </g>
                     );
                   })}
 
-                  {/* Hovered Extension Layer Anchor-to-Target Bracket & Detail Pill */}
-                  {hoveredLayer &&
-                    (() => {
-                      const style = tierStyle(hoveredLayer.tier);
-                      const startX = Math.max(padding.left, Math.min(endX - 110, getX(hoveredLayer.anchorCandleIndex)));
-                      const yTarget = getY(hoveredLayer.price);
-                      const yAnchor = Math.max(plotTop, Math.min(plotBottom, getY(hoveredLayer.anchorPrice)));
-                      const bracketX = startX + 3;
-                      const infoX = Math.min(endX - 285, Math.max(padding.left + 8, startX + 162));
-                      const infoY = yTarget - 32 >= plotTop ? yTarget - 30 : Math.min(plotBottom - 26, yTarget + 10);
-                      return (
-                        <g pointerEvents="none">
-                          <line
-                            x1={bracketX}
-                            y1={yAnchor}
-                            x2={bracketX}
-                            y2={yTarget}
-                            stroke={style.stroke}
-                            strokeWidth="1.6"
-                            strokeDasharray="3 2"
-                          />
-                          <circle cx={bracketX} cy={yAnchor} r="3.5" fill="#080d1a" stroke={style.stroke} strokeWidth="1.5" />
-                          <circle cx={bracketX} cy={yTarget} r="4" fill={style.stroke} stroke="#ffffff" strokeWidth="1.2" />
-                          <rect
-                            x={infoX}
-                            y={infoY}
-                            width="276"
-                            height="22"
-                            rx="5"
-                            fill="#020617"
-                            fillOpacity="0.95"
-                            stroke={style.stroke}
-                            strokeWidth="1"
-                          />
-                          <text
-                            x={infoX + 268}
-                            y={infoY + 14.5}
-                            textAnchor="end"
-                            fill="#f8fafc"
-                            fontSize="9.5"
-                            fontWeight="700"
+                {/* 2. Horizontal Width-Adjustable TMV Target Ribbons (Strictly Synced to Rule-Engine Targets) */}
+                {effectiveShowTMV &&
+                  projectionReport &&
+                  projectionReport.tmvZones.map(tmv => {
+                    const rawYTop = getY(tmv.highPrice);
+                    const rawYBot = getY(tmv.lowPrice);
+                    const showBand = !(rawYBot < plotTop || rawYTop > plotBottom);
+
+                    const yTop = Math.max(plotTop, Math.min(plotBottom - 12, rawYTop));
+                    const yBot = Math.min(plotBottom, Math.max(yTop + 12, rawYBot));
+                    const bandH = Math.max(12, yBot - yTop);
+
+                    const isBullZone = tmv.direction === 'BULLISH';
+                    const strokeCol = isBullZone ? '#38bdf8' : '#a855f7';
+                    const fillUrl = isBullZone ? 'url(#tmvBullZoneGrad)' : 'url(#tmvBearZoneGrad)';
+
+                    // Compute responsive horizontal span from Analysis Window / Span Mode / Custom Drag
+                    const tmvX2 = endX;
+                    let tmvX1 = padding.left;
+                    if (tmvCustomRatio !== null) {
+                      const customW = Math.max(72, Math.min(plotW, plotW * tmvCustomRatio));
+                      tmvX1 = Math.max(padding.left, tmvX2 - customW);
+                    } else if (tmvSpanMode === 'FULL') {
+                      tmvX1 = padding.left;
+                    } else if (tmvSpanMode === 'COMPACT') {
+                      const compactW = Math.max(96, Math.min(plotW * 0.3, Math.max(96, tmvX2 - getX(tmv.anchorCandleIndex ?? tmv.startCandleIndex))));
+                      tmvX1 = Math.max(padding.left, tmvX2 - compactW);
+                    } else {
+                      const analysisRawX1 = getX(tmv.startCandleIndex);
+                      const minAnalysisW = Math.max(120, plotW * 0.24);
+                      const maxAnalysisW = plotW * 0.72;
+                      const desiredW = Math.max(minAnalysisW, Math.min(maxAnalysisW, tmvX2 - analysisRawX1));
+                      tmvX1 = Math.max(padding.left, tmvX2 - desiredW);
+                    }
+                    const tmvBandW = Math.max(72, tmvX2 - tmvX1);
+
+                    const tmvLevels =
+                      tmv.targetPrices && tmv.targetPrices.length > 0
+                        ? tmv.targetPrices
+                        : [
+                            {
+                              id: `${tmv.id}-ideal`,
+                              label: 'TMV Ideal',
+                              ratioLabel: 'Ideal',
+                              price: tmv.ideal100Price
+                            }
+                          ];
+                    tmvLevels.forEach(lvl => tmvTargetPricesForDedup.push(lvl.price));
+
+                    const tmvText = `${tmv.labelFa} · ${tmv.ideal100Price.toLocaleString()}`;
+                    const tmvBadgeW = Math.min(
+                      Math.max(150, tmvBandW - 18),
+                      Math.max(180, tmvText.length * 5.2 + 24)
+                    );
+                    const tmvBadgeX = Math.max(padding.left + 8, Math.min(tmvX1 + 10, tmvX2 - tmvBadgeW - 6));
+                    const tmvTagY = showBand ? resolveTagY(yTop + 4, tmvBadgeX, tmvBadgeW, 18) : 0;
+
+                    return (
+                      <g key={tmv.id}>
+                        {showBand && (
+                          <g pointerEvents="none">
+                            <rect
+                              x={tmvX1}
+                              y={yTop}
+                              width={tmvBandW}
+                              height={bandH}
+                              rx="2"
+                              fill={fillUrl}
+                            />
+                            <line
+                              x1={tmvX1}
+                              y1={yTop}
+                              x2={tmvX2}
+                              y2={yTop}
+                              stroke={strokeCol}
+                              strokeWidth="1.15"
+                              strokeDasharray="6 3"
+                              strokeOpacity="0.82"
+                            />
+                            <line
+                              x1={tmvX1}
+                              y1={yBot}
+                              x2={tmvX2}
+                              y2={yBot}
+                              stroke={strokeCol}
+                              strokeWidth="1.15"
+                              strokeDasharray="6 3"
+                              strokeOpacity="0.82"
+                            />
+
+                            {/* TMV Label Pill */}
+                            <rect
+                              x={tmvBadgeX}
+                              y={tmvTagY}
+                              width={tmvBadgeW}
+                              height="18"
+                              rx="4"
+                              fill="#020617"
+                              fillOpacity="0.9"
+                              stroke={strokeCol}
+                              strokeOpacity="0.62"
+                              strokeWidth="0.8"
+                            />
+                            <text
+                              x={tmvBadgeX + 7}
+                              y={tmvTagY + 12}
+                              fill={isBullZone ? '#bae6fd' : '#e9d5ff'}
+                              fontSize="9"
+                              fontWeight="700"
+                            >
+                              {tmvText}
+                            </text>
+                          </g>
+                        )}
+
+                        {/* Interactive Left-Edge Width Resize Handle for Horizontal TMV Ribbon */}
+                        {showBand && (
+                          <g
+                            className="cursor-ew-resize"
+                            onMouseDown={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDraggingTmvEdge(true);
+                            }}
                           >
-                            {hoveredLayer.titleFa} ({hoveredLayer.formulaFa})
-                          </text>
-                        </g>
-                      );
-                    })()}
-                </g>
-              );
-            })()}
+                            <title>برای تغییر عرض افقی نوار TMV به چپ یا راست بکشید</title>
+                            <rect
+                              x={tmvX1 - 6}
+                              y={yTop}
+                              width={12}
+                              height={bandH}
+                              fill="transparent"
+                            />
+                            <line
+                              x1={tmvX1}
+                              y1={yTop + 2}
+                              x2={tmvX1}
+                              y2={yBot - 2}
+                              stroke={strokeCol}
+                              strokeWidth={draggingTmvEdge ? '2.6' : '2'}
+                              strokeOpacity="0.92"
+                            />
+                            <circle
+                              cx={tmvX1}
+                              cy={yTop + bandH / 2}
+                              r={draggingTmvEdge ? 4 : 3}
+                              fill="#020617"
+                              stroke={strokeCol}
+                              strokeWidth="1.5"
+                            />
+                          </g>
+                        )}
 
-          {/* Targets & Invalidation */}
-          {showTargets &&
-            (projectionReport?.targets.length ? projectionReport.targets : activeScenario.targets).map(target => {
-              const targetY = getY(target.price);
-              if (targetY < padding.top || targetY > height - padding.bottom - volumeHeight) return null;
-              const isInv = target.isInvalidation;
-              const color = isInv ? '#f43f5e' : target.type === 'TMV' ? '#f59e0b' : '#38bdf8';
+                        {/* Horizontal Target Price Levels Rendered Strictly from Computed Targets Inside [tmvX1, tmvX2] */}
+                        {tmvLevels.map((lvl, lvlIdx) => {
+                          const lvlY = getY(lvl.price);
+                          if (lvlY < plotTop + 4 || lvlY > plotBottom - 4) return null;
+                          const isIdeal = Math.abs(lvl.price - tmv.ideal100Price) < Math.max(0.05, tmv.ideal100Price * 0.0005);
+                          const lvlAxisY = resolveAxisY(lvlY, 19);
 
-              return (
-                <g key={target.id}>
-                  <line
-                    x1={padding.left}
-                    y1={targetY}
-                    x2={width - padding.right}
-                    y2={targetY}
-                    stroke={color}
-                    strokeWidth="1.2"
-                    strokeDasharray={isInv ? '5 4' : '3 3'}
-                    opacity="0.7"
-                  />
-                  <rect
-                    x={width - padding.right + 2}
-                    y={targetY - 9}
-                    width="82"
-                    height="18"
-                    rx="4"
-                    fill={isInv ? '#4c0519' : '#082f49'}
-                    stroke={color}
-                    strokeWidth="0.8"
-                  />
-                  <text
-                    x={width - padding.right + 6}
-                    y={targetY + 3.5}
-                    fill={color}
-                    fontSize="9.5"
-                    fontWeight="bold"
-                    fontFamily="JetBrains Mono, monospace"
-                  >
-                    {isInv ? 'INV ' : target.type === 'TMV' ? 'TMV ' : 'TGT '}
-                    {target.price.toLocaleString()}
-                  </text>
-                </g>
-              );
-            })}
+                          return (
+                            <g key={`${tmv.id}-${lvl.id}-${lvlIdx}`} pointerEvents="none">
+                              <line
+                                x1={tmvX1}
+                                y1={lvlY}
+                                x2={tmvX2}
+                                y2={lvlY}
+                                stroke={isIdeal ? strokeCol : '#818cf8'}
+                                strokeWidth={isIdeal ? '1.5' : '1.05'}
+                                strokeDasharray={isIdeal ? '7 3' : '3 3'}
+                                strokeOpacity={isIdeal ? '0.94' : '0.78'}
+                              />
+                              {lvlAxisY !== null && (
+                                <g>
+                                  <rect
+                                    x={endX + 2}
+                                    y={lvlAxisY - 9.5}
+                                    width="82"
+                                    height="19"
+                                    rx="4"
+                                    fill={isIdeal ? (isBullZone ? '#0c4a6e' : '#3b0764') : '#1e1b4b'}
+                                    stroke={isIdeal ? strokeCol : '#818cf8'}
+                                    strokeWidth={isIdeal ? '0.95' : '0.8'}
+                                  />
+                                  <text
+                                    x={endX + 6}
+                                    y={lvlAxisY + 3.5}
+                                    fill={isIdeal ? (isBullZone ? '#7dd3fc' : '#e9d5ff') : '#c7d2fe'}
+                                    fontSize="8.8"
+                                    fontWeight="bold"
+                                    fontFamily="JetBrains Mono, monospace"
+                                  >
+                                    {isIdeal ? 'TMV ' : 'TGT '}
+                                    {lvl.price.toLocaleString()}
+                                  </text>
+                                </g>
+                              )}
+                            </g>
+                          );
+                        })}
+                      </g>
+                    );
+                  })}
+
+                {/* 3. Dynamic Horizontal Fibonacci Extension Layers (TargetProjectionEngine) */}
+                {effectiveShowFibLayers &&
+                  projectionReport?.extensionLayers &&
+                  projectionReport.extensionLayers.length > 0 &&
+                  (() => {
+                    const visibleLayers = projectionReport.extensionLayers.filter(layer => {
+                      const cy = getY(layer.price);
+                      return cy >= plotTop + 4 && cy <= plotBottom - 4;
+                    });
+                    const hoveredLayer: FibonacciExtensionLayer | null =
+                      visibleLayers.find(l => l.id === hoveredExtLayerId) || null;
+
+                    const tierStyle = (tier: FibonacciExtensionLayer['tier']) => {
+                      if (tier === 'PRIMARY') {
+                        return { stroke: '#10b981', fill: 'url(#fibLayerPrimary)', badgeBg: '#064e3b', badgeText: '#6ee7b7', dash: '8 3' };
+                      }
+                      if (tier === 'TMV') {
+                        return { stroke: '#f59e0b', fill: 'url(#fibLayerTmv)', badgeBg: '#451a03', badgeText: '#fde68a', dash: '6 3' };
+                      }
+                      if (tier === 'EXTREME') {
+                        return { stroke: '#c084fc', fill: 'url(#fibLayerExtreme)', badgeBg: '#3b0764', badgeText: '#e9d5ff', dash: '3 4' };
+                      }
+                      return { stroke: '#38bdf8', fill: 'url(#fibLayerSecondary)', badgeBg: '#0c4a6e', badgeText: '#bae6fd', dash: '5 4' };
+                    };
+
+                    return (
+                      <g>
+                        {visibleLayers.map(layer => {
+                          const style = tierStyle(layer.tier);
+                          const centerY = getY(layer.price);
+                          const rawYTop = getY(layer.bandHigh);
+                          const rawYBot = getY(layer.bandLow);
+                          const yTop = Math.max(plotTop, Math.min(rawYTop, centerY - 3.5));
+                          const yBot = Math.min(plotBottom, Math.max(rawYBot, centerY + 3.5));
+                          const bandH = Math.max(7, yBot - yTop);
+                          const startX = Math.max(padding.left, Math.min(endX - 110, getX(layer.anchorCandleIndex)));
+                          const layerW = Math.max(40, endX - startX);
+                          const isHovered = hoveredExtLayerId === layer.id;
+
+                          const axisY = isHovered ? centerY : resolveAxisY(centerY, 19);
+                          const canShowInlineTag = axisY !== null || isHovered;
+                          const tagW = isHovered ? 148 : 112;
+                          const tagY = canShowInlineTag
+                            ? resolveTagY(centerY - 9, startX + 6, tagW, 17)
+                            : centerY - 9;
+                          const signedPct = layer.distancePct > 0 ? `+${layer.distancePct}%` : `${layer.distancePct}%`;
+
+                          return (
+                            <g
+                              key={layer.id}
+                              onMouseEnter={() => setHoveredExtLayerId(layer.id)}
+                              onMouseLeave={() => setHoveredExtLayerId(null)}
+                              className="cursor-pointer"
+                              opacity={hoveredExtLayerId && !isHovered ? 0.36 : 1}
+                              style={{ transition: 'opacity 140ms ease' }}
+                            >
+                              <rect
+                                x={startX}
+                                y={centerY - 7}
+                                width={layerW}
+                                height={14}
+                                fill="transparent"
+                              />
+                              <rect
+                                x={startX}
+                                y={yTop}
+                                width={layerW}
+                                height={bandH}
+                                fill={style.fill}
+                                fillOpacity={isHovered ? 0.9 : layer.tier === 'PRIMARY' || layer.tier === 'TMV' ? 0.65 : 0.45}
+                                stroke={isHovered ? style.stroke : 'none'}
+                                strokeWidth={isHovered ? 0.9 : 0}
+                                strokeOpacity={0.65}
+                              />
+                              <line
+                                x1={startX}
+                                y1={centerY}
+                                x2={endX}
+                                y2={centerY}
+                                stroke={style.stroke}
+                                strokeWidth={isHovered ? 2 : layer.tier === 'PRIMARY' || layer.tier === 'TMV' ? 1.3 : 0.95}
+                                strokeDasharray={isHovered ? undefined : style.dash}
+                                strokeOpacity={isHovered ? 1 : layer.tier === 'EXTREME' ? 0.6 : 0.8}
+                              />
+                              <circle
+                                cx={startX}
+                                cy={centerY}
+                                r={isHovered ? 4 : 2.6}
+                                fill={style.stroke}
+                                stroke="#080d1a"
+                                strokeWidth="1"
+                              />
+
+                              {canShowInlineTag && (
+                                <g pointerEvents="none">
+                                  <rect
+                                    x={startX + 6}
+                                    y={tagY}
+                                    width={tagW}
+                                    height={17}
+                                    rx="4"
+                                    fill="#020617"
+                                    fillOpacity={isHovered ? 0.94 : 0.8}
+                                    stroke={style.stroke}
+                                    strokeOpacity={isHovered ? 0.9 : 0.45}
+                                    strokeWidth="0.8"
+                                  />
+                                  <text
+                                    x={startX + 12}
+                                    y={tagY + 12}
+                                    fill={style.badgeText}
+                                    fontSize="9"
+                                    fontWeight="700"
+                                    fontFamily="JetBrains Mono, monospace"
+                                  >
+                                    {layer.ratioLabel}
+                                    {isHovered ? ` · ${signedPct}` : ` · ${layer.confidence}%`}
+                                  </text>
+                                </g>
+                              )}
+
+                              {axisY !== null && (
+                                <g pointerEvents="none">
+                                  <rect
+                                    x={endX + 2}
+                                    y={axisY - 9}
+                                    width="82"
+                                    height="18"
+                                    rx="4"
+                                    fill={style.badgeBg}
+                                    stroke={style.stroke}
+                                    strokeWidth={isHovered ? '1.3' : '0.85'}
+                                  />
+                                  <text
+                                    x={endX + 6}
+                                    y={axisY + 3.5}
+                                    fill={style.badgeText}
+                                    fontSize="9"
+                                    fontWeight="bold"
+                                    fontFamily="JetBrains Mono, monospace"
+                                  >
+                                    {layer.ratio}·{layer.price.toLocaleString()}
+                                  </text>
+                                </g>
+                              )}
+                            </g>
+                          );
+                        })}
+
+                        {hoveredLayer &&
+                          (() => {
+                            const style = tierStyle(hoveredLayer.tier);
+                            const startX = Math.max(padding.left, Math.min(endX - 110, getX(hoveredLayer.anchorCandleIndex)));
+                            const yTarget = getY(hoveredLayer.price);
+                            const yAnchor = Math.max(plotTop, Math.min(plotBottom, getY(hoveredLayer.anchorPrice)));
+                            const bracketX = startX + 3;
+                            const infoX = Math.min(endX - 285, Math.max(padding.left + 8, startX + 162));
+                            const infoY = yTarget - 32 >= plotTop ? yTarget - 30 : Math.min(plotBottom - 26, yTarget + 10);
+                            return (
+                              <g pointerEvents="none">
+                                <line
+                                  x1={bracketX}
+                                  y1={yAnchor}
+                                  x2={bracketX}
+                                  y2={yTarget}
+                                  stroke={style.stroke}
+                                  strokeWidth="1.6"
+                                  strokeDasharray="3 2"
+                                />
+                                <circle cx={bracketX} cy={yAnchor} r="3.5" fill="#080d1a" stroke={style.stroke} strokeWidth="1.5" />
+                                <circle cx={bracketX} cy={yTarget} r="4" fill={style.stroke} stroke="#ffffff" strokeWidth="1.2" />
+                                <rect
+                                  x={infoX}
+                                  y={infoY}
+                                  width="276"
+                                  height="22"
+                                  rx="5"
+                                  fill="#020617"
+                                  fillOpacity="0.95"
+                                  stroke={style.stroke}
+                                  strokeWidth="1"
+                                />
+                                <text
+                                  x={infoX + 268}
+                                  y={infoY + 14.5}
+                                  textAnchor="end"
+                                  fill="#f8fafc"
+                                  fontSize="9.5"
+                                  fontWeight="700"
+                                >
+                                  {hoveredLayer.titleFa} ({hoveredLayer.formulaFa})
+                                </text>
+                              </g>
+                            );
+                          })()}
+                      </g>
+                    );
+                  })()}
+
+                {/* 4. Targets & Invalidation (Deduplicated against TMV Target Lines + Shared Axis Collision Solver) */}
+                {showTargets &&
+                  targetPool.map(target => {
+                    const isInv = Boolean(target.isInvalidation);
+                    if (
+                      !isInv &&
+                      effectiveShowTMV &&
+                      tmvTargetPricesForDedup.some(tp => Math.abs(tp - target.price) / Math.max(1, target.price) < 0.0025)
+                    ) {
+                      return null;
+                    }
+                    const targetY = getY(target.price);
+                    if (targetY < plotTop || targetY > plotBottom) return null;
+                    const color = isInv ? '#f43f5e' : target.type === 'TMV' ? '#f59e0b' : '#38bdf8';
+                    const axisY = resolveAxisY(targetY, 19);
+
+                    return (
+                      <g key={target.id} pointerEvents="none">
+                        <line
+                          x1={padding.left}
+                          y1={targetY}
+                          x2={endX}
+                          y2={targetY}
+                          stroke={color}
+                          strokeWidth="1.15"
+                          strokeDasharray={isInv ? '5 4' : '3 3'}
+                          opacity="0.65"
+                        />
+                        {axisY !== null && (
+                          <>
+                            <rect
+                              x={endX + 2}
+                              y={axisY - 9}
+                              width="82"
+                              height="18"
+                              rx="4"
+                              fill={isInv ? '#4c0519' : '#082f49'}
+                              stroke={color}
+                              strokeWidth="0.8"
+                            />
+                            <text
+                              x={endX + 6}
+                              y={axisY + 3.5}
+                              fill={color}
+                              fontSize="9.2"
+                              fontWeight="bold"
+                              fontFamily="JetBrains Mono, monospace"
+                            >
+                              {isInv ? 'INV ' : target.type === 'TMV' ? 'TMV ' : 'TGT '}
+                              {target.price.toLocaleString()}
+                            </text>
+                          </>
+                        )}
+                      </g>
+                    );
+                  })}
+              </g>
+            );
+          })()}
 
           {/* Multi-Scenario Color Overlays (non-active checked scenarios) */}
           {overlayScenarios

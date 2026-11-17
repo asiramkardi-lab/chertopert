@@ -23,6 +23,9 @@ import { FractalTree } from './FractalTree';
 import { ScenarioManager } from './ScenarioManager';
 import { TfBoundaryReport } from './TfBoundaryReport';
 import { SddAndCodeViewer } from './SddAndCodeViewer';
+import { AnglePenetrationWidget } from './AnglePenetrationWidget';
+import { TargetProjectionPanel } from './TargetProjectionPanel';
+import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import { 
   Cpu, 
   GitBranch, 
@@ -31,10 +34,12 @@ import {
   FileCode2, 
   ShieldCheck,
   CornerDownLeft,
-  Layers
+  Layers,
+  Crosshair,
+  ArrowUpLeft
 } from 'lucide-react';
 
-export type SidebarTab = 'COPILOT' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
+export type SidebarTab = 'COPILOT' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
 
 interface SleekSidebarProps {
   activeScenario: WaveScenario;
@@ -99,6 +104,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   onPromoteDegree
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
+  const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'PRZ'>('RADAR');
 
   useEffect(() => {
     if (drillContext?.key) {
@@ -108,6 +114,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
   const tabs = [
     { id: 'COPILOT' as SidebarTab, label: 'دستیار هوشمند و قوانین', icon: Cpu, badge: `${activeScenario.validityScore}%` },
+    { id: 'ANGLE_TARGETS' as SidebarTab, label: 'زوایا و اهداف', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
     { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch, badge: '۴ درجه' },
     { id: 'SCENARIOS' as SidebarTab, label: 'سناریوهای موازی', icon: FolderGit2, badge: `${scenarios.length}` },
     { id: 'TF_BOUNDARY' as SidebarTab, label: 'محدوده تایم‌فریم', icon: Compass },
@@ -166,6 +173,36 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               </span>
             </div>
 
+            {/* Quick Shortcut to Angle & Penetration Targets Widget */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('ANGLE_TARGETS')}
+              className="w-full p-3 rounded-xl bg-cyan-950/25 hover:bg-cyan-950/40 border border-cyan-500/35 hover:border-cyan-400/65 flex items-center justify-between gap-2 text-right transition-colors"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Crosshair className="w-4 h-4 text-cyan-300 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-white truncate">رادار زوایای برخورد و سطوح نفوذ</div>
+                  <div className="text-[10.5px] text-slate-400 truncate">
+                    مشاهده اهداف کوتاه‌مدت و میان‌مدت با درصد اطمینان
+                  </div>
+                </div>
+              </div>
+              <ArrowUpLeft className="w-4 h-4 text-cyan-300 shrink-0" />
+            </button>
+
+            {/* 11-Step Pipeline & Boundary Tables Audit */}
+            <TopDownPipelineAudit
+              candles={candles}
+              scenario={activeScenario}
+              scenarios={scenarios}
+              marketType={marketType}
+              timeframe={activeTimeframe}
+              parentRole={drillContext?.role || 'ROOT'}
+              parentWaveLabel={drillContext?.waveLabel || ''}
+              compact
+            />
+
             {/* Strict PatternValidator Stepper */}
             <PatternValidator
               scenario={activeScenario}
@@ -184,6 +221,56 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onApplyAlternative={(newPattern) => onPatternChange(newPattern)}
               onApplyExtendedAdjustment={() => {}}
             />
+          </div>
+        )}
+
+        {activeTab === 'ANGLE_TARGETS' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setTargetsSubView('RADAR')}
+                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsSubView === 'RADAR'
+                    ? 'bg-cyan-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                رادار زوایا و نفوذ
+              </button>
+              <button
+                type="button"
+                onClick={() => setTargetsSubView('PRZ')}
+                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsSubView === 'PRZ'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                تارگت‌های تفصیلی PRZ
+              </button>
+            </div>
+
+            {targetsSubView === 'RADAR' ? (
+              <AnglePenetrationWidget
+                scenario={activeScenario}
+                candles={candles}
+                parentRole={drillContext?.role || 'ROOT'}
+                parentWaveLabel={drillContext?.waveLabel || ''}
+              />
+            ) : (
+              <TargetProjectionPanel
+                currentLevelScenarios={scenarios}
+                activeScenarioId={activeScenarioId}
+                candles={candles}
+                parentRole={drillContext?.role || 'ROOT'}
+                parentWaveLabel={drillContext?.waveLabel || ''}
+                onSelectScenario={onSelectScenario}
+                onHoverScenario={onHoverScenario}
+                showPRZ={true}
+                showTMV={true}
+              />
+            )}
           </div>
         )}
 

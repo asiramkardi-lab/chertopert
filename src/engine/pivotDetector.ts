@@ -17,6 +17,26 @@ export interface PivotPoint {
   strength: number; // 0 to 100
 }
 
+export const TIMEFRAME_PIVOT_WINDOWS: Record<string, number> = {
+  '1M': 3,
+  MONTHLY: 3,
+  '1W': 4,
+  WEEKLY: 4,
+  '1D': 5,
+  DAILY: 5,
+  '4H': 6,
+  '1H': 8,
+  '15M': 10
+};
+
+/**
+ * Step 3.2: Adaptive pivot detection window size per timeframe.
+ */
+export function getPivotWindowForTimeframe(timeframe: string): number {
+  const key = (timeframe || '1D').trim().toUpperCase();
+  return TIMEFRAME_PIVOT_WINDOWS[key] ?? 5;
+}
+
 export class PivotDetector {
   /**
    * Calculate Average True Range (ATR) to calibrate swing threshold

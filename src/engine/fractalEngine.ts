@@ -123,20 +123,55 @@ export function relabelVerticesForDegree(vertices: WaveVertex[], targetDegree: W
   }));
 }
 
+export const MAX_DEGREES_BY_TF: Record<string, { stock: number; forex: number }> = {
+  '1M': { stock: 2, forex: 5 },
+  '1W': { stock: 3, forex: 7 },
+  '1D': { stock: 4, forex: 10 },
+  '4H': { stock: 5, forex: 12 },
+  '1H': { stock: 6, forex: 15 },
+  '15M': { stock: 0, forex: 15 } // در بورس ایران ۱۵ دقیقه مجاز نیست
+};
+
+export function getNextLowerTimeframe(currentTf: string): string | null {
+  const order = ['1M', '1W', '1D', '4H', '1H', '15M'];
+  const idx = order.indexOf(currentTf);
+  return idx >= 0 && idx + 1 < order.length ? order[idx + 1] : null;
+}
+
 export class FractalEngine {
   /**
-   * Session 3.8 & 5.12: Maximum wave degrees allowed per timeframe & market profile.
-   * Daily: max 4, Weekly: max 3, Monthly: max 2. TSE Iran strictly caps at 4 degrees (no counting below 4H).
+   * Step 1.2 & Sessions 3.8 / 5.12: Maximum wave degrees allowed per timeframe & market profile.
+   * Spec Table 1.2:
+   * - Stock / TSE Iran: monthly=2, weekly=3, daily=4, 4h=5, 1h=6, 15m=0 (strictly capped at visual 4 degrees for TSE_IRAN)
+   * - Crypto / Forex / Commodity: monthly=5, weekly=7, daily=10, 4h=12, 1h=15, 15m=15
    */
   public static getMaxDegreesForTimeframe(
     timeframe: string,
+    marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO',
+    rawSpecMode: boolean = false
+  ): number {
+    const key = (timeframe || '1D').toUpperCase();
+    const entry = MAX_DEGREES_BY_TF[key] ?? { stock: 4, forex: 10 };
+    if (marketType === 'TSE_IRAN') {
+      if (key === '15M' || key === '1H') return 0; // زیر ۴ ساعته در بورس مجاز نیست
+      return rawSpecMode ? entry.stock : Math.min(4, entry.stock);
+    }
+    return rawSpecMode ? entry.forex : Math.min(4, entry.forex);
+  }
+
+  /**
+   * Returns raw specification degree depth (up to 15 for Crypto/Forex, up to 4/6 for Stock)
+   */
+  public static getSpecMaxDegrees(
+    timeframe: string,
     marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO'
   ): number {
-    if (timeframe === '1M') return 2;
-    if (timeframe === '1W') return 3;
-    if (timeframe === '1D') return 4;
-    if (marketType === 'TSE_IRAN') return 4;
-    return 4;
+    const key = (timeframe || '1D').toUpperCase();
+    const entry = MAX_DEGREES_BY_TF[key] ?? { stock: 4, forex: 10 };
+    if (marketType === 'TSE_IRAN') {
+      return key === '15M' ? 0 : Math.min(4, entry.stock);
+    }
+    return entry.forex;
   }
 
   /**
@@ -148,12 +183,14 @@ export class FractalEngine {
     marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO'
   ): DegreeAssignmentResult {
     const maxAllowed = this.getMaxDegreesForTimeframe(timeframe, marketType);
-    const clampedCount = Math.max(1, Math.min(nestingDepth, maxAllowed, DEGREE_ORDER.length));
+    const clampedCount = Math.max(1, Math.min(nestingDepth, maxAllowed || 1, DEGREE_ORDER.length));
     const degrees = DEGREE_ORDER.slice(0, clampedCount);
     const droppedLevels = Math.max(0, nestingDepth - clampedCount);
 
     const reasonFa =
-      droppedLevels > 0
+      maxAllowed === 0
+        ? `تایم‌فریم ${timeframe} در بورس ایران مجاز به شمارش نیست (نقدشوندگی و محدودیت درجه).`
+        : droppedLevels > 0
         ? `تایم‌فریم ${timeframe} حداکثر از ${maxAllowed} درجه پشتیبانی می‌کند؛ ${droppedLevels} سطح ریزموج اضافی طبق قانون توقف درجه حذف شد.`
         : `تخصیص ${degrees.length} درجه ساختاری در تایم‌فریم ${timeframe} کاملاً مجاز است (حداکثر مجاز: ${maxAllowed}).`;
 

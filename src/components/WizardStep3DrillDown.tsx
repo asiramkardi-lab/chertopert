@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * Wizard Step 3: Recursive Fractal Tree, Bijective Leg-to-Subbranch Mapping,
- * Multi-Timeframe Drill-Down, Independent Per-Scenario Validation, and Final-Step Target & PRZ/TMW Forecast.
+ * Multi-Timeframe Drill-Down, Independent Per-Scenario Validation, and Final-Step Target & PRZ/TMV Forecast.
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -21,6 +21,8 @@ import { ChartInteractionMode } from './ChartStudio';
 import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import { PatternValidator } from './PatternValidator';
 import { TargetProjectionPanel, TargetProjectionBranchItem } from './TargetProjectionPanel';
+import { AnglePenetrationWidget } from './AnglePenetrationWidget';
+import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import {
   GitBranch,
   ChevronLeft,
@@ -42,7 +44,6 @@ import {
   CornerDownLeft,
   ShieldCheck,
   Target,
-  Clock,
   TrendingUp,
   TrendingDown,
   ArrowUpLeft
@@ -87,8 +88,8 @@ interface WizardStep3DrillDownProps {
   candles?: Candle[];
   showPRZ?: boolean;
   onToggleShowPRZ?: () => void;
-  showTMW?: boolean;
-  onToggleShowTMW?: () => void;
+  showTMV?: boolean;
+  onToggleShowTMV?: () => void;
 }
 
 export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
@@ -123,10 +124,11 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   candles = [],
   showPRZ = true,
   onToggleShowPRZ,
-  showTMW = true,
-  onToggleShowTMW
+  showTMV = true,
+  onToggleShowTMV
 }) => {
   const [subTab, setSubTab] = useState<'SCENARIOS' | 'LEGS' | 'TARGETS' | 'EDIT' | 'RULES'>('SCENARIOS');
+  const [targetsViewMode, setTargetsViewMode] = useState<'ANGLE_RADAR' | 'PRZ_TMV'>('ANGLE_RADAR');
   const [validationReportsById, setValidationReportsById] = useState<Record<string, ValidationSummary>>({});
   const [expandedNodeIds, setExpandedNodeIds] = useState<Record<string, boolean>>({});
 
@@ -481,7 +483,6 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   const failedHardRules = activeLevelScenario.rulesResults.filter(r => r.type === 'HARD' && !r.passed);
   const solvableAlt = failedHardRules.find(r => r.canBeSolvedByAlternate)?.canBeSolvedByAlternate;
   const primaryPrz = activeProjection?.przZones.find(z => z.isPrimary) || activeProjection?.przZones[0];
-  const primaryTmw = activeProjection?.tmwZones.find(z => z.isPrimary) || activeProjection?.tmwZones[0];
 
   const renderValidationBanner = () => {
     const summary = validationReportsById[activeLevelScenario.id];
@@ -532,12 +533,12 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Breadcrumb, PRZ/TMW Bar & Navigation */}
+      {/* Breadcrumb, PRZ/TMV Bar & Navigation */}
       <div className="p-4 pb-3 border-b border-slate-800 space-y-2.5 shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-white flex items-center gap-2">
             <GitBranch className="w-4 h-4 text-indigo-400" />
-            <span>مرحله ۳: درخت متناظر، تارگت و PRZ/TMW</span>
+            <span>مرحله ۳: درخت متناظر، تارگت و PRZ/TMV</span>
           </h2>
           <span className="text-[11px] font-mono text-slate-400">سقف: {confirmedLowestTF}</span>
         </div>
@@ -588,39 +589,39 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
           </div>
         )}
 
-        {/* Independent PRZ & TMW Zone Controls */}
-        {(onToggleShowPRZ || onToggleShowTMW) && (
+        {/* Independent Horizontal PRZ & Horizontal TMV Controls */}
+        {(onToggleShowPRZ || onToggleShowTMV) && (
           <div className="grid grid-cols-2 gap-1.5">
             <button
               type="button"
               onClick={onToggleShowPRZ}
-              className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+              className={`flex items-center justify-between gap-1 px-2.5 py-1.5 rounded-lg border text-[10.5px] font-semibold transition-colors ${
                 showPRZ
                   ? 'bg-amber-500/15 border-amber-500/45 text-amber-200'
                   : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
               }`}
             >
-              <span className="flex items-center gap-1">
-                {showPRZ ? <Eye className="w-3.5 h-3.5 text-amber-400" /> : <EyeOff className="w-3.5 h-3.5" />}
-                <span>PRZ قیمتی</span>
+              <span className="flex items-center gap-1 min-w-0 truncate">
+                {showPRZ ? <Eye className="w-3.5 h-3.5 text-amber-400 shrink-0" /> : <EyeOff className="w-3.5 h-3.5 shrink-0" />}
+                <span className="truncate">PRZ افقی</span>
               </span>
-              <span className="font-mono text-[10px]">{showPRZ ? 'نمایش' : 'مخفی'}</span>
+              <span className="font-mono text-[9.5px] shrink-0">{showPRZ ? 'نمایش' : 'مخفی'}</span>
             </button>
 
             <button
               type="button"
-              onClick={onToggleShowTMW}
-              className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
-                showTMW
-                  ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200'
+              onClick={onToggleShowTMV}
+              className={`flex items-center justify-between gap-1 px-2.5 py-1.5 rounded-lg border text-[10.5px] font-semibold transition-colors ${
+                showTMV
+                  ? 'bg-sky-500/15 border-sky-500/45 text-sky-200'
                   : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
               }`}
             >
-              <span className="flex items-center gap-1">
-                {showTMW ? <Eye className="w-3.5 h-3.5 text-cyan-400" /> : <EyeOff className="w-3.5 h-3.5" />}
-                <span>TMW زمانی</span>
+              <span className="flex items-center gap-1 min-w-0 truncate">
+                {showTMV ? <Eye className="w-3.5 h-3.5 text-sky-400 shrink-0" /> : <EyeOff className="w-3.5 h-3.5 shrink-0" />}
+                <span className="truncate">TMV افقی</span>
               </span>
-              <span className="font-mono text-[10px]">{showTMW ? 'نمایش' : 'مخفی'}</span>
+              <span className="font-mono text-[9.5px] shrink-0">{showTMV ? 'نمایش' : 'مخفی'}</span>
             </button>
           </div>
         )}
@@ -698,7 +699,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 <span>پیش‌بینی گام آخر ({activeProjection.lastLegLabel})</span>
               </span>
               <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-300 font-semibold">
-                <span>جزئیات تارگت و PRZ/TMW</span>
+                <span>رادار زوایا، تارگت و PRZ</span>
                 <ArrowUpLeft className="w-3 h-3" />
               </span>
             </div>
@@ -706,8 +707,11 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
               <span className="truncate text-amber-300">
                 PRZ: {primaryPrz ? `${primaryPrz.lowPrice.toLocaleString()}–${primaryPrz.highPrice.toLocaleString()}` : '—'}
               </span>
-              <span className="truncate text-cyan-300">
-                TMW: {primaryTmw ? `#${primaryTmw.startCandleIndex + 1}–#${primaryTmw.endCandleIndex + 1}` : '—'}
+              <span className="truncate text-sky-300">
+                TMV:{' '}
+                {activeProjection.tmvZones?.[0]
+                  ? `${activeProjection.tmvZones[0].lowPrice.toLocaleString()}–${activeProjection.tmvZones[0].highPrice.toLocaleString()}`
+                  : '—'}
               </span>
               <span className="text-white font-bold">
                 {activeProjection.targets[0] ? activeProjection.targets[0].price.toLocaleString() : '—'}
@@ -1002,31 +1006,67 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
         )}
 
         {subTab === 'TARGETS' && (
-          <TargetProjectionPanel
-            currentLevelScenarios={
-              currentDrill
-                ? activeSubScenarios
-                : rootScenarios.filter(s => s.isSelectedForTree && !s.isDiscarded)
-            }
-            allBranchItems={allTreeBranchItems}
-            activeScenarioId={activeLevelScenario.id}
-            candles={candles}
-            parentRole={currentDrill?.role || 'ROOT'}
-            parentWaveLabel={currentDrill?.waveLabel || ''}
-            onSelectScenario={id => {
-              if (currentDrill) {
-                onSelectSubScenario(id);
-              } else {
-                const matchedNode = fractalTreeNodes.find(n => n.scenarioId === id);
-                if (matchedNode) onSelectRootNode(matchedNode.id);
-              }
-            }}
-            onHoverScenario={onHoverScenario}
-            showPRZ={showPRZ}
-            onToggleShowPRZ={onToggleShowPRZ}
-            showTMW={showTMW}
-            onToggleShowTMW={onToggleShowTMW}
-          />
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setTargetsViewMode('ANGLE_RADAR')}
+                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsViewMode === 'ANGLE_RADAR'
+                    ? 'bg-cyan-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                رادار زوایا و نفوذ
+              </button>
+              <button
+                type="button"
+                onClick={() => setTargetsViewMode('PRZ_TMV')}
+                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsViewMode === 'PRZ_TMV'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                پروجکشن PRZ و TMV
+              </button>
+            </div>
+
+            {targetsViewMode === 'ANGLE_RADAR' ? (
+              <AnglePenetrationWidget
+                scenario={activeLevelScenario}
+                candles={candles}
+                parentRole={currentDrill?.role || 'ROOT'}
+                parentWaveLabel={currentDrill?.waveLabel || ''}
+              />
+            ) : (
+              <TargetProjectionPanel
+                currentLevelScenarios={
+                  currentDrill
+                    ? activeSubScenarios
+                    : rootScenarios.filter(s => s.isSelectedForTree && !s.isDiscarded)
+                }
+                allBranchItems={allTreeBranchItems}
+                activeScenarioId={activeLevelScenario.id}
+                candles={candles}
+                parentRole={currentDrill?.role || 'ROOT'}
+                parentWaveLabel={currentDrill?.waveLabel || ''}
+                onSelectScenario={id => {
+                  if (currentDrill) {
+                    onSelectSubScenario(id);
+                  } else {
+                    const matchedNode = fractalTreeNodes.find(n => n.scenarioId === id);
+                    if (matchedNode) onSelectRootNode(matchedNode.id);
+                  }
+                }}
+                onHoverScenario={onHoverScenario}
+                showPRZ={showPRZ}
+                onToggleShowPRZ={onToggleShowPRZ}
+                showTMV={showTMV}
+                onToggleShowTMV={onToggleShowTMV}
+              />
+            )}
+          </div>
         )}
 
         {subTab === 'EDIT' && (
@@ -1167,6 +1207,16 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
 
         {subTab === 'RULES' && (
           <div className="space-y-3">
+            <TopDownPipelineAudit
+              candles={candles}
+              scenario={activeLevelScenario}
+              scenarios={currentDrill ? activeSubScenarios : rootScenarios}
+              timeframe={activeLevelScenario.timeframe}
+              parentRole={currentDrill?.role || 'ROOT'}
+              parentWaveLabel={currentDrill?.waveLabel || ''}
+              compact
+            />
+
             <PatternValidator
               scenario={activeLevelScenario}
               candles={candles}

@@ -140,7 +140,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
   const [hoveredWizardScenarioId, setHoveredWizardScenarioId] = useState<string | null>(null);
   const [highlightedLegIndex, setHighlightedLegIndex] = useState<number | null>(null);
   const [showPRZ, setShowPRZ] = useState<boolean>(() => initialDraft?.showPRZ ?? true);
-  const [showTMW, setShowTMW] = useState<boolean>(() => initialDraft?.showTMW ?? true);
+  const [showTMV, setShowTMV] = useState<boolean>(() => initialDraft?.showTMV ?? true);
 
   const prevResetDepsRef = React.useRef({ assetId: asset.id, resetSignal });
   const savedDraftByAssetRef = React.useRef(savedDraftByAsset);
@@ -175,7 +175,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
       setHoveredWizardScenarioId(null);
       setHighlightedLegIndex(null);
       setShowPRZ(nextDraft.showPRZ);
-      setShowTMW(nextDraft.showTMW);
+      setShowTMV(nextDraft.showTMV ?? true);
       return;
     }
 
@@ -200,7 +200,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
     setHoveredWizardScenarioId(null);
     setHighlightedLegIndex(null);
     setShowPRZ(true);
-    setShowTMW(true);
+    setShowTMV(true);
   }, [asset.id, resetSignal, boundaryReport.highestValidTF, boundaryReport.lowestValidTF, dataByTf]);
 
   const onDraftChangeRef = React.useRef(onDraftChange);
@@ -224,7 +224,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
       subScenariosByKey,
       activeSubIdByKey,
       showPRZ,
-      showTMW
+      showTMV
     });
   }, [
     asset.id,
@@ -243,7 +243,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
     subScenariosByKey,
     activeSubIdByKey,
     showPRZ,
-    showTMW
+    showTMV
   ]);
 
   // Keep absoluteBottom aligned if user changes confirmedHighestTF in Step 1
@@ -838,7 +838,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
     }
   };
 
-  // Build flat list of all tree branches across all levels for Target & PRZ/TMW Tree View
+  // Build flat list of all tree branches across all levels for Target & PRZ/TMV Tree View
   const allTreeBranchItems: TargetProjectionBranchItem[] = useMemo(() => {
     const items: TargetProjectionBranchItem[] = [];
     const walk = (nodes: FractalNode[], rootId: string, prefixPath: string) => {
@@ -1145,8 +1145,8 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
             onValidateActiveScenario={handleValidateWizardScenario}
             showPRZ={showPRZ}
             onToggleShowPRZ={() => setShowPRZ(p => !p)}
-            showTMW={showTMW}
-            onToggleShowTMW={() => setShowTMW(p => !p)}
+            showTMV={showTMV}
+            onToggleShowTMV={() => setShowTMV(p => !p)}
             hideZoneControls={step === 1}
             highlightedLegIndex={highlightedLegIndex}
             drillTrail={
@@ -1250,8 +1250,8 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
               candles={activeChartCandles}
               showPRZ={showPRZ}
               onToggleShowPRZ={() => setShowPRZ(p => !p)}
-              showTMW={showTMW}
-              onToggleShowTMW={() => setShowTMW(p => !p)}
+              showTMV={showTMV}
+              onToggleShowTMV={() => setShowTMV(p => !p)}
             />
           )}
 
@@ -1328,8 +1328,8 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
               candles={activeChartCandles}
               showPRZ={showPRZ}
               onToggleShowPRZ={() => setShowPRZ(p => !p)}
-              showTMW={showTMW}
-              onToggleShowTMW={() => setShowTMW(p => !p)}
+              showTMV={showTMV}
+              onToggleShowTMV={() => setShowTMV(p => !p)}
             />
           )}
         </aside>

@@ -61,7 +61,7 @@ export interface WizardAssetDraftPayload {
   subScenariosByKey: Record<string, WaveScenario[]>;
   activeSubIdByKey: Record<string, string>;
   showPRZ: boolean;
-  showTMW: boolean;
+  showTMV?: boolean;
 }
 
 export interface FeiAutoSaveDraft {

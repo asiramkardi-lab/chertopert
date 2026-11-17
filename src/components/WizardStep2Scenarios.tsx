@@ -27,7 +27,6 @@ import {
   Check,
   X,
   ShieldCheck,
-  Clock,
   Target
 } from 'lucide-react';
 
@@ -55,8 +54,8 @@ interface WizardStep2ScenariosProps {
   candles?: Candle[];
   showPRZ?: boolean;
   onToggleShowPRZ?: () => void;
-  showTMW?: boolean;
-  onToggleShowTMW?: () => void;
+  showTMV?: boolean;
+  onToggleShowTMV?: () => void;
 }
 
 export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
@@ -83,8 +82,8 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
   candles = [],
   showPRZ = true,
   onToggleShowPRZ,
-  showTMW = true,
-  onToggleShowTMW
+  showTMV = true,
+  onToggleShowTMV
 }) => {
   const [innerTab, setInnerTab] = useState<'LIST' | 'EDIT_VERTICES' | 'RULES'>('LIST');
   const [validationReportsById, setValidationReportsById] = useState<Record<string, ValidationSummary>>({});
@@ -231,59 +230,64 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
           </button>
         </div>
 
-        {/* Independent PRZ & TMW Zone Controls + Active Scenario Live Readout */}
-        {(onToggleShowPRZ || onToggleShowTMW) && (
+        {/* Independent Horizontal PRZ & Horizontal TMV Controls */}
+        {(onToggleShowPRZ || onToggleShowTMV) && (
           <div className="p-2 rounded-lg bg-slate-950/90 border border-slate-800 space-y-1.5">
             <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
                 onClick={onToggleShowPRZ}
-                className={`flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-md border text-[11px] font-semibold transition-colors ${
+                className={`flex items-center justify-between gap-1 px-2.5 py-1.5 rounded-md border text-[10.5px] font-semibold transition-colors ${
                   showPRZ
                     ? 'bg-amber-500/15 border-amber-500/45 text-amber-200'
                     : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
                 }`}
               >
-                <span className="flex items-center gap-1">
-                  <Target className="w-3 h-3 text-amber-400" />
-                  <span>ناحیه PRZ</span>
+                <span className="flex items-center gap-1 min-w-0 truncate">
+                  <Target className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span className="truncate">PRZ افقی</span>
                 </span>
-                <span className="text-[10px] font-mono">{showPRZ ? 'روشن' : 'خاموش'}</span>
+                <span className="text-[9.5px] font-mono shrink-0">{showPRZ ? 'روشن' : 'خاموش'}</span>
               </button>
 
               <button
                 type="button"
-                onClick={onToggleShowTMW}
-                className={`flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-md border text-[11px] font-semibold transition-colors ${
-                  showTMW
-                    ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200'
+                onClick={onToggleShowTMV}
+                className={`flex items-center justify-between gap-1 px-2.5 py-1.5 rounded-md border text-[10.5px] font-semibold transition-colors ${
+                  showTMV
+                    ? 'bg-sky-500/15 border-sky-500/45 text-sky-200'
                     : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
                 }`}
               >
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-cyan-400" />
-                  <span>پنجره TMW</span>
+                <span className="flex items-center gap-1 min-w-0 truncate">
+                  <Target className="w-3 h-3 text-sky-400 shrink-0" />
+                  <span className="truncate">TMV افقی</span>
                 </span>
-                <span className="text-[10px] font-mono">{showTMW ? 'روشن' : 'خاموش'}</span>
+                <span className="text-[9.5px] font-mono shrink-0">{showTMV ? 'روشن' : 'خاموش'}</span>
               </button>
             </div>
 
-            {activeProjection && (activeProjection.przZones[0] || activeProjection.tmwZones[0]) && (
-              <div className="flex items-center justify-between gap-2 px-1 text-[10px] font-mono tabular-nums text-slate-400">
-                <span className="truncate text-amber-300/90">
-                  PRZ:{' '}
-                  {activeProjection.przZones[0]
-                    ? `${activeProjection.przZones[0].lowPrice.toLocaleString()}–${activeProjection.przZones[0].highPrice.toLocaleString()}`
-                    : '—'}
-                </span>
-                <span className="truncate text-cyan-300/90">
-                  TMW:{' '}
-                  {activeProjection.tmwZones[0]
-                    ? `#${activeProjection.tmwZones[0].startCandleIndex + 1}–#${activeProjection.tmwZones[0].endCandleIndex + 1}`
-                    : '—'}
-                </span>
-              </div>
-            )}
+            {activeProjection && (() => {
+              const primaryPrz = activeProjection.przZones.find(z => z.isPrimary) || activeProjection.przZones[0];
+              const primaryTmv = activeProjection.tmvZones?.[0];
+              if (!primaryPrz && !primaryTmv) return null;
+              return (
+                <div className="flex items-center justify-between gap-2 px-1 text-[10px] font-mono tabular-nums text-slate-400">
+                  <span className="truncate text-amber-300/90">
+                    PRZ:{' '}
+                    {primaryPrz
+                      ? `${primaryPrz.lowPrice.toLocaleString()}–${primaryPrz.highPrice.toLocaleString()}`
+                      : '—'}
+                  </span>
+                  <span className="truncate text-sky-300/90">
+                    TMV:{' '}
+                    {primaryTmv
+                      ? `${primaryTmv.lowPrice.toLocaleString()}–${primaryTmv.highPrice.toLocaleString()}`
+                      : '—'}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
