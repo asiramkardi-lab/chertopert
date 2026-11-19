@@ -215,6 +215,10 @@ export interface DiagonalAnalysisReport {
   isCommonLocation: boolean;
   correctionDepthFa: string;
   correctionTargetRangeFa: string;
+  hasRule3Overlap?: boolean;
+  diagonalSubwaveErrors?: string[];
+  postDiagonalDropConfirmed?: boolean;
+  postDiagonalDropPct?: number | null;
   confidence: number;
   warnings: string[];
   notes: string[];
@@ -230,6 +234,7 @@ export interface ZigzagAnalysisReport {
   bOverARatioPct: number;
   waveCClass: 'TRUNCATED' | 'NORMAL' | 'EXTENDED' | 'INVALID';
   waveCClassFa: string;
+  isBorderlineC1618?: boolean;
   postPatternTargetPct: number;
   postPatternBasisFa: string;
   postPatternTargetPrice: number;
@@ -262,6 +267,8 @@ export interface FlatAnalysisReport {
   cSubStructure: 'IDEAL' | 'DIAGONAL' | 'TERMINAL';
   vsSimpleZigzagFa: string;
   knotUntanglerRecommended: boolean;
+  borderlineNotesFa?: string[];
+  isWave4KnotUntangler?: boolean;
   confidence: number;
   warnings: string[];
   notes: string[];
@@ -310,6 +317,10 @@ export interface TriangleAnalysisReport {
   isCounterTrendAligned: boolean;
   idealRetracement50: boolean;
   idealCompletionBeforeBox3: boolean;
+  timingZone?: 'BEFORE_BOX_3' | 'INSIDE_BOX_3' | 'AFTER_BOX_3';
+  timingSpanRatio?: number;
+  subwaveCounts?: number[];
+  subwaveMismatchWarningFa?: string;
   tradingApproachFa: string;
   endingTriangle: boolean;
   isParallelRectangle?: boolean;
@@ -324,12 +335,16 @@ export interface ExtensionTmvTrailingReport {
   extendedWave: 'WAVE_1' | 'WAVE_3' | 'WAVE_5' | null;
   severity: 'MODERATE' | 'STRONG' | 'SEVERE' | null;
   extensionLabelFa: string;
+  extensionUnconfirmedReasonFa?: string;
+  isTerminalFromW3ExtOverlap?: boolean;
   trailingStopStage:
     | 'IMMEDIATE_PROFIT_TAKING'
     | 'BELOW_100_PROJECTION'
     | 'BELOW_618_RETRACEMENT'
     | 'BELOW_WAVE_2'
     | 'INITIAL_BELOW_WAVE_2';
+  trailingStopPrice: number | null;
+  trailingStopStatus: 'ACTIVE' | 'INACTIVE_WARNING' | 'IMMEDIATE_EXIT';
   trailingStopLabelFa: string;
   trailingStopDescFa: string;
   trailingLockPct: number | null;
@@ -387,9 +402,24 @@ export interface InputDataValidationReport {
   historySpanDays: number;
   dojiPct: number;
   recommendedStartTf: '1D' | '1W' | '1M';
+  recommendedStartReasonFa?: string;
+  sanitizedCandles?: Candle[];
+  sortedOutOfOrder?: boolean;
+  hasZeroVolumeCandles?: boolean;
+  zeroVolumeCount?: number;
+  hasDuplicateTimestamps?: boolean;
   errors: string[];
   warnings: string[];
   historyWarnings: string[];
+}
+
+export interface FibonacciToolValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+  toolType: 'RETRACEMENT' | 'PROJECTION';
+  pairUsedLabel?: string;
+  isWave5RetracementInvalid?: boolean;
 }
 
 export interface ScenarioProjectionReport {
@@ -411,6 +441,9 @@ export interface ScenarioProjectionReport {
   forbidWave5RetracementFa?: string;
   wave3ExtensionEffectFa?: string;
   tmvPrimeApproxIdealWarningFa?: string;
+  fibValidation?: FibonacciToolValidationResult;
+  fibValidationWarnings?: string[];
+  isWave5RetracementInvalid?: boolean;
 }
 
 export type PipelineStepStatus = 'PASSED' | 'WARNING' | 'BLOCKED' | 'SKIPPED';
@@ -448,6 +481,32 @@ export interface PipelinePriorityCandidate {
   isPrimary: boolean;
 }
 
+export interface MultiTfRefinementStep {
+  timeframe: string;
+  degree: WaveDegree;
+  candleCount: number;
+  legChecks: Array<{
+    legLabel: string;
+    role: WaveRole;
+    detectedSubwaves: 3 | 5 | null;
+    nature: WaveNature;
+    verdictFa: string;
+  }>;
+  stoppedReasonFa?: string;
+}
+
+export interface MultiTfRefinementSummary {
+  startTf: string;
+  finalTf: string;
+  traversedTimeframes: string[];
+  reachedDegreeLevel: number;
+  maxAllowedDegree: number;
+  fallbackToHigherTf: boolean;
+  fallbackReasonFa?: string;
+  steps: MultiTfRefinementStep[];
+  relabelingSuggestions: string[];
+}
+
 export interface TopDownPipelineReport {
   marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
   startTf: string;
@@ -472,6 +531,18 @@ export interface TopDownPipelineReport {
   }>;
   entryActionFa: string;
   riskActionFa: string;
+  trailingStopPrice?: number | null;
+  trailingStopStatus?: 'ACTIVE' | 'INACTIVE_WARNING' | 'IMMEDIATE_EXIT';
+  multiTfRefinementSummary?: MultiTfRefinementSummary;
+  fibValidationWarnings?: string[];
+  relabelingSuggestions?: string[];
+  promotionOpportunity?: {
+    shouldPromote: boolean;
+    canPromoteDegree: boolean;
+    fromDegree: WaveDegree;
+    toDegree: WaveDegree;
+    reasonFa: string;
+  };
 }
 
 export interface WaveScenario {

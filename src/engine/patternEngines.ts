@@ -117,6 +117,18 @@ export class PatternEngines {
 
     const w1Subs = estimateSubwaveCount(candles, verts[0].candleIndex, verts[1].candleIndex, 3);
     const w2Subs = estimateSubwaveCount(candles, verts[1].candleIndex, verts[2].candleIndex, 3);
+    const w3Subs = estimateSubwaveCount(candles, verts[2].candleIndex, verts[3].candleIndex, 3);
+    const w4Subs = estimateSubwaveCount(candles, verts[3].candleIndex, verts[4].candleIndex, 3);
+    const w5Subs = estimateSubwaveCount(candles, verts[4].candleIndex, verts[5].candleIndex, 3);
+
+    const diagonalSubwaveErrors: string[] = [];
+    if (w3Subs === 5) diagonalSubwaveErrors.push('موج ۳ قطر ساختار ۵موجی نشان می‌دهد (در قطر استاندارد ۳-۳-۳-۳-۳ غیرمجاز)');
+    if (w5Subs === 5) diagonalSubwaveErrors.push('موج ۵ قطر ساختار ۵موجی نشان می‌دهد (در قطر استاندارد ۳-۳-۳-۳-۳ غیرمجاز)');
+    if (diagonalSubwaveErrors.length > 0) {
+      warnings.push(...diagonalSubwaveErrors);
+    }
+
+    const hasRule3Overlap = isBull ? verts[4].price <= verts[1].price : verts[4].price >= verts[1].price;
 
     let diagonalVariant: DiagonalAnalysisReport['diagonalVariant'] = 'IMPULSIVE';
     let variantLabelFa = 'قطر شتابدار (Impulsive Diagonal: ۳-۳-۳-۳-۳)';
@@ -135,9 +147,34 @@ export class PatternEngines {
       variantLabelFa = 'قطر پیشرو ایده‌آل (Leading Ideal: موج ۱-۲ به‌صورت ۵-۳)';
     }
 
+    if ((diagonalVariant === 'LEADING_IDEAL' || diagonalVariant === 'LEADING_ANTI') && !hasRule3Overlap) {
+      notes.push('جدول ۹.۴: قطر پیشرو بدون هم‌پوشانی موج ۴ و ۱ تشکیل شده است (حالت نادر؛ نیازمند تفکیک از سیکل ایده‌آل).');
+    }
+
     const diagStart = verts[0].price;
     const diagEnd = verts[5].price;
-    const diagSpan = Math.abs(diagEnd - diagStart);
+    const diagSpan = Math.max(0.01, Math.abs(diagEnd - diagStart));
+
+    // Table 9: Post-Wave-5 trailing candles sharp drop confirmation in Ending Diagonal
+    let postDiagonalDropConfirmed = false;
+    let postDiagonalDropPct: number | null = null;
+    if (diagonalVariant === 'ENDING' && candles.length > verts[5].candleIndex + 1) {
+      const trailingBars = candles.slice(verts[5].candleIndex + 1);
+      let postExtreme = diagEnd;
+      for (const bar of trailingBars) {
+        if (isBull && bar.low < postExtreme) postExtreme = bar.low;
+        if (!isBull && bar.high > postExtreme) postExtreme = bar.high;
+      }
+      const dropAmt = isBull ? diagEnd - postExtreme : postExtreme - diagEnd;
+      postDiagonalDropPct = Math.round((Math.max(0, dropAmt) / diagSpan) * 1000) / 10;
+      if (postDiagonalDropPct >= 85) {
+        postDiagonalDropConfirmed = true;
+        notes.push(`جدول ۹: بازگشت سریع ${postDiagonalDropPct}٪ (≥ ۸۵٪) پس از موج ۵ قطر پایانی تایید شد (سیگنال خروج/ریزش فعال).`);
+      } else {
+        warnings.push(`جدول ۹: بازگشت پس از قطر پایانی فعلاً ${postDiagonalDropPct}٪ (< ۸۵٪) است؛ ریزش سریع هنوز کامل نشده است.`);
+      }
+    }
+
     const rev50 = roundPrice(diagEnd - sign * diagSpan * 0.5);
     const rev618 = roundPrice(diagEnd - sign * diagSpan * 0.618);
     const isAnti = diagonalVariant === 'ANTI_DIAGONAL';
@@ -172,6 +209,10 @@ export class PatternEngines {
       isCommonLocation,
       correctionDepthFa,
       correctionTargetRangeFa,
+      hasRule3Overlap,
+      diagonalSubwaveErrors,
+      postDiagonalDropConfirmed,
+      postDiagonalDropPct,
       confidence,
       warnings,
       notes
@@ -228,15 +269,13 @@ export class PatternEngines {
 
     let subType: ZigzagAnalysisReport['subType'] = 'IDEAL';
     let subTypeLabelFa = 'زیگزاگ ایده‌آل (۵-۳-۵)';
-    if (sa === 3 && sb === 3 && sc === 3) {
-      if (bOverARatioPct < 61.8) {
-        subType = 'SIMPLE';
-        subTypeLabelFa = 'زیگزاگ سیمپل (۳-۳-۳ با B < ۶۱.۸٪ — جدول ۶)';
-      } else {
-        subType = 'SIMPLE';
-        subTypeLabelFa = 'ساختار ۳-۳-۳ ترکیبی (B ≥ ۶۱.۸٪ موج A — جدول ۶.۵)';
-        warnings.push('جدول ۶ (ردیف ۵): در ساختار ۳-۳-۳ با اصلاح B بیش از ۶۱.۸٪، احتمال الگوی ترکیبی بیش از زیگزاگ ساده است.');
-      }
+    if (sc === 3 && bOverARatioPct >= 61.8) {
+      subType = 'SIMPLE';
+      subTypeLabelFa = `ساختار ${structureLabel} ترکیبی (موج C سه‌موجی و B ≥ ۶۱.۸٪ — جدول ۶.۵)`;
+      warnings.push('جدول ۶ (ردیف ۵): در صورت ۳موجی بودن C و اصلاح B ≥ ۶۱.۸٪ موج A، الگوی ترکیبی محتمل‌تر از زیگزاگ است.');
+    } else if (sa === 3 && sb === 3 && sc === 3) {
+      subType = 'SIMPLE';
+      subTypeLabelFa = 'زیگزاگ سیمپل (۳-۳-۳ با B < ۶۱.۸٪ — جدول ۶)';
     } else if (sa === 3 && sb === 5 && sc === 5) {
       subType = 'ANTI';
       subTypeLabelFa = 'زیگزاگ آنتی‌ای (۳-۵-۵)';
@@ -245,6 +284,7 @@ export class PatternEngines {
     let waveCClass: ZigzagAnalysisReport['waveCClass'] = 'NORMAL';
     let waveCClassFa = 'معمولی (۱۰۰–۱۶۱.۸٪ موج A)';
     const cRatio = lenC / lenA;
+    const isBorderlineC1618 = Math.abs(cRatio - 1.618) <= 0.015;
     if (cRatio < 0.618) {
       waveCClass = 'INVALID';
       waveCClassFa = 'نامعتبر (< ۶۱.۸٪ موج A — احتمال فلت / ۵۰٪ غیرمعتبر)';
@@ -257,7 +297,11 @@ export class PatternEngines {
     } else if (Math.abs(cRatio - 1.0) <= 0.015) {
       waveCClass = 'NORMAL';
       waveCClassFa = 'مرزی کوتاه‌شده/معمولی (C ≈ ۱۰۰٪ موج A — جدول ۶.۷)';
-    } else if (cRatio <= 1.618) {
+    } else if (isBorderlineC1618) {
+      waveCClass = 'NORMAL';
+      waveCClassFa = 'مرزی معمولی/کشیده (C ≈ ۱۶۱.۸٪ موج A — جدول ۶.۸)';
+      notes.push('جدول ۶: نسبت C/A روی مرز ۱۶۱.۸٪ (±۱.۵٪) قرار دارد.');
+    } else if (cRatio < 1.618) {
       waveCClass = 'NORMAL';
       waveCClassFa = 'معمولی (۱۰۰–۱۶۱.۸٪ موج A)';
     } else {
@@ -327,6 +371,7 @@ export class PatternEngines {
       bOverARatioPct,
       waveCClass,
       waveCClassFa,
+      isBorderlineC1618,
       postPatternTargetPct,
       postPatternBasisFa,
       postPatternTargetPrice,
@@ -445,7 +490,23 @@ export class PatternEngines {
       }
     }
 
+    const borderlineNotesFa: string[] = [];
+    if (Math.abs(bPctOfA - 61.8) <= 1.2) {
+      borderlineNotesFa.push('جدول ۷: B ≈ ۶۱.۸٪ موج A (مرز فلت و زیگزاگ سیمپل).');
+    }
+    if (Math.abs(bPctOfA - 100) <= 1.5 && Math.abs(cPctOfB - 100) <= 1.5) {
+      borderlineNotesFa.push('جدول ۷: B ≈ ۱۰۰٪ و C ≈ ۱۰۰٪ (فلت متعارف مرزی).');
+    }
+    if (Math.abs(bPctOfA - 138.2) <= 1.5) {
+      borderlineNotesFa.push('جدول ۷: B ≈ ۱۳۸.۲٪ موج A (مرز فلت نامنظم و نامنظم کشیده).');
+    }
+    notes.push(...borderlineNotesFa);
+
     const knotUntanglerRecommended = !isMarketEnd && bOver618Valid && scenario.validityScore < 75;
+    const isWave4KnotUntangler = sc === 5 || knotUntanglerRecommended;
+    if (isWave4KnotUntangler) {
+      notes.push('جدول ۷ (فلت گره‌گشا vs صبر بدون گره): در صورت وجود ۵+ زیرموج و بن‌بست شمارش گذشته، فلت گره‌گشایی است.');
+    }
     notes.push('اولویت شمارش جلسه ۱۳: ایده‌آل ← قطر ← ترمینال ← زیگزاگ ← فلت ← مثلث ← ترکیبی.');
 
     return {
@@ -460,6 +521,8 @@ export class PatternEngines {
       cSubStructure,
       vsSimpleZigzagFa,
       knotUntanglerRecommended,
+      borderlineNotesFa,
+      isWave4KnotUntangler,
       confidence: Math.max(0, Math.min(1, confidence)),
       warnings,
       notes
@@ -527,6 +590,9 @@ export class PatternEngines {
     }
 
     if (verts.length < 5) {
+      if (verts.length === 4) {
+        warnings.push('جدول ۸: مثلث حداقل ۵ ضلع (A-B-C-D-E) دارد؛ ساختار ۳موجی فعلی احتمالاً زیگزاگ است.');
+      }
       return {
         detected: false,
         triangleType: 'CONTRACTING',
@@ -539,6 +605,8 @@ export class PatternEngines {
         isCounterTrendAligned: true,
         idealRetracement50: false,
         idealCompletionBeforeBox3: false,
+        timingZone: 'BEFORE_BOX_3',
+        timingSpanRatio: 0,
         tradingApproachFa: 'صبر تا تکمیل موج E و شکست خط روند',
         endingTriangle,
         confidence: 0.45,
@@ -552,6 +620,17 @@ export class PatternEngines {
     const legC = Math.abs(verts[3].price - verts[2].price);
     const legD = Math.abs(verts[4].price - verts[3].price);
     const legE = verts[5] ? Math.abs(verts[5].price - verts[4].price) : legD * 0.7;
+
+    // Table 8: Subwave counts across legs A..E (5 legs with 5 subwaves -> warn Diagonal)
+    const subwaveCounts: number[] = [];
+    for (let li = 0; li < Math.min(5, verts.length - 1); li++) {
+      subwaveCounts.push(estimateSubwaveCount(candles, verts[li].candleIndex, verts[li + 1].candleIndex, 3));
+    }
+    let subwaveMismatchWarningFa: string | undefined;
+    if (subwaveCounts.length === 5 && subwaveCounts.every(c => c === 5)) {
+      subwaveMismatchWarningFa = 'جدول ۸: هر ۵ ضلع ساختار ۵زیرموجی دارند؛ این الگو قطر (Diagonal) است نه مثلث (۳-۳-۳-۳-۳).';
+      warnings.push(subwaveMismatchWarningFa);
+    }
 
     // جدول ۸ (۸.۹ و ۸.۱۰): بررسی مستطیل (موازی) و خطوط روند مختلط
     const isParallelRectangle =
@@ -611,9 +690,22 @@ export class PatternEngines {
       warnings.push('جدول ۸ (۸.۱۵): برخی اضلاع مثلث کمتر از ۵۰٪ بازگشت داشته‌اند (غیرایده‌آل).');
     }
 
+    // Table 8: Completion Box Timing (<0.50 Before Box 3 = ideal, 0.50..0.75 Inside Box 3 = standard, >0.75 After Box 3 = non-ideal)
     const lastVertIdx = verts[verts.length - 1].candleIndex;
-    const spanRatio = candles.length > 0 ? (lastVertIdx - verts[0].candleIndex) / Math.max(1, candles.length - verts[0].candleIndex) : 0.6;
-    const idealCompletionBeforeBox3 = spanRatio < 0.67;
+    const timingSpanRatio =
+      candles.length > 0
+        ? Math.round(((lastVertIdx - verts[0].candleIndex) / Math.max(1, candles.length - verts[0].candleIndex)) * 100) / 100
+        : 0.55;
+    const timingZone: TriangleAnalysisReport['timingZone'] =
+      timingSpanRatio < 0.5
+        ? 'BEFORE_BOX_3'
+        : timingSpanRatio <= 0.75
+        ? 'INSIDE_BOX_3'
+        : 'AFTER_BOX_3';
+    const idealCompletionBeforeBox3 = timingZone !== 'AFTER_BOX_3';
+    if (timingZone === 'AFTER_BOX_3') {
+      warnings.push('جدول ۸: مثلث پس از باکس سوم (نسبت زمانی > ۷۵٪) تکمیل شده است (غیرایده‌آل — احتمال ضعف پرتاب).');
+    }
 
     const lastClose = candles.length > 0 ? candles[candles.length - 1].close : verts[verts.length - 1].price;
     const upperBound = Math.max(verts[1].price, verts[3].price);
@@ -660,6 +752,10 @@ export class PatternEngines {
       isCounterTrendAligned: true,
       idealRetracement50,
       idealCompletionBeforeBox3,
+      timingZone,
+      timingSpanRatio,
+      subwaveCounts,
+      subwaveMismatchWarningFa,
       tradingApproachFa,
       endingTriangle,
       isParallelRectangle,
@@ -799,6 +895,11 @@ export class PatternEngines {
         ? 'احتمال غالب: موج A اصلاحی (ریسک ادامه ریزش با موج C)'
         : 'سناریوی دوگانه (W2 در برابر A) — توصیه به ورود پله‌ای';
 
+    const is535Correction = leg1Sub === 5 && scenario.patternType === 'ZIGZAG';
+    const is535At50 = is535Correction && Math.abs(rawRetracement - 0.5) <= 0.045;
+    const isCrossing618To786 = rawRetracement > 0.65 && rawRetracement < 0.74;
+    const isAmbiguousStructure = w2VsAScenario === 'UNCERTAIN' && scenario.validityScore < 70;
+
     let entryZone: EntryStrategyReport['entryZone'] = 'NONE';
     let entryZoneLabelFa = 'عدم ورود (رتریسمنت کمتر از حداقل ۵۰٪ — جلوگیری از FOMO)';
     let riskLevel: EntryStrategyReport['riskLevel'] = 'HIGH';
@@ -808,7 +909,15 @@ export class PatternEngines {
       entryZoneLabelFa = 'بهترین نقطه ورود: شروع موج ۳ (پس از شکست سقف موج ۱)';
       riskLevel = 'LOW';
     } else if (!meetsMin50) {
+      entryZoneLabelFa =
+        is535Correction && rawRetracement >= 0.34
+          ? 'رتریسمنت ۳۸.۲–۴۰٪ در ساختار ۵-۳-۵ کافی نیست؛ تا ۵۰٪ یا ۶۱.۸٪ صبر کنید (جدول ۱۳)'
+          : 'عدم ورود (رتریسمنت کمتر از حداقل ۵۰٪ — جلوگیری از FOMO)';
       warnings.push(`جدول ۱۳ (۱۰.۱ / ۱۰.۱۳): رتریسمنت فعلی (${retracementPct}٪) کمتر از حداقل ۵۰٪ است؛ برای جلوگیری از FOMO ورود نکنید.`);
+    } else if (isAmbiguousStructure) {
+      entryZone = 'NONE';
+      entryZoneLabelFa = 'ساختار موجی مبهم است؛ تا رفع ابهام و تأیید کندل معتبر صبر کنید (جدول ۱۳)';
+      warnings.push('جدول ۱۳: ساختار موج نامشخص/مبهم است؛ از ورود پیش‌هنگام خودداری کنید.');
     } else if (at786) {
       entryZone = '78.6%';
       entryZoneLabelFa =
@@ -816,13 +925,25 @@ export class PatternEngines {
           ? 'ورود تأییدشده در ۷۸.۶٪ (همراه با شتاب‌گیری موج ۳)'
           : 'محدوده طلایی ۷۸.۶٪ (همراه با پتانسیل شتاب‌گیری موج ۳ — منتظر کندل تأیید)';
       riskLevel = 'MEDIUM';
+    } else if (isCrossing618To786) {
+      entryZone = '78.6%';
+      entryZoneLabelFa = 'عبور قیمت از ۶۱.۸٪ به سمت ۷۸.۶٪ — صبر تا رسیدن به ۷۸.۶٪ و تأیید کندل (جدول ۱۳)';
+      warnings.push('جدول ۱۳: تراز ۶۱.۸٪ شکسته شده و قیمت در مسیر ۷۸.۶٪ است؛ تا رسیدن به ۷۸.۶٪ وارد نشوید.');
+      riskLevel = 'MEDIUM';
     } else if (at618) {
       entryZone = '61.8%';
       entryZoneLabelFa =
-        candleSignal === 'DOJI_WEAK'
+        candleSignal === 'HAMMER_OR_ENGULFING'
+          ? 'ورود تأییدشده در ۶۱.۸٪ با کندل چکش/پوشا (جدول ۱۳)'
+          : candleSignal === 'DOJI_WEAK'
           ? 'تراز ۶۱.۸٪ روی دوجی — صبر تا کندل تأیید چکش/پوشا (جدول ۱۳.۶)'
-          : 'محدوده طلایی ۶۱.۸٪ (ایده‌آل‌ترین چرخش موج ۲ پس از تأیید کندل)';
+          : 'تراز ۶۱.۸٪ بدون سیگنال کندلی — منتظر کندل تأیید بمانید (جدول ۱۳)';
+      riskLevel = candleSignal === 'HAMMER_OR_ENGULFING' ? 'LOW' : 'MEDIUM';
+    } else if (is535At50) {
+      entryZone = '50%_PULLBACK';
+      entryZoneLabelFa = 'ورود مجاز در ۵۰٪ (ساختار واضح ۵-۳-۵ پیش از ۶۱.۸٪ — جدول ۱۳)';
       riskLevel = 'MEDIUM';
+      notes.push('جدول ۱۳: به دلیل وضوح ساختار ۵-۳-۵، ورود در اصلاح ۵۰٪ حتی پیش از ۶۱.۸٪ مجاز ارزیابی شد.');
     } else if (isFallback50) {
       entryZone = '50%_PULLBACK';
       entryZoneLabelFa = 'ورود جایگزین (Fallback): پول‌بک از ۵۵٪ روی سطح ۵۰٪';
@@ -835,6 +956,8 @@ export class PatternEngines {
 
     const isFomoBlocked =
       (!meetsMin50 && !w2CompleteAndBrokeW1) ||
+      isCrossing618To786 ||
+      isAmbiguousStructure ||
       (candleSignal === 'DOJI_WEAK' && !w2CompleteAndBrokeW1) ||
       w2VsAScenario === 'A';
 
@@ -964,6 +1087,11 @@ export class PatternEngines {
     let extendedWave: ExtensionTmvTrailingReport['extendedWave'] = null;
     let severity: ExtensionTmvTrailingReport['severity'] = null;
     let extensionLabelFa = 'بدون کشیدگی خاص (تناسب استاندارد امواج)';
+    let extensionUnconfirmedReasonFa: string | undefined;
+    let isTerminalFromW3ExtOverlap = false;
+
+    const isBull = scenario.direction === 'BULLISH';
+    const sign = isBull ? 1 : -1;
 
     if (verts.length >= 5) {
       const len1 = Math.max(0.01, Math.abs(verts[1].price - verts[0].price));
@@ -976,27 +1104,43 @@ export class PatternEngines {
       const ratio43 = len4 / len3;
       const ratio21 = len2 / len1;
       const ratio53 = len5 > 0 ? len5 / len3 : 0;
+      const w4OverlapsW1 = isBull ? verts[4].price <= verts[1].price : verts[4].price >= verts[1].price;
 
-      if (ratio31 >= 1.618 && ratio43 < 0.42) {
+      // Table 11.13: W3 extended + W4 overlaps W1 -> Terminal / Diagonal
+      if (ratio31 >= 1.618 && w4OverlapsW1) {
+        isTerminalFromW3ExtOverlap = true;
+        warnings.push('جدول ۱۱.۱۳: موج ۳ کشیده شده اما موج ۴ با موج ۱ هم‌پوشانی دارد ← تبدیل ساختار به ترمینال / قطر.');
+      }
+
+      // Strict < 38.2% confirmation (0.1% float cushion => < 0.383)
+      if (ratio31 >= 1.618 && ratio43 < 0.383) {
         extendedWave = 'WAVE_3';
         severity = ratio31 >= 2.618 ? 'SEVERE' : ratio31 >= 2.0 ? 'STRONG' : 'MODERATE';
-        extensionLabelFa = `کشیدگی موج ۳ (${(ratio31 * 100).toFixed(0)}٪ موج ۱ و موج ۴ کم‌عمق <۳۸.۲٪)؛ احتمال کوتاه‌شدگی موج ۵`;
+        extensionLabelFa = `کشیدگی تاییدشده موج ۳ (${(ratio31 * 100).toFixed(0)}٪ موج ۱ و موج ۴ < ۳۸.۲٪)؛ احتمال کوتاه‌شدگی موج ۵`;
       } else if (len5 > 0 && ratio53 >= 1.618) {
         extendedWave = 'WAVE_5';
         severity = ratio53 >= 2.618 ? 'SEVERE' : ratio53 >= 2.0 ? 'STRONG' : 'MODERATE';
         extensionLabelFa = `کشیدگی موج ۵ (${(ratio53 * 100).toFixed(0)}٪ موج ۳)؛ زنگ خطر چرخش شدید!`;
+        if (Math.abs(ratio53 - 1.618) <= 0.02) {
+          warnings.push('جدول ۱۱: کشیدگی موج ۵ روی مرز ۱۶۱.۸٪ موج ۳ قرار دارد؛ آماده واکنش سریع باشید.');
+        }
         if (ratio53 >= 2.0) {
           warnings.push('هشدار جلسه ۱۸ (جدول ۱۱.۱۱–۱۲): موج ۵ بیش از ۲۰۰٪ موج ۳ امتداد یافته است؛ سیو سود فوری توصیه می‌شود.');
         }
-      } else if (ratio21 < 0.382 && ratio31 < 1.0) {
+      } else if (ratio21 < 0.383 && ratio31 < 1.0) {
         extendedWave = 'WAVE_1';
         severity = 'MODERATE';
-        extensionLabelFa = 'کشیدگی موج ۱ (اصلاح موج ۲ < ۳۸.۲٪ و موج ۳ کوتاه‌تر از ۱)؛ احتمال تداخل موج ۴';
+        extensionLabelFa = 'کشیدگی تاییدشده موج ۱ (اصلاح موج ۲ < ۳۸.۲٪ و موج ۳ کوتاه‌تر از ۱)؛ احتمال تداخل موج ۴';
+      } else if (ratio31 >= 1.618 && ratio43 >= 0.383) {
+        extensionUnconfirmedReasonFa = `موج ۳ ≥ ۱۶۱.۸٪ موج ۱ اما اصلاح موج ۴ (${(ratio43 * 100).toFixed(1)}٪) ≥ ۳۸.۲٪ است؛ کشیدگی موج ۳ تایید قطعی ندارد (جدول ۱۱).`;
+        warnings.push(extensionUnconfirmedReasonFa);
+      } else if (ratio31 < 1.0 && ratio21 >= 0.383) {
+        extensionUnconfirmedReasonFa = `موج ۲ (${(ratio21 * 100).toFixed(1)}٪) ≥ ۳۸.۲٪ است؛ کشیدگی موج ۱ بدون تایید قطعی باقی می‌ماند (جدول ۱۱).`;
+        warnings.push(extensionUnconfirmedReasonFa);
       }
     }
 
     const lastPrice = candles.length > 0 ? candles[candles.length - 1].close : verts[verts.length - 1]?.price ?? 0;
-    const isBull = scenario.direction === 'BULLISH';
     const cleanParent = parentWaveLabel.replace(/[()VW\s]/g, '').toUpperCase();
     const isTriangle =
       scenario.patternType === 'TRIANGLE_CONVERGING' || scenario.patternType === 'TRIANGLE_EXPANDING';
@@ -1010,17 +1154,39 @@ export class PatternEngines {
     let trailingStopLabelFa = 'حد ضرر اولیه زیر انتهای موج ۲';
     let trailingStopDescFa = 'تا پیش از لمس TMV Prime (سقف موج ۱)، حد ضرر در کف موج ۲ حفظ شود.';
     let trailingLockPct: number | null = null;
+    let trailingStopStatus: ExtensionTmvTrailingReport['trailingStopStatus'] = 'ACTIVE';
+
+    const w2Anchor = verts[2]?.price ?? verts[0]?.price ?? lastPrice;
+    const ret618Stop =
+      verts.length >= 2
+        ? verts[1].price - sign * Math.abs(verts[1].price - verts[0].price) * 0.618
+        : w2Anchor;
+    const proj100Stop =
+      tmvIdeal ??
+      (verts.length >= 3 ? verts[2].price + sign * Math.abs(verts[1].price - verts[0].price) : lastPrice);
+
+    let trailingStopPrice: number | null =
+      verts.length >= 2 ? roundPrice(isBull ? w2Anchor * 0.995 : w2Anchor * 1.005) : null;
+
+    if (verts.length < 2) {
+      trailingStopStatus = 'INACTIVE_WARNING';
+      warnings.push('هشدار NO_TRAILING_STOP (جدول ۱۴): استاپ متحرک فعال نیست؛ حد ابطال تعیین نشده است.');
+    }
 
     const hitPrice = (lvl?: number) =>
       lvl !== undefined && (isBull ? lastPrice >= lvl : lastPrice <= lvl);
 
     if (extendedWave === 'WAVE_5') {
       trailingStopStage = 'IMMEDIATE_PROFIT_TAKING';
+      trailingStopStatus = 'IMMEDIATE_EXIT';
+      trailingStopPrice = roundPrice(lastPrice);
       trailingStopLabelFa = 'سیو سود فوری (کشیدگی موج ۵)';
       trailingStopDescFa = 'موج ۵ وارد فاز کشیدگی پرریسک شده است؛ حد ضرر را بلافاصله روی قیمت فعلی/زیر کف موج ۴ قرار دهید.';
       trailingLockPct = 2;
     } else if (endingTriangleTriggered || isTerminalOrEndingDiag) {
       trailingStopStage = 'IMMEDIATE_PROFIT_TAKING';
+      trailingStopStatus = 'IMMEDIATE_EXIT';
+      trailingStopPrice = roundPrice(isBull ? lastPrice * 0.98 : lastPrice * 1.02);
       trailingStopLabelFa = endingTriangleTriggered
         ? 'سیو سود فوری (مثلث پایانی — جدول ۱۴.۱۲)'
         : scenario.patternType === 'TERMINAL'
@@ -1030,16 +1196,30 @@ export class PatternEngines {
       trailingLockPct = 3;
     } else if (hitPrice(tmvAlternate)) {
       trailingStopStage = 'BELOW_100_PROJECTION';
+      trailingStopStatus = 'ACTIVE';
+      trailingStopPrice = roundPrice(
+        isBull ? Math.max(lastPrice * 0.95, proj100Stop * 0.995) : Math.min(lastPrice * 1.05, proj100Stop * 1.005)
+      );
       trailingStopLabelFa = 'انتقال حد ضرر زیر ۱۰۰٪ پروجکشن / ۵٪ زیر قیمت (TMV Alt hit)';
       trailingStopDescFa = 'هدف TMV Alternate (۱۶۱.۸٪) تاچ شده است؛ استاپ ۵٪ زیر قیمت یا زیر ۱۰۰٪ پروجکشن تثبیت شود.';
       trailingLockPct = 5;
     } else if (hitPrice(tmvIdeal)) {
       trailingStopStage = 'BELOW_618_RETRACEMENT';
+      trailingStopStatus = 'ACTIVE';
+      trailingStopPrice = roundPrice(
+        isBull ? Math.max(lastPrice * 0.93, ret618Stop) : Math.min(lastPrice * 1.07, ret618Stop)
+      );
       trailingStopLabelFa = 'انتقال حد ضرر زیر ۶۱.۸٪ رتریسمنت / ۷٪ زیر قیمت (TMV Ideal hit)';
       trailingStopDescFa = 'هدف TMV Ideal (۱۰۰٪ پروجکشن) لمس شده است؛ معامله بدون ریسک و استاپ ۷٪ زیر قیمت یا زیر ۶۱.۸٪ منتقل شود.';
       trailingLockPct = 7;
     } else if (hitPrice(tmvPrime)) {
       trailingStopStage = 'BELOW_WAVE_2';
+      trailingStopStatus = 'ACTIVE';
+      trailingStopPrice = roundPrice(
+        isBull
+          ? Math.max(lastPrice * 0.9, w2Anchor * 0.995)
+          : Math.min(lastPrice * 1.1, w2Anchor * 1.005)
+      );
       trailingStopLabelFa = 'انتقال حد ضرر زیر موج ۲ / ۱۰٪ زیر قیمت (TMV Prime hit)';
       trailingStopDescFa = 'قیمت از سقف موج قبلی (TMV Prime) عبور کرده است؛ استاپ ۱۰٪ زیر قیمت یا زیر انتهای موج ۲ تثبیت شود.';
       trailingLockPct = 10;
@@ -1054,7 +1234,11 @@ export class PatternEngines {
       extendedWave,
       severity,
       extensionLabelFa,
+      extensionUnconfirmedReasonFa,
+      isTerminalFromW3ExtOverlap,
       trailingStopStage,
+      trailingStopPrice,
+      trailingStopStatus,
       trailingStopLabelFa,
       trailingStopDescFa,
       trailingLockPct,
@@ -1096,18 +1280,43 @@ export class PatternEngines {
     }
 
     let nanCount = 0;
+    let firstCandleHasNan = false;
     let forwardFilledCount = 0;
     let hasNegative = false;
     let hasHighLowInv = false;
     let hasDuplicateTs = false;
     let hasOutOfOrderTs = false;
+    let zeroVolumeCount = 0;
     let minPrice = Infinity;
     let maxPrice = -Infinity;
     let dojiCount = 0;
     const validPrices: number[] = [];
+    const seenTimestamps = new Set<number>();
 
-    for (let i = 0; i < candles.length; i++) {
-      const c = candles[i];
+    const workingCopy: Candle[] = candles.map(c => ({ ...c }));
+
+    for (let i = 0; i < workingCopy.length; i++) {
+      const c = workingCopy[i];
+      if (Number.isFinite(c.timestamp)) {
+        if (seenTimestamps.has(c.timestamp)) hasDuplicateTs = true;
+        seenTimestamps.add(c.timestamp);
+      }
+      if (i > 0 && c.timestamp < workingCopy[i - 1].timestamp) {
+        hasOutOfOrderTs = true;
+      }
+    }
+
+    // Auto-sort out-of-order timestamps chronologically (Table 1.6 / 1.9 edge case)
+    if (hasOutOfOrderTs) {
+      workingCopy.sort((a, b) => a.timestamp - b.timestamp);
+      warnings.push('ترتیب زمانی کندل‌ها خارج از نظم صعودی بود و به‌صورت خودکار مرتب‌سازی شد (جدول ۱.۶).');
+    }
+
+    const sanitizedCandles: Candle[] = [];
+    let lastValidCandle: Candle | null = null;
+
+    for (let i = 0; i < workingCopy.length; i++) {
+      const c = workingCopy[i];
       const isInvalidNum =
         !Number.isFinite(c.open) ||
         !Number.isFinite(c.high) ||
@@ -1115,50 +1324,72 @@ export class PatternEngines {
         !Number.isFinite(c.close) ||
         !Number.isFinite(c.timestamp);
 
+      let cleanBar = { ...c };
       if (isInvalidNum) {
         nanCount++;
-        if (i > 0 && validPrices.length > 0) forwardFilledCount++;
+        if (lastValidCandle) {
+          forwardFilledCount++;
+          cleanBar = {
+            ...lastValidCandle,
+            time: c.time || lastValidCandle.time,
+            timestamp: Number.isFinite(c.timestamp) ? c.timestamp : lastValidCandle.timestamp + 86400000
+          };
+        } else {
+          firstCandleHasNan = true;
+        }
       } else {
-        validPrices.push(c.close);
-        minPrice = Math.min(minPrice, c.low);
-        maxPrice = Math.max(maxPrice, c.high);
+        lastValidCandle = cleanBar;
+        validPrices.push(cleanBar.close);
+        minPrice = Math.min(minPrice, cleanBar.low);
+        maxPrice = Math.max(maxPrice, cleanBar.high);
       }
 
-      if (c.open <= 0 || c.high <= 0 || c.low <= 0 || c.close <= 0) {
+      if (cleanBar.volume === 0 || !Number.isFinite(cleanBar.volume)) {
+        zeroVolumeCount++;
+        cleanBar.volume = 0;
+      }
+
+      if (cleanBar.open <= 0 || cleanBar.high <= 0 || cleanBar.low <= 0 || cleanBar.close <= 0) {
         hasNegative = true;
       }
-      if (c.high < c.low) {
+      if (cleanBar.high < cleanBar.low) {
         hasHighLowInv = true;
       }
-      if (i > 0) {
-        if (c.timestamp === candles[i - 1].timestamp) hasDuplicateTs = true;
-        else if (c.timestamp < candles[i - 1].timestamp) hasOutOfOrderTs = true;
-      }
 
-      const range = Math.max(1e-9, c.high - c.low);
-      const body = Math.abs(c.close - c.open);
-      if (body / range < 0.08 || (c.open === c.high && c.high === c.low && c.low === c.close)) {
+      const range = Math.max(1e-9, cleanBar.high - cleanBar.low);
+      const body = Math.abs(cleanBar.close - cleanBar.open);
+      if (
+        body / range < 0.08 ||
+        (cleanBar.open === cleanBar.high && cleanBar.high === cleanBar.low && cleanBar.low === cleanBar.close)
+      ) {
         dojiCount++;
       }
+      sanitizedCandles.push(cleanBar);
     }
 
     const nanPct = Math.round((nanCount / candles.length) * 1000) / 10;
     if (nanCount > 0) {
-      if (nanPct > 10) {
-        errors.push(`تعداد مقادیر نامعتبر NaN (${nanCount} مورد، معادل ${nanPct}٪) بیش از آستانه ۱۰٪ است (جدول ۱.۳).`);
+      if (nanPct > 10 || firstCandleHasNan) {
+        errors.push(`تعداد یا جایگاه مقادیر نامعتبر NaN (${nanCount} مورد، ${nanPct}٪) قابل جایگزینی امن نیست (جدول ۱.۳).`);
       } else {
-        warnings.push(`${nanCount} مقدار NaN (${nanPct}٪ ≤ ۱۰٪) شناسایی و با روش Forward-fill جایگزین شد (جدول ۱.۴).`);
+        warnings.push(`${nanCount} مقدار NaN (${nanPct}٪ ≤ ۱۰٪) شناسایی و با Forward-fill جایگزین شد (جدول ۱.۴).`);
       }
     }
 
     if (hasNegative) errors.push('قیمت منفی یا صفر در تاریخچه کندل‌ها مجاز نیست (جدول ۱.۹).');
     if (hasHighLowInv) errors.push('در برخی کندل‌ها سقف کندل پایین‌تر از کف ثبت شده است (High < Low — جدول ۱.۱۰).');
-    if (hasDuplicateTs) warnings.push('برچسب زمانی تکراری در کندل‌ها وجود دارد (جدول ۱.۵).');
-    if (hasOutOfOrderTs) errors.push('ترتیب زمانی کندل‌ها صعودی نیست (Out-of-order timestamps — جدول ۱.۶).');
+    if (hasDuplicateTs) {
+      errors.push('برچسب زمانی تکراری در کندل‌ها وجود دارد (Duplicate timestamps — جدول ۱.۵).');
+    }
 
     const distinctCloses = new Set(validPrices).size;
     if (distinctCloses <= 1 || (maxPrice !== -Infinity && maxPrice - minPrice <= 1e-6)) {
-      errors.push('نوسان قیمتی صفر (Zero Price Movement)؛ بازار کاملاً متوقف است (جدول ۱.۷).');
+      errors.push('نوسان قیمتی صفر (No price movement)؛ بازار کاملاً متوقف است (جدول ۱.۴ / ۱.۷).');
+    }
+
+    const hasZeroVolumeCandles = zeroVolumeCount > 0;
+    if (hasZeroVolumeCandles) {
+      warnings.push(`${zeroVolumeCount} کندل با حجم صفر شناسایی شد (شمارش معتبر است؛ در محاسبه حجم نادیده گرفته می‌شوند — جدول ۱.۷).`);
     }
 
     const dojiPct = Math.round((dojiCount / candles.length) * 100);
@@ -1168,35 +1399,54 @@ export class PatternEngines {
       warnings.push(`نرخ کندل‌های دوجی/خنثی (${dojiPct}٪) بیش از ۵۰٪ است؛ نویز حرکتی بالا و تایم‌فریم نامناسب (جدول ۱.۸).`);
     }
 
-    const firstTs = candles[0].timestamp;
-    const lastTs = candles[candles.length - 1].timestamp;
+    const firstTs = sanitizedCandles[0]?.timestamp ?? 0;
+    const lastTs = sanitizedCandles[sanitizedCandles.length - 1]?.timestamp ?? 0;
     const historySpanDays = Math.max(1, Math.round((lastTs - firstTs) / 86400000));
-    const recommendedStartTf: '1D' | '1W' | '1M' =
-      historySpanDays > 1825 ? '1M' : historySpanDays >= 180 ? '1W' : '1D';
+
+    // Table 1.11 (>10 years -> 1W compressed monthly), 1.12 (<1 year -> 1W), <6 months -> 1D
+    let recommendedStartTf: '1D' | '1W' | '1M' = '1W';
+    let recommendedStartReasonFa = 'تاریخچه متعادل — تایم‌فریم هفتگی یا ماهانه مناسب آغاز شمارش است.';
+    if (historySpanDays < 180) {
+      recommendedStartTf = '1D';
+      recommendedStartReasonFa = 'تاریخچه کمتر از ۶ ماه است؛ شروع از تایم‌فریم 1D توصیه می‌شود.';
+    } else if (historySpanDays < 365) {
+      recommendedStartTf = '1W';
+      recommendedStartReasonFa = 'دیتای کمتر از ۱ سال: کف مطلق در تایم ماهانه قابل تشخیص نیست؛ از هفتگی (1W) شروع کنید (جدول ۱.۱۲).';
+    } else if (historySpanDays > 3650) {
+      recommendedStartTf = '1W';
+      recommendedStartReasonFa = 'دیتای بیش از ۱۰ سال: تایم‌فریم ماهانه ممکن است بیش‌ازحد فشرده باشد؛ از هفتگی (1W) شروع کنید (جدول ۱.۱۱).';
+    } else if (historySpanDays > 1825) {
+      recommendedStartTf = '1M';
+      recommendedStartReasonFa = 'تاریخچه ۵ تا ۱۰ ساله — مناسب شناسایی کف مطلق کلان در 1M.';
+    }
 
     if (historySpanDays < 30) {
       const msg = `طول تاریخچه کمتر از ۱ ماه (${historySpanDays} روز) است؛ موج‌شماری ممکن است ناقص باشد (جدول ۱.۱۲ / ۲.۹).`;
       warnings.push(msg);
       historyWarnings.push(msg);
     }
-    if (historySpanDays > 365 * 20) {
-      const msg = `تاریخچه بیش از ۲۰ سال (${Math.round(historySpanDays / 365)} سال) است؛ کندل‌های تایم ماهانه ممکن است بیش‌ازحد فشرده باشند (جدول ۲.۶).`;
-      warnings.push(msg);
-      historyWarnings.push(msg);
+    if (historySpanDays > 3650) {
+      historyWarnings.push(recommendedStartReasonFa);
     }
-    if (timeframe === '1M' && recommendedStartTf === '1D') {
-      warnings.push('بازه تاریخچه کوتاه (< ۶ ماه) است؛ شروع از تایم‌فریم 1D توصیه می‌شود (جدول ۲.۱).');
+    if (timeframe === '1M' && recommendedStartTf !== '1M') {
+      warnings.push(recommendedStartReasonFa);
     }
 
     return {
       valid: errors.length === 0,
-      candleCount: candles.length,
+      candleCount: sanitizedCandles.length,
       nanCount,
       nanPct,
       forwardFilledCount,
       historySpanDays,
       dojiPct,
       recommendedStartTf,
+      recommendedStartReasonFa,
+      sanitizedCandles,
+      sortedOutOfOrder: hasOutOfOrderTs,
+      hasZeroVolumeCandles,
+      zeroVolumeCount,
+      hasDuplicateTimestamps: hasDuplicateTs,
       errors,
       warnings,
       historyWarnings
@@ -1423,13 +1673,16 @@ export class PatternEngines {
       if (!candles.length || !verts[idx] || !verts[idx + 1]) return 0;
       const s = Math.max(0, Math.min(verts[idx].candleIndex, verts[idx + 1].candleIndex));
       const e = Math.min(candles.length - 1, Math.max(verts[idx].candleIndex, verts[idx + 1].candleIndex));
-      const slice = candles.slice(s, e + 1);
+      const slice = candles.slice(s, e + 1).filter(c => c.volume > 0);
       if (!slice.length) return 0;
       return slice.reduce((acc, c) => acc + c.volume, 0) / slice.length;
     };
 
+    const nonZeroVolBars = candles.filter(c => c.volume > 0);
     const globalAvgVol =
-      candles.length > 0 ? candles.reduce((acc, c) => acc + c.volume, 0) / candles.length : 1;
+      nonZeroVolBars.length > 0
+        ? nonZeroVolBars.reduce((acc, c) => acc + c.volume, 0) / nonZeroVolBars.length
+        : 1;
 
     const w1Len = len(0);
     const w3Len = len(2);

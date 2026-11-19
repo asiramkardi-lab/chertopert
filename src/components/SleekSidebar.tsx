@@ -75,6 +75,7 @@ interface SleekSidebarProps {
   } | null;
   onExitDrill?: () => void;
   candles?: Candle[];
+  candlesByTf?: Record<string, Candle[]>;
   marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
   onPromoteDegree?: (scenarioId?: string) => void;
 }
@@ -103,6 +104,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   drillContext,
   onExitDrill,
   candles = [],
+  candlesByTf,
   marketType = 'CRYPTO',
   onPromoteDegree
 }) => {
@@ -231,12 +233,16 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
             {/* 11-Step Pipeline & Boundary Tables Audit */}
             <TopDownPipelineAudit
               candles={candles}
+              candlesByTf={candlesByTf}
               scenario={activeScenario}
               scenarios={scenarios}
               marketType={marketType}
               timeframe={activeTimeframe}
               parentRole={drillContext?.role || 'ROOT'}
               parentWaveLabel={drillContext?.waveLabel || ''}
+              onPromoteDegree={
+                onPromoteDegree ? () => onPromoteDegree(activeScenario.id) : undefined
+              }
               compact
             />
 

@@ -18,7 +18,9 @@ import {
   WaveNature,
   WaveScenario,
   WaveVertex,
-  PatternFamily
+  PatternFamily,
+  MultiTfRefinementStep,
+  MultiTfRefinementSummary
 } from '../types/elliott';
 import { PivotDetector } from './pivotDetector';
 
@@ -255,6 +257,264 @@ export class FractalEngine {
         : canPromoteDegree
         ? `در صورت شکست معتبر انتهای ساختار (${lastV.price.toLocaleString()}) و تشکیل سیکل بزرگ‌تر، امکان ارتقاء درجه به ${DEGREE_CONFIGS[toDegree].nameFa} فعال است.`
         : 'ساختار هم‌اکنون در بالاترین درجه کلان (Super Cycle V) قرار دارد.'
+    };
+  }
+
+  /**
+   * Session 3.6 & Step 6: Executes degree promotion on a scenario:
+   * promotes degree one level up (INTERMEDIATE -> PRIMARY -> CYCLE -> SUPER_CYCLE),
+   * relabels vertices ((1)->1->W1->V1), and flags/drops excess micro levels beyond TF cap.
+   */
+  public static promoteScenarioDegrees(
+    scenario: WaveScenario,
+    marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO',
+    timeframe?: string
+  ): {
+    promoted: boolean;
+    scenario: WaveScenario;
+    droppedSmallestLevel: boolean;
+    reasonFa: string;
+  } {
+    if (scenario.degree === 'SUPER_CYCLE') {
+      return {
+        promoted: false,
+        scenario,
+        droppedSmallestLevel: false,
+        reasonFa: 'ساختار هم‌اکنون در بالاترین درجه کلان (Super Cycle V) است و امکان ارتقاء بالاتر وجود ندارد.'
+      };
+    }
+
+    const fromDegree = scenario.degree;
+    const toDegree = getHigherDegree(fromDegree);
+    const tf = timeframe || scenario.timeframe || '1D';
+    const maxAllowed = this.getMaxDegreesForTimeframe(tf, marketType);
+    const droppedSmallestLevel = maxAllowed > 0 && DEGREE_CONFIGS[fromDegree].level >= maxAllowed;
+
+    const relabeledVertices = relabelVerticesForDegree(scenario.vertices, toDegree);
+    const promotedScenario: WaveScenario = {
+      ...scenario,
+      degree: toDegree,
+      vertices: relabeledVertices,
+      notes: [
+        scenario.notes || '',
+        `ارتقاء درجه از ${DEGREE_CONFIGS[fromDegree].nameFa} به ${DEGREE_CONFIGS[toDegree].nameFa}`
+      ]
+        .filter(Boolean)
+        .join(' | ')
+    };
+
+    return {
+      promoted: true,
+      scenario: promotedScenario,
+      droppedSmallestLevel,
+      reasonFa: droppedSmallestLevel
+        ? `درجه به ${DEGREE_CONFIGS[toDegree].nameFa} ارتقاء یافت و کوچک‌ترین سطح ریزموج جهت رعایت سقف ${maxAllowed} درجه در ${tf} کنار گذاشته شد.`
+        : `درجه موج‌شماری با موفقیت از ${DEGREE_CONFIGS[fromDegree].nameFa} به ${DEGREE_CONFIGS[toDegree].nameFa} ارتقاء یافت.`
+    };
+  }
+
+  /**
+   * Steps 4 & 5: Real Multi-Timeframe Iterative Refinement across 1M -> 1W -> 1D -> 4H -> 1H -> 15M.
+   * Stops at degree cap (including TSE_IRAN cap <= 4 & no <4H), missing TF, or <10 candles.
+   * Checks main legs (1,3,5,A,C) vs corrective legs (2,4,B,X,D) and falls back cleanly if all cycles fail.
+   */
+  public static refineCyclesAcrossTimeframes(
+    candlesByTf: Record<string, Candle[]>,
+    scenarios: WaveScenario[],
+    startTf: string,
+    marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO'
+  ): {
+    refinedScenarios: WaveScenario[];
+    summary: MultiTfRefinementSummary;
+  } {
+    const tfOrder = ['1M', '1W', '1D', '4H', '1H', '15M'];
+    const startIdx = Math.max(0, tfOrder.indexOf(startTf));
+    const maxAllowedDegree = this.getMaxDegreesForTimeframe(startTf, marketType);
+
+    const activeList = scenarios.filter(s => !s.isDiscarded);
+    const primary = activeList.find(s => s.isPrimary) || activeList[0] || scenarios[0];
+
+    const steps: MultiTfRefinementStep[] = [];
+    const traversedTimeframes: string[] = [];
+    const relabelingSuggestions: string[] = [];
+
+    let reachedDegreeLevel = primary ? DEGREE_CONFIGS[primary.degree].level : 1;
+    let finalTf = startTf;
+
+    if (!primary || activeList.length === 0) {
+      return {
+        refinedScenarios: scenarios,
+        summary: {
+          startTf,
+          finalTf: startTf,
+          traversedTimeframes: [],
+          reachedDegreeLevel,
+          maxAllowedDegree,
+          fallbackToHigherTf: false,
+          steps: [],
+          relabelingSuggestions: []
+        }
+      };
+    }
+
+    for (let idx = startIdx; idx < tfOrder.length; idx++) {
+      const tf = tfOrder[idx];
+      const tfCandles = candlesByTf[tf];
+      const tfMaxAllowed = this.getMaxDegreesForTimeframe(tf, marketType);
+      const tfDegree = getDegreeForTimeframe(tf);
+      const tfDegreeLevel = DEGREE_CONFIGS[tfDegree].level;
+
+      if (marketType === 'TSE_IRAN' && (tf === '1H' || tf === '15M' || tfMaxAllowed === 0)) {
+        steps.push({
+          timeframe: tf,
+          degree: tfDegree,
+          candleCount: tfCandles?.length ?? 0,
+          legChecks: [],
+          stoppedReasonFa: `توقف پالایش: تایم‌فریم ${tf} در بورس ایران مجاز نیست (سقف ۴ درجه).`
+        });
+        break;
+      }
+
+      if (!tfCandles || tfCandles.length < 10) {
+        steps.push({
+          timeframe: tf,
+          degree: tfDegree,
+          candleCount: tfCandles?.length ?? 0,
+          legChecks: [],
+          stoppedReasonFa: !tfCandles
+            ? `توقف پالایش: داده تایم‌فریم ${tf} موجود نیست.`
+            : `توقف پالایش: تعداد کندل‌های ${tf} (${tfCandles.length}) کمتر از ۱۰ کندل است.`
+        });
+        break;
+      }
+
+      if (traversedTimeframes.length > 0 && reachedDegreeLevel >= Math.max(maxAllowedDegree, tfMaxAllowed)) {
+        steps.push({
+          timeframe: tf,
+          degree: tfDegree,
+          candleCount: tfCandles.length,
+          legChecks: [],
+          stoppedReasonFa: `توقف در سقف درجه مجاز (${reachedDegreeLevel}).`
+        });
+        break;
+      }
+
+      traversedTimeframes.push(tf);
+      finalTf = tf;
+      reachedDegreeLevel = Math.max(reachedDegreeLevel, Math.min(4, tfDegreeLevel));
+
+      const legChecks: MultiTfRefinementStep['legChecks'] = [];
+      const verts = primary.vertices;
+      const firstTs = tfCandles[0].timestamp;
+      const lastTs = tfCandles[tfCandles.length - 1].timestamp;
+
+      for (let i = 1; i < verts.length; i++) {
+        const vStart = verts[i - 1];
+        const vEnd = verts[i];
+        const cleanLabel = vEnd.label.replace(/[()VW\s]/g, '').toUpperCase();
+        const role: WaveRole = ['2', '4', 'B', 'X', 'D'].includes(cleanLabel) ? 'CORRECTIVE' : 'MOTIVE';
+
+        const subSlice = tfCandles.filter(
+          c => c.timestamp >= Math.min(vStart.timestamp, vEnd.timestamp) && c.timestamp <= Math.max(vStart.timestamp, vEnd.timestamp)
+        );
+        const usableSlice =
+          subSlice.length >= 4
+            ? subSlice
+            : vEnd.timestamp >= firstTs && vStart.timestamp <= lastTs
+            ? subSlice
+            : [];
+
+        if (usableSlice.length < 5) {
+          legChecks.push({
+            legLabel: `${vStart.label}→${vEnd.label}`,
+            role,
+            detectedSubwaves: null,
+            nature: 'IMPULSIVE_MOMENTUM',
+            verdictFa:
+              role === 'MOTIVE'
+                ? 'داده/پیوت کافی نیست — موج شتابدار، فرض ۵ زیرموج'
+                : 'داده/پیوت کافی نیست — موج اصلاحی، فرض ۳ زیرموج'
+          });
+          continue;
+        }
+
+        const pivots = PivotDetector.detectPivots(usableSlice, 1, 1, 0.45);
+        const subCount: 3 | 5 | null = pivots.length >= 4 ? 5 : pivots.length >= 2 ? 3 : null;
+        const nature: WaveNature = subCount === null ? 'IMPULSIVE_MOMENTUM' : 'FRACTAL_EXTENDED';
+
+        let verdictFa = '';
+        if (role === 'MOTIVE') {
+          if (subCount === null) {
+            verdictFa = 'موج اصلی شتابدار — فرض ساختار ۵موجی';
+          } else if (subCount === 5) {
+            verdictFa = 'فرکتال ۵موجی در تایم پایین‌تر تایید شد';
+          } else {
+            const isDiag = primary.patternType.includes('DIAGONAL');
+            verdictFa = isDiag
+              ? 'ساختار ۳موجی با الگوی قطر سازگار است'
+              : 'هشدار پالایش: موج اصلی ۳ زیرموج دارد — بررسی قطر یا بازشماری لیبل';
+            if (!isDiag && tf === finalTf) {
+              relabelingSuggestions.push(
+                `موج اصلی ${vEnd.label} در تایم ${tf} تنها ۳ زیرموج نشان می‌دهد؛ تبدیل به قطر یا اصلاح لیبل بررسی شود.`
+              );
+            }
+          }
+        } else {
+          if (subCount === null) {
+            verdictFa = 'موج اصلاحی کوتاه — فرض ساختار ۳موجی';
+          } else if (subCount === 3) {
+            verdictFa = 'فرکتال اصلاحی ۳موجی تایید شد';
+          } else {
+            const isAntiCycle = primary.patternType === 'ANTI_CYCLE';
+            verdictFa = isAntiCycle
+              ? 'اصلاح ۵موجی با آنتی‌سیکل ۳-۵ سازگار است'
+              : 'موج اصلاحی ۵ زیرموج دارد — احتمال آنتی‌سیکل یا الگوی ترکیبی';
+            if (!isAntiCycle && tf === finalTf) {
+              relabelingSuggestions.push(
+                `موج اصلاحی ${vEnd.label} در تایم ${tf} ساختار ۵موجی دارد؛ آنتی‌سیکل یا ساختار ترکیبی (W-X-Y) را بررسی کنید.`
+              );
+            }
+          }
+        }
+
+        legChecks.push({
+          legLabel: `${vStart.label}→${vEnd.label}`,
+          role,
+          detectedSubwaves: subCount,
+          nature,
+          verdictFa
+        });
+      }
+
+      steps.push({
+        timeframe: tf,
+        degree: tfDegree,
+        candleCount: tfCandles.length,
+        legChecks
+      });
+
+      if (steps.length >= 3) break;
+    }
+
+    const validRemaining = activeList.filter(s => s.validityScore >= 70);
+    const fallbackToHigherTf = validRemaining.length === 0 && activeList.length > 0;
+    const fallbackReasonFa = fallbackToHigherTf
+      ? 'پالایش در تایم پایین‌تر هیچ سناریوی کاملی تایید نکرد؛ بازگشت به شمارش مرجع تایم بالاتر.'
+      : undefined;
+
+    return {
+      refinedScenarios: fallbackToHigherTf ? scenarios : activeList,
+      summary: {
+        startTf,
+        finalTf,
+        traversedTimeframes,
+        reachedDegreeLevel,
+        maxAllowedDegree,
+        fallbackToHigherTf,
+        fallbackReasonFa,
+        steps,
+        relabelingSuggestions: Array.from(new Set(relabelingSuggestions))
+      }
     };
   }
 

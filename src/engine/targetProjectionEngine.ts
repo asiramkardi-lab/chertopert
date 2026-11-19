@@ -15,6 +15,7 @@ import {
   ExtensionLayerTier,
   FibImportanceLevel,
   FibonacciExtensionLayer,
+  FibonacciToolValidationResult,
   PatternFamily,
   ProjectedTargetItem,
   PrzZone,
@@ -136,6 +137,107 @@ export class TargetProjectionEngine {
         descriptionFa: 'نزدیک‌ترین تراز به مبدأ موج پیش از نقض قانون ۱؛ همراه با شتاب چرخش بالا.'
       }
     ];
+  }
+
+  /**
+   * Session 7, 8 & Table 10: Validate Fibonacci Retracement (2-point X->Y) & Projection (3-point X->Y->Z)
+   * tool usage: pair selection (1-2->W3, 3-4->W5), orientation check, 0%/100%/>100% retracement checks,
+   * missing Z error, and Wave 5 retracement prohibition.
+   */
+  public static validateFibonacciToolUsage(params: {
+    toolType: 'RETRACEMENT' | 'PROJECTION';
+    points: Array<{ price: number; candleIndex?: number }>;
+    direction: WaveDirection;
+    targetWave?: '1' | '2' | '3' | '4' | '5' | 'A' | 'B' | 'C';
+    pairLabel?: string;
+    overlappingLevels?: boolean;
+  }): FibonacciToolValidationResult {
+    const { toolType, points, direction, targetWave, pairLabel, overlappingLevels } = params;
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const isBull = direction === 'BULLISH';
+    let isWave5RetracementInvalid = false;
+
+    if (toolType === 'RETRACEMENT') {
+      if (targetWave === '5') {
+        isWave5RetracementInvalid = true;
+        errors.push(
+          'ممنوعیت اکید رتریسمنت روی موج ۵ (جدول ۱۰ / C17): آخرین موج روند هیچ اصلاح هم‌درجه‌ای ندارد؛ به جای آن کل سیکل ۰←۵ را بسنجید.'
+        );
+      }
+
+      if (points.length < 2) {
+        errors.push('برای رسم رتریسمنت حداقل ۲ نقطه (X و Y) مورد نیاز است.');
+      } else {
+        const x = points[0].price;
+        const y = points[1].price;
+        const span = Math.abs(y - x);
+        if (span <= 1e-9) {
+          errors.push('طول موج مبنای رتریسمنت صفر است.');
+        } else {
+          const orientedOk = isBull ? y > x : y < x;
+          if (!orientedOk) {
+            errors.push(
+              isBull
+                ? 'جهت ابزار رتریسمنت معکوس است: در روند صعودی باید از X (پایین) به Y (بالا) رسم شود (جدول ۱۰).'
+                : 'جهت ابزار رتریسمنت معکوس است: در روند نزولی باید از X (بالا) به Y (پایین) رسم شود (جدول ۱۰).'
+            );
+          }
+
+          if (points.length >= 3) {
+            const z = points[2].price;
+            const retAmt = isBull ? y - z : z - y;
+            const ratio = retAmt / span;
+            if (Math.abs(ratio) <= 0.002) {
+              warnings.push('رتریسمنت ۰٪: قیمت هنوز هیچ اصلاحی از انتهای موج قبلی آغاز نکرده است (جدول ۱۰).');
+            } else if (ratio >= 1.0 - 1e-7) {
+              errors.push(
+                ratio > 1.001
+                  ? `رتریسمنت > ۱۰۰٪ (${(ratio * 100).toFixed(1)}٪): مبدأ موج نقض شده است (جدول ۱۰ / قانون ۱).`
+                  : 'رتریسمنت دقیقاً ۱۰۰٪: مبدأ موج کاملاً پوشش داده شده است (حالت مرزی/نقض قانون ۱).'
+              );
+            }
+          }
+        }
+      }
+    } else {
+      // PROJECTION (3-point X -> Y -> Z)
+      if (points.length < 3) {
+        errors.push('خطای ابزار پروجکشن: نقطه سوم (Z / انتهای موج اصلاحی) موجود نیست (جدول ۱۰).');
+      } else {
+        const x = points[0].price;
+        const y = points[1].price;
+        const z = points[2].price;
+        const yAligned = isBull ? y > x : y < x;
+        const zRetraced = isBull ? z < y : z > y;
+        if (!yAligned || !zRetraced) {
+          errors.push(
+            'جهت ابزار پروجکشن سه‌نقطه‌ای معکوس یا نامعتبر است (X→Y باید هم‌جهت روند و Y→Z اصلاحی باشد — جدول ۱۰).'
+          );
+        }
+      }
+
+      const normPair = (pairLabel || '').replace(/\s+/g, '');
+      if (targetWave === '5' && normPair.includes('1-2')) {
+        errors.push('خطای قانون جفت‌ها (جدول ۱۰): برای هدف موج ۵ نباید از جفت ۱-۲ استفاده کرد؛ حتماً جفت ۳-۴ را مبنا قرار دهید.');
+      }
+      if (targetWave === '3' && normPair.includes('3-4')) {
+        errors.push('خطای قانون جفت‌ها (جدول ۱۰): برای هدف موج ۳ باید از جفت ۱-۲ استفاده کرد، نه ۳-۴.');
+      }
+    }
+
+    if (overlappingLevels) {
+      warnings.push('تداخل یا انباشتگی سطوح فیبوناچی (Overlapping Fibonacci cluster): ناحیه PRZ چندسطحی فعال است.');
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings,
+      toolType,
+      pairUsedLabel: pairLabel,
+      isWave5RetracementInvalid
+    };
   }
 
   /**
@@ -1437,6 +1539,42 @@ export class TargetProjectionEngine {
       tmvPrimeApproxIdealWarningFa
     } = this.computeTmvTiersAndOverlap(scenario, przZones);
 
+    const activeToolType: 'RETRACEMENT' | 'PROJECTION' = n === 2 || n === 4 ? 'RETRACEMENT' : 'PROJECTION';
+    const fibTargetWave: '2' | '3' | '4' | '5' | 'C' | undefined =
+      n === 2
+        ? '2'
+        : n === 3
+        ? isCorrective
+          ? 'C'
+          : '3'
+        : n === 4
+        ? '4'
+        : n === 5
+        ? '5'
+        : undefined;
+    const toolPoints =
+      activeToolType === 'RETRACEMENT'
+        ? n >= 4
+          ? [verts[2], verts[3]]
+          : [v0, v1]
+        : n >= 5
+        ? [verts[2], verts[3], verts[4]]
+        : [v0, v1, v2];
+    const fibValidation = this.validateFibonacciToolUsage({
+      toolType: activeToolType,
+      points: toolPoints,
+      direction: scenario.direction,
+      targetWave: fibTargetWave,
+      pairLabel: tmvSummary?.basisPairLabel,
+      overlappingLevels: overlapReport?.type === 'FULL'
+    });
+
+    const fibValidationWarnings: string[] = [
+      ...fibValidation.errors,
+      ...fibValidation.warnings,
+      ...(forbidWave5RetracementFa ? [forbidWave5RetracementFa] : [])
+    ];
+
     const retracementTable =
       verts.length >= 2
         ? this.getRetracementImportanceLevels(verts[0].price, verts[1].price, scenario.direction)
@@ -1533,7 +1671,10 @@ export class TargetProjectionEngine {
       projectionPairNoteFa,
       forbidWave5RetracementFa,
       wave3ExtensionEffectFa,
-      tmvPrimeApproxIdealWarningFa
+      tmvPrimeApproxIdealWarningFa,
+      fibValidation,
+      fibValidationWarnings,
+      isWave5RetracementInvalid: Boolean(forbidWave5RetracementFa)
     };
   }
 }

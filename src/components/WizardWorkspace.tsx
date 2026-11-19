@@ -1326,6 +1326,8 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
               onHoverScenario={setHoveredWizardScenarioId}
               onHoverLeg={setHighlightedLegIndex}
               candles={activeChartCandles}
+              candlesByTf={dataByTf}
+              marketType={asset.marketType}
               showPRZ={showPRZ}
               onToggleShowPRZ={() => setShowPRZ(p => !p)}
               showTMV={showTMV}

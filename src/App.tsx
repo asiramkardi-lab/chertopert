@@ -972,6 +972,7 @@ export default function App() {
                 : undefined
             }
             candles={effectiveCandles}
+            candlesByTf={multiTfData}
             marketType={currentAsset.marketType}
             onPromoteDegree={handlePromoteScenarioDegree}
           />

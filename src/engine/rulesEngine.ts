@@ -405,17 +405,66 @@ export class RulesEngine {
           canBeSolvedByAlternate: xValid ? undefined : 'ZIGZAG'
         });
 
+        // Table 12.12-12.14: Cardinal Rules 1, 2, 3 remain sacred even inside Complex Combinations
+        if (len1 > 0) {
+          const r1Eval = evaluateWave2Retracement(cleanFloat(len1), cleanFloat(retrace2));
+          if (!r1Eval.passed) {
+            rules.push({
+              ruleId: 'CARDINAL_RULE_1',
+              name: 'Cardinal Rule 1 inside Complex Pattern',
+              nameFa: 'قانون اول در الگوی ترکیبی (عدم پوشش ۱۰۰٪ مبدأ — جدول ۱۲.۱۲)',
+              type: 'HARD',
+              passed: false,
+              score: 0,
+              conceptId: 'C07',
+              messageFa: 'نقض قانون ۱ در الگوی ترکیبی: موج میانی/اصلاحی از مبدأ موج اول عبور کرده است.'
+            });
+          }
+        }
+        if (vertices.length >= 6 && len1 > 0 && len3 > 0 && len5 > 0) {
+          const r2Eval = evaluateWave3NotShortest(cleanFloat(len1), cleanFloat(len3), cleanFloat(len5));
+          if (!r2Eval.passed) {
+            rules.push({
+              ruleId: 'CARDINAL_RULE_2',
+              name: 'Cardinal Rule 2 inside Complex Pattern',
+              nameFa: 'قانون دوم در الگوی ترکیبی (موج میانی کوتاه‌ترین نباشد — جدول ۱۲.۱۳)',
+              type: 'HARD',
+              passed: false,
+              score: 0,
+              conceptId: 'C07',
+              messageFa: 'نقض قانون ۲ در الگوی ترکیبی: گام میانی (W3/Y) کوتاه‌ترین موج است و با ساختار ترکیبی توجیه نمی‌شود.'
+            });
+          }
+        }
+        if (vertices.length >= 5 && len1 > 0) {
+          const r3Eval = evaluateWave4Overlap(p1, p4, len1, isBull);
+          if (r3Eval.hasOverlap) {
+            rules.push({
+              ruleId: 'CARDINAL_RULE_3',
+              name: 'Cardinal Rule 3 inside Complex Pattern',
+              nameFa: 'قانون سوم در الگوی ترکیبی (عدم هم‌پوشانی حریم موج اول — جدول ۱۲.۱۴)',
+              type: 'HARD',
+              passed: false,
+              score: 0,
+              conceptId: 'C07',
+              messageFa: 'نقض قانون ۳ در الگوی ترکیبی: موج اصلاحی چهارم وارد محدوده قیمتی گام اول شده است.'
+            });
+          }
+        }
+
         const simpleFits = len1 > 0 && retrace2 / len1 < 1.0 && (vertices.length < 4 || (isBull ? p3 > p1 : p3 < p1));
         if (simpleFits) {
+          const complexTarget = isBull ? p2 + len1 : p2 - len1;
+          const simpleAltTarget = isBull ? p0 + len1 * 1.618 : p0 - len1 * 1.618;
           rules.push({
             ruleId: 'COMPLEX_LAST_RESORT',
-            name: 'Complex Pattern Last-Resort Rule (C26)',
-            nameFa: 'اصل اولویت الگوهای ساده بر ترکیبی',
+            name: 'Complex Pattern Last-Resort Rule & Target Comparison (C26)',
+            nameFa: 'اصل اولویت الگوهای ساده و مقایسه هدف ترکیبی (جدول ۱۲.۱۵–۱۶)',
             type: 'SOFT',
             passed: false,
             score: 65,
             conceptId: 'C26',
-            messageFa: 'ساختار فعلی با الگوی ساده‌تر زیگزاگ قابل توجیه است؛ الگوی ترکیبی فقط هنگام شکست الگوهای ساده مجاز است.',
+            messageFa: `ساختار فعلی با الگوی ساده‌تر زیگزاگ قابل توجیه است (هدف ساده: ${Math.round(simpleAltTarget).toLocaleString()} در برابر هدف ترکیبی: ${Math.round(complexTarget).toLocaleString()}).`,
             canBeSolvedByAlternate: 'ZIGZAG'
           });
         }
@@ -540,9 +589,35 @@ export class RulesEngine {
             conceptId: pattern.includes('DIAGONAL') ? 'C20' : 'C19',
             messageFa: hasOverlap
               ? `موج ۴ وارد محدوده موج ۱ شده که با مشخصه الگوی ${PATTERN_LABELS_FA[pattern]} سازگار است.`
-              : 'توجه: هم‌پوشانی موج ۴ و ۱ رخ نداده است؛ سیکل ایده‌آل نیز محتمل است.'
+              : 'توجه: هم‌پوشانی موج ۴ و ۱ رخ نداده است؛ قطر پیشرو بدون هم‌پوشانی یا سیکل ایده‌آل نیز محتمل است.'
           });
         }
+      }
+
+      // 3b. Table 9: Diagonal Subwave Structure Verification (waves 3 and 5 must not be 5-subwave impulses in standard 3-3-3-3-3 diagonals)
+      if (pattern.includes('DIAGONAL') && vertices.length >= 6 && candles && candles.length >= 12) {
+        const countSub = (aIdx: number, bIdx: number) => {
+          const s = Math.max(0, Math.min(candles.length - 1, Math.min(aIdx, bIdx)));
+          const e = Math.max(s, Math.min(candles.length - 1, Math.max(aIdx, bIdx)));
+          const slice = candles.slice(s, e + 1);
+          if (slice.length < 7) return 3;
+          return PivotDetector.detectPivots(slice, 1, 1, 0.45).length >= 4 ? 5 : 3;
+        };
+        const sub3 = countSub(vertices[2].candleIndex, vertices[3].candleIndex);
+        const sub5 = countSub(vertices[4].candleIndex, vertices[5].candleIndex);
+        const diagSubOk = sub3 === 3 && sub5 === 3;
+        rules.push({
+          ruleId: 'DIAGONAL_SUBWAVES',
+          name: 'Diagonal 3-3-3-3-3 Subwave Check (Table 9)',
+          nameFa: 'کنترل ریزساختار ۳موجی امواج ۳ و ۵ در قطر (جدول ۹)',
+          type: 'STRUCTURE',
+          passed: diagSubOk,
+          score: diagSubOk ? 100 : 45,
+          conceptId: 'C20',
+          messageFa: diagSubOk
+            ? 'ساختار درونی امواج ۳ و ۵ با الگوی سه‌موجی قطر (۳-۳-۳-۳-۳) منطبق است.'
+            : `هشدار قطر: زیرموج‌های غیرمنتظره ۵موجی در ${sub3 === 5 ? 'موج ۳' : ''}${sub3 === 5 && sub5 === 5 ? ' و ' : ''}${sub5 === 5 ? 'موج ۵' : ''} مشاهده شد.`
+        });
       }
 
       // 4. Terminal vs Anti-Terminal Wave 5 & CB-Wave 100% Coverage Behavior (C19 / Session 6.2-6.4, 6.11)

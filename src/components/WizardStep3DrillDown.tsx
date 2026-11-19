@@ -86,6 +86,8 @@ interface WizardStep3DrillDownProps {
   onHoverScenario?: (id: string | null) => void;
   onHoverLeg?: (legIndex: number | null) => void;
   candles?: Candle[];
+  candlesByTf?: Record<string, Candle[]>;
+  marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
   showPRZ?: boolean;
   onToggleShowPRZ?: () => void;
   showTMV?: boolean;
@@ -122,6 +124,8 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   onHoverScenario,
   onHoverLeg,
   candles = [],
+  candlesByTf,
+  marketType = 'CRYPTO',
   showPRZ = true,
   onToggleShowPRZ,
   showTMV = true,
@@ -1209,8 +1213,10 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
           <div className="space-y-3">
             <TopDownPipelineAudit
               candles={candles}
+              candlesByTf={candlesByTf}
               scenario={activeLevelScenario}
               scenarios={currentDrill ? activeSubScenarios : rootScenarios}
+              marketType={marketType}
               timeframe={activeLevelScenario.timeframe}
               parentRole={currentDrill?.role || 'ROOT'}
               parentWaveLabel={currentDrill?.waveLabel || ''}

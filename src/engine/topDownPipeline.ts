@@ -34,6 +34,7 @@ const PRIORITY_TIER_NAMES_FA: Record<number, string> = {
 
 export interface TopDownPipelineParams {
   candles: Candle[];
+  candlesByTf?: Record<string, Candle[]>;
   scenario: WaveScenario;
   scenarios?: WaveScenario[];
   marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
@@ -48,6 +49,7 @@ export class TopDownPipelineEngine {
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const {
       candles,
+      candlesByTf,
       scenario,
       scenarios = [scenario],
       marketType = 'CRYPTO',
@@ -106,6 +108,42 @@ export class TopDownPipelineEngine {
         severity: inputReport.nanPct > 10 ? 'ERROR' : 'WARNING'
       });
     }
+    if (inputReport.hasDuplicateTimestamps) {
+      pushEdge(step0Edges, {
+        id: 'T1_0_5',
+        tableNumber: 1,
+        tableNameFa: 'جدول ۱: داده ورودی',
+        ruleRef: '1.8',
+        sessionRef: 'جلسه ۵',
+        conditionFa: 'کندل با timestamp تکراری در دیتای ورودی مشاهده شد',
+        actionFa: 'خطای داده: حذف یا اصلاح timestampهای تکراری الزامی است',
+        severity: 'ERROR'
+      });
+    }
+    if (inputReport.sortedOutOfOrder) {
+      pushEdge(step0Edges, {
+        id: 'T1_0_6',
+        tableNumber: 1,
+        tableNameFa: 'جدول ۱: داده ورودی',
+        ruleRef: '1.9',
+        sessionRef: 'جلسه ۵',
+        conditionFa: 'کندل‌ها خارج از ترتیب زمانی بودند',
+        actionFa: 'مرتب‌سازی صعودی خودکار + هشدار',
+        severity: 'WARNING'
+      });
+    }
+    if (inputReport.hasZeroVolumeCandles) {
+      pushEdge(step0Edges, {
+        id: 'T1_0_7',
+        tableNumber: 1,
+        tableNameFa: 'جدول ۱: داده ورودی',
+        ruleRef: '1.7',
+        sessionRef: 'جلسه ۵',
+        conditionFa: `${inputReport.zeroVolumeCount ?? 1} کندل با حجم صفر شناسایی شد`,
+        actionFa: 'داده معتبر است ولی کندل‌های حجم صفر از میانگین حجم حذف شدند',
+        severity: 'INFO'
+      });
+    }
     if (inputReport.dojiPct > 50) {
       pushEdge(step0Edges, {
         id: 'T1_0_8',
@@ -130,6 +168,11 @@ export class TopDownPipelineEngine {
         severity: 'WARNING'
       });
     }
+
+    const workingCandles =
+      inputReport.sanitizedCandles && inputReport.sanitizedCandles.length > 0
+        ? inputReport.sanitizedCandles
+        : candles;
 
     const step0Status: PipelineStepStatus = !inputReport.valid
       ? 'BLOCKED'
@@ -162,6 +205,8 @@ export class TopDownPipelineEngine {
     const specMaxDegree = FractalEngine.getSpecMaxDegrees(timeframe, marketType);
     const maxAllowedVisualDegree = FractalEngine.getMaxDegreesForTimeframe(timeframe, marketType);
     const isForbiddenTseTf = marketType === 'TSE_IRAN' && (timeframe === '15M' || timeframe === '1H');
+    const scenarioDegreeLevel = DEGREE_CONFIGS[scenario.degree]?.level ?? 4;
+    const isTseDegreeExceeded = marketType === 'TSE_IRAN' && scenarioDegreeLevel > 4;
 
     if (!availableTimeframes.includes('1D')) {
       pushEdge(step1Edges, {
@@ -187,6 +232,41 @@ export class TopDownPipelineEngine {
         severity: 'ERROR'
       });
     }
+    if (isTseDegreeExceeded) {
+      pushEdge(step1Edges, {
+        id: 'T2_2_5',
+        tableNumber: 2,
+        tableNameFa: 'جدول ۲: تایم‌فریم',
+        ruleRef: '1.8',
+        sessionRef: 'جلسه ۳، ۵',
+        conditionFa: `درجه فعلی (${scenarioDegreeLevel}) از سقف بورس ایران (۴ درجه) فراتر رفته است`,
+        actionFa: 'توقف در درجه ۴ و پرهیز از زیرموج‌های بیش‌ازحد ریز',
+        severity: 'ERROR'
+      });
+    }
+    if (inputReport.historySpanDays > 365 * 10 && inputReport.historySpanDays <= 365 * 20) {
+      pushEdge(step1Edges, {
+        id: 'T2_1_11',
+        tableNumber: 2,
+        tableNameFa: 'جدول ۲: تایم‌فریم',
+        ruleRef: '1.11',
+        sessionRef: 'جلسه ۵',
+        conditionFa: `داده بیش از ۱۰ سال (${Math.round(inputReport.historySpanDays / 365)} سال)`,
+        actionFa: 'تایم ماهانه ممکن است فشرده باشد ← شروع از هفتگی (1W)',
+        severity: 'WARNING'
+      });
+    } else if (inputReport.historySpanDays > 0 && inputReport.historySpanDays < 365 && workingCandles.length >= 10) {
+      pushEdge(step1Edges, {
+        id: 'T2_1_12',
+        tableNumber: 2,
+        tableNameFa: 'جدول ۲: تایم‌فریم',
+        ruleRef: '1.12',
+        sessionRef: 'جلسه ۵',
+        conditionFa: `داده کمتر از ۱ سال (${inputReport.historySpanDays} روز)`,
+        actionFa: 'کف مطلق ماهانه قابل تشخیص نیست ← شروع از هفتگی/روزانه',
+        severity: 'INFO'
+      });
+    }
     if (inputReport.historySpanDays > 365 * 20) {
       pushEdge(step1Edges, {
         id: 'T2_2_6',
@@ -204,14 +284,15 @@ export class TopDownPipelineEngine {
       stepNumber: 1,
       titleFa: 'گام ۱: انتخاب تایم‌فریم شروع و سقف درجه',
       status:
-        isForbiddenTseTf || !availableTimeframes.includes('1D')
+        isForbiddenTseTf || isTseDegreeExceeded || !availableTimeframes.includes('1D')
           ? 'BLOCKED'
-          : inputReport.historyWarnings.length
+          : inputReport.historyWarnings.length > 0 || step1Edges.some(e => e.severity === 'WARNING')
           ? 'WARNING'
           : 'PASSED',
       summaryFa: `شروع پیشنهادی: ${startTf} · تایم فعلی: ${timeframe} · حداکثر درجه مجاز: ${specMaxDegree}`,
       detailsFa: [
-        `پیشنهاد بر اساس تاریخچه (${inputReport.historySpanDays} روز): < ۶ ماه = 1D، ۶ ماه تا ۵ سال = 1W، > ۵ سال = 1M.`,
+        inputReport.recommendedStartReasonFa ||
+          `پیشنهاد بر اساس تاریخچه (${inputReport.historySpanDays} روز): < ۶ ماه = 1D، ۶ ماه تا ۱۰ سال = 1W، > ۱۰ سال = 1W (فشردگی 1M).`,
         marketType === 'TSE_IRAN'
           ? 'محدودیت بورس ایران: توقف قطعی در درجه ۴ (بدون زیر ۴ ساعته).'
           : `بازار جهانی/کریپتو: عمق مشخصات تا درجه ${specMaxDegree} (نمایش ۴ درجه فعال).`,
@@ -226,11 +307,11 @@ export class TopDownPipelineEngine {
     // ═══════════════════════════════════════════════════════
     const step2Edges: TriggeredEdgeCase[] = [];
     const bottomEval = RulesEngine.evaluateAbsoluteBottomAndValidLows(
-      candles,
+      workingCandles,
       scenario.vertices,
       scenario.direction
     );
-    if (bottomEval.absoluteBottomIdx === 0 && candles.length > 0) {
+    if (bottomEval.absoluteBottomIdx === 0 && workingCandles.length > 0) {
       pushEdge(step2Edges, {
         id: 'T3_2_2',
         tableNumber: 3,
@@ -241,7 +322,7 @@ export class TopDownPipelineEngine {
         actionFa: 'داده مرجع پیش از کف وجود ندارد؛ با احتیاط آغاز کنید',
         severity: 'WARNING'
       });
-    } else if (bottomEval.absoluteBottomIdx < 5 && candles.length > 0) {
+    } else if (bottomEval.absoluteBottomIdx < 5 && workingCandles.length > 0) {
       pushEdge(step2Edges, {
         id: 'T3_2_1',
         tableNumber: 3,
@@ -287,14 +368,14 @@ export class TopDownPipelineEngine {
     // ═══════════════════════════════════════════════════════
     const step3Edges: TriggeredEdgeCase[] = [];
     const pivotWin = getPivotWindowForTimeframe(timeframe);
-    const detectedPivots = PivotDetector.detectPivots(candles, Math.min(pivotWin, 4), Math.min(pivotWin, 4), 0.8);
+    const detectedPivots = PivotDetector.detectPivots(workingCandles, Math.min(pivotWin, 4), Math.min(pivotWin, 4), 0.8);
     const validation = RulesEngine.validateStructure(
       scenario.patternType,
       scenario.vertices,
       scenario.direction,
       parentRole,
       parentWaveLabel,
-      candles
+      workingCandles
     );
 
     const priorityRankedCandidates: PipelinePriorityCandidate[] = [...scenarios]
@@ -369,9 +450,21 @@ export class TopDownPipelineEngine {
     // گام ۴ و ۵: پالایش به تایم میانی و پایین (جدول ۵: شتابدار vs فرکتالی)
     // ═══════════════════════════════════════════════════════
     const step4Edges: TriggeredEdgeCase[] = [];
-    const legNatures = FractalEngine.classifyScenarioWaveNatures(scenario, candles);
+    const legNatures = FractalEngine.classifyScenarioWaveNatures(scenario, workingCandles);
     const impulsiveLegs = legNatures.filter(l => l.nature === 'IMPULSIVE_MOMENTUM');
     const fractalLegs = legNatures.filter(l => l.nature === 'FRACTAL_EXTENDED');
+
+    const effectiveCandlesByTf: Record<string, Candle[]> = {
+      ...(candlesByTf || {}),
+      [timeframe]: workingCandles
+    };
+    const multiTfResult = FractalEngine.refineCyclesAcrossTimeframes(
+      effectiveCandlesByTf,
+      scenarios,
+      startTf,
+      marketType
+    );
+    const multiTfSummary = multiTfResult.summary;
 
     if (impulsiveLegs.length > 0) {
       pushEdge(step4Edges, {
@@ -385,13 +478,37 @@ export class TopDownPipelineEngine {
         severity: 'INFO'
       });
     }
+    if (multiTfSummary.traversedTimeframes.length > 1 || multiTfSummary.fallbackToHigherTf || multiTfSummary.relabelingSuggestions.length > 0) {
+      pushEdge(step4Edges, {
+        id: 'T5_MULTI_TF',
+        tableNumber: 5,
+        tableNameFa: 'جدول ۵: پالایش چندتایم‌فریمی',
+        ruleRef: '4 / 5',
+        sessionRef: 'جلسه ۳، ۵',
+        conditionFa: multiTfSummary.fallbackToHigherTf
+          ? multiTfSummary.fallbackReasonFa || 'بازگشت به تایم‌فریم بالاتر'
+          : `پیمایش تایم‌فریم: ${multiTfSummary.traversedTimeframes.join(' ← ')}`,
+        actionFa:
+          multiTfSummary.relabelingSuggestions[0] ||
+          `توقف در تایم ${multiTfSummary.finalTf} (درجه ${multiTfSummary.reachedDegreeLevel} از ${multiTfSummary.maxAllowedDegree})`,
+        severity: multiTfSummary.fallbackToHigherTf || multiTfSummary.relabelingSuggestions.length > 0 ? 'WARNING' : 'INFO'
+      });
+    }
 
     steps.push({
       stepNumber: 4,
       titleFa: 'گام ۴ و ۵: پالایش میان‌تایم و تفکیک شتابدار از فرکتالی',
-      status: legNatures.length > 0 ? 'PASSED' : 'SKIPPED',
-      summaryFa: `${fractalLegs.length} موج فرکتالی قابل شکست · ${impulsiveLegs.length} موج شتابدار (Momentum)`,
-      detailsFa: legNatures.slice(0, 4).map(l => `${l.legLabel}: ${l.summaryFa}`),
+      status: multiTfSummary.fallbackToHigherTf
+        ? 'WARNING'
+        : legNatures.length > 0
+        ? 'PASSED'
+        : 'SKIPPED',
+      summaryFa: `${fractalLegs.length} موج فرکتالی قابل شکست · ${impulsiveLegs.length} موج شتابدار · مسیر: ${multiTfSummary.traversedTimeframes.join(' ← ') || timeframe}`,
+      detailsFa: [
+        ...legNatures.slice(0, 4).map(l => `${l.legLabel}: ${l.summaryFa}`),
+        ...(multiTfSummary.fallbackReasonFa ? [multiTfSummary.fallbackReasonFa] : []),
+        ...multiTfSummary.relabelingSuggestions
+      ],
       sessions: ['جلسه ۳', 'جلسه ۵'],
       edgeCases: step4Edges
     });
@@ -400,7 +517,7 @@ export class TopDownPipelineEngine {
     // گام ۶: توقف در درجه مجاز و ارتقاء لیبل‌ها (جدول ۶-۳)
     // ═══════════════════════════════════════════════════════
     const step6Edges: TriggeredEdgeCase[] = [];
-    const promo = FractalEngine.detectDegreePromotionOpportunity(scenario, candles);
+    const promo = FractalEngine.detectDegreePromotionOpportunity(scenario, workingCandles);
     const currentDegreeLevel = DEGREE_CONFIGS[scenario.degree].level;
 
     if (promo.shouldPromote) {
@@ -430,11 +547,14 @@ export class TopDownPipelineEngine {
     // گام ۷: اعتبارسنجی نهایی و ممیزی الگوی تخصصی (جداول ۶–۱۲)
     // ═══════════════════════════════════════════════════════
     const step7Edges: TriggeredEdgeCase[] = [];
-    const complexRep = PatternEngines.analyzeComplexPattern(scenario, candles);
-    const zzRep = scenario.patternType === 'ZIGZAG' ? PatternEngines.analyzeZigzag(scenario, candles) : null;
-    const flatRep = scenario.patternType.startsWith('FLAT') ? PatternEngines.analyzeFlat(scenario, candles) : null;
+    const complexRep = PatternEngines.analyzeComplexPattern(scenario, workingCandles);
+    const zzRep = scenario.patternType === 'ZIGZAG' ? PatternEngines.analyzeZigzag(scenario, workingCandles) : null;
+    const flatRep = scenario.patternType.startsWith('FLAT') ? PatternEngines.analyzeFlat(scenario, workingCandles) : null;
     const triRep = scenario.patternType.startsWith('TRIANGLE')
-      ? PatternEngines.analyzeTriangle(scenario, candles, parentRole, parentWaveLabel)
+      ? PatternEngines.analyzeTriangle(scenario, workingCandles, parentRole, parentWaveLabel)
+      : null;
+    const diagRep = scenario.patternType.includes('DIAGONAL')
+      ? PatternEngines.analyzeDiagonal(scenario, workingCandles)
       : null;
 
     if (complexRep.complexity === 'TOO_COMPLEX') {
@@ -473,11 +593,37 @@ export class TopDownPipelineEngine {
         severity: 'ERROR'
       });
     }
+    if (triRep?.subwaveMismatchWarningFa) {
+      pushEdge(step7Edges, {
+        id: 'T8_DIAG_SUBWAVE',
+        tableNumber: 8,
+        tableNameFa: 'جدول ۸: مثلث',
+        ruleRef: '8.4',
+        sessionRef: 'جلسه ۱۴',
+        conditionFa: 'در یک یا چند ضلع مثلث ساختار ۵ زیرموجی مشاهده شد',
+        actionFa: 'احتمال الگوی قطر (Diagonal) یا شمارش نادرست مثلث',
+        severity: 'WARNING'
+      });
+    }
+    if (diagRep?.diagonalSubwaveErrors && diagRep.diagonalSubwaveErrors.length > 0) {
+      pushEdge(step7Edges, {
+        id: 'T9_SUBWAVES',
+        tableNumber: 9,
+        tableNameFa: 'جدول ۹: الگوی قطر',
+        ruleRef: '9.4',
+        sessionRef: 'جلسه ۶',
+        conditionFa: diagRep.diagonalSubwaveErrors[0],
+        actionFa: 'اصلاح ساختار زیرموج‌های قطر (۳-۳-۳-۳-۳ / ۵-۳-۵-۳-۵)',
+        severity: 'WARNING'
+      });
+    }
 
     const step7Warnings = [
       ...(zzRep?.warnings || []),
       ...(flatRep?.warnings || []),
+      ...(flatRep?.borderlineNotesFa || []),
       ...(triRep?.warnings || []),
+      ...(diagRep?.warnings || []),
       ...complexRep.warnings
     ];
 
@@ -492,7 +638,7 @@ export class TopDownPipelineEngine {
       summaryFa: `${validation.rules.filter(r => r.passed).length} از ${validation.rules.length} قانون تایید شد (اعتبار ${validation.validityScore}٪)`,
       detailsFa: [
         validation.mislabelingReasonFa || '',
-        ...step7Warnings.slice(0, 4)
+        ...step7Warnings.slice(0, 5)
       ].filter(Boolean),
       sessions: ['جلسه ۴', 'جلسه ۶', 'جلسه ۹', 'جلسه ۱۰', 'جلسه ۱۲–۱۷'],
       edgeCases: step7Edges
@@ -501,10 +647,10 @@ export class TopDownPipelineEngine {
     // ═══════════════════════════════════════════════════════
     // گام ۸: سناریو بندی آینده (جدول ۸.۲ و ۸.۳)
     // ═══════════════════════════════════════════════════════
-    const entryPlan = PatternEngines.analyzeEntryStrategy(scenario, candles);
+    const entryPlan = PatternEngines.analyzeEntryStrategy(scenario, workingCandles);
     const extTrailing = PatternEngines.analyzeExtensionAndTrailing(
       scenario,
-      candles,
+      workingCandles,
       undefined,
       undefined,
       undefined,
@@ -520,6 +666,45 @@ export class TopDownPipelineEngine {
         conditionFa: 'هم‌پوشانی موج ۴ با ۱ و کوتاه‌شدگی موج ۵',
         actionFa: 'سیو سود سریع و پرهیز از ماندن در اصلاح'
       });
+    } else if (scenario.patternType.includes('DIAGONAL')) {
+      futureScenarios.push({
+        id: 'SC_DIAGONAL_REV',
+        labelFa:
+          scenario.patternType === 'ENDING_DIAGONAL'
+            ? 'بازگشت تند ۸۵٪–۱۰۰٪ پس از قطر پایانی'
+            : 'اصلاح موج ۲ پس از قطر پیشرو',
+        probabilityPct: 85,
+        conditionFa: diagRep?.postDiagonalDropConfirmed
+          ? `ریزش ${diagRep.postDiagonalDropPct}٪ تایید شد`
+          : 'تکمیل ساختار همگرا/واگرای قطر',
+        actionFa:
+          scenario.patternType === 'ENDING_DIAGONAL'
+            ? 'خروج/سیو سود سریع پیش از بازگشت کامل'
+            : 'انتظار برای پول‌بک ۶۱.۸٪ جهت شروع موج ۳'
+      });
+    } else if (scenario.patternType.startsWith('TRIANGLE')) {
+      futureScenarios.push({
+        id: 'SC_TRIANGLE_THRUST',
+        labelFa:
+          extTrailing.endingTriangleTriggered
+            ? 'مثلث پایانی (موج ۵) ← بازگشت ۷۰٪ تا مبدأ'
+            : 'پرتاب پس از اتمام مثلث (E)',
+        probabilityPct: extTrailing.endingTriangleTriggered ? 70 : 65,
+        conditionFa: triRep?.timingZone === 'INSIDE_BOX_3'
+          ? 'شکست داخل باکس ۳ مثلث (بهینه)'
+          : 'نزدیک شدن به راس مثلث',
+        actionFa: extTrailing.endingTriangleTriggered
+          ? 'سیو سود فوری (جدول ۱۴.۱۲)'
+          : 'ورود در جهت شکست ضلع E'
+      });
+    } else if (scenario.patternType.startsWith('FLAT')) {
+      futureScenarios.push({
+        id: 'SC_RANGE_FLAT',
+        labelFa: 'بازار رنج و نوسان فلت (۳-۳-۵)',
+        probabilityPct: 50,
+        conditionFa: 'نوسان رنج در محدوده ۳۰٪ تا ۵۰٪',
+        actionFa: 'پرهیز از تعقیب روند تا شکست کامل تراز B/A'
+      });
     } else if (extTrailing.extendedWave === 'WAVE_5') {
       futureScenarios.push({
         id: 'SC_W5_DROP',
@@ -529,34 +714,52 @@ export class TopDownPipelineEngine {
         actionFa: 'سیو سود فوری (جدول ۱۰.۸ / ۱۱.۴)'
       });
     } else if (entryPlan.w2VsAScenario === 'W2') {
-      futureScenarios.push({
-        id: 'SC_W2_CONT',
-        labelFa: 'سناریوی غالب W2 و آغاز موج ۳',
-        probabilityPct: Math.round(entryPlan.scenarioConfidence * 100),
-        conditionFa: 'ساختار ۵ موجی اولیه + اصلاح طلایی',
-        actionFa: 'خرید متمرکز در ۶۱.۸٪ یا شکست موج ۱'
-      });
+      futureScenarios.push(
+        {
+          id: 'SC_W2_CONT',
+          labelFa: 'سناریوی غالب ادامه صعود (W2 ← موج ۳)',
+          probabilityPct: Math.max(60, Math.round(entryPlan.scenarioConfidence * 100)),
+          conditionFa: 'ساختار ۵ موجی اولیه + اصلاح طلایی',
+          actionFa: 'خرید متمرکز در ۶۱.۸٪ یا شکست موج ۱'
+        },
+        {
+          id: 'SC_DOWN_START',
+          labelFa: 'سناریوی جایگزین شروع اصلاح/نزول',
+          probabilityPct: Math.min(40, 100 - Math.max(60, Math.round(entryPlan.scenarioConfidence * 100))),
+          conditionFa: 'در صورت شکست حمایت ۶۱.۸٪ و ضعف مومنتوم',
+          actionFa: 'کاهش حجم و فعال‌سازی حد ابطال'
+        }
+      );
     } else if (entryPlan.w2VsAScenario === 'A') {
-      futureScenarios.push({
-        id: 'SC_WAVE_A',
-        labelFa: 'سناریوی غالب موج A اصلاحی',
-        probabilityPct: Math.round(entryPlan.scenarioConfidence * 100),
-        conditionFa: 'ساختار ۳ موجی / اصلاح کم‌عمق ۳۸.۲٪',
-        actionFa: 'ورود نکن — انتظار برای تکمیل موج C'
-      });
+      futureScenarios.push(
+        {
+          id: 'SC_WAVE_A',
+          labelFa: 'سناریوی غالب موج A اصلاحی (شروع نزول)',
+          probabilityPct: Math.round(entryPlan.scenarioConfidence * 100),
+          conditionFa: 'ساختار ۳ موجی / اصلاح کم‌عمق ۳۸.۲٪',
+          actionFa: 'ورود نکن — انتظار برای تکمیل موج C'
+        },
+        {
+          id: 'SC_UP_ALT',
+          labelFa: 'سناریوی بازگشت صعودی با تایید کندلی',
+          probabilityPct: Math.max(25, 100 - Math.round(entryPlan.scenarioConfidence * 100)),
+          conditionFa: 'عبور از سقف موج A با کندل قدرتمند',
+          actionFa: 'بازشماری به موج ۱–۲'
+        }
+      );
     } else {
       futureScenarios.push(
         {
           id: 'SC_UNCERTAIN_W2',
-          labelFa: 'سناریوی موج ۲ (ورود پله اول)',
-          probabilityPct: 55,
+          labelFa: 'سناریوی موج ۲ (ادامه صعود با احتمال ۶۰٪)',
+          probabilityPct: 60,
           conditionFa: 'در تراز ۶۱.۸٪ با حمایت معتبر',
           actionFa: '۵۰٪ حجم در ۶۱.۸٪ + ۵۰٪ در ۷۸.۶٪'
         },
         {
           id: 'SC_UNCERTAIN_A',
-          labelFa: 'سناریوی موج A (اصلاح ادامه‌دار)',
-          probabilityPct: 45,
+          labelFa: 'سناریوی موج A (شروع نزول ۴۰٪)',
+          probabilityPct: 40,
           conditionFa: 'در صورت شکست ۶۱.۸٪ به سمت ۷۸.۶٪',
           actionFa: 'صبر در ۷۸.۶٪ تا تأیید کندل چکش'
         }
@@ -579,8 +782,45 @@ export class TopDownPipelineEngine {
     // گام ۹: محاسبه PRZ و TMV (جدول ۱۰)
     // ═══════════════════════════════════════════════════════
     const step9Edges: TriggeredEdgeCase[] = [];
-    const proj = TargetProjectionEngine.projectScenario(scenario, candles, parentRole, parentWaveLabel);
+    const proj = TargetProjectionEngine.projectScenario(scenario, workingCandles, parentRole, parentWaveLabel);
+    const fibWarnings = proj.fibValidationWarnings || [];
 
+    if (proj.fibValidation && !proj.fibValidation.isValid) {
+      pushEdge(step9Edges, {
+        id: 'T10_PAIR_RULE',
+        tableNumber: 10,
+        tableNameFa: 'جدول ۱۰: فیبوناچی PRZ/TMV',
+        ruleRef: '10.1–10.5',
+        sessionRef: 'جلسه ۷، ۸',
+        conditionFa: proj.fibValidation.errors[0] || 'خطا در نقاط لنگر ابزار فیبوناچی',
+        actionFa: 'اصلاح جفت‌نقطه مبنای فیبوناچی (۱-۲ برای موج ۳ / ۳-۴ برای موج ۵)',
+        severity: 'ERROR'
+      });
+    }
+    if (proj.isWave5RetracementInvalid) {
+      pushEdge(step9Edges, {
+        id: 'T10_W5_RET_FORBIDDEN',
+        tableNumber: 10,
+        tableNameFa: 'جدول ۱۰: فیبوناچی PRZ/TMV',
+        ruleRef: '10.8',
+        sessionRef: 'جلسه ۸',
+        conditionFa: 'استفاده از رتریسمنت برای تارگت موج ۵ ممنوع است',
+        actionFa: 'فقط از پروجکشن ۳–۴ و سطوح TMV استفاده شود',
+        severity: 'WARNING'
+      });
+    }
+    if (fibWarnings.some(w => w.includes('جهت'))) {
+      pushEdge(step9Edges, {
+        id: 'T10_ORIENTATION',
+        tableNumber: 10,
+        tableNameFa: 'جدول ۱۰: فیبوناچی PRZ/TMV',
+        ruleRef: '10.3',
+        sessionRef: 'جلسه ۷',
+        conditionFa: 'خطای جهت رسم ابزار فیبوناچی',
+        actionFa: 'در صعودی از کف به سقف و در نزولی از سقف به کف رسم کنید',
+        severity: 'WARNING'
+      });
+    }
     if (proj.tmvPrimeApproxIdealWarningFa) {
       pushEdge(step9Edges, {
         id: 'T10_15',
@@ -604,19 +844,38 @@ export class TopDownPipelineEngine {
         actionFa: 'اعتبار بالا (۹۰٪)',
         severity: 'INFO'
       });
+    } else if (proj.overlapReport?.type === 'NONE') {
+      pushEdge(step9Edges, {
+        id: 'T10_NO_OVERLAP',
+        tableNumber: 10,
+        tableNameFa: 'جدول ۱۰: فیبوناچی PRZ/TMV',
+        ruleRef: '10.17',
+        sessionRef: 'جلسه ۸',
+        conditionFa: `عدم همپوشانی PRZ و TMV Ideal (فاصله ${proj.overlapReport.gapPct}٪)`,
+        actionFa: 'PRZ برای چرخش اصلاحی و TMV برای مقصد حرکت بررسی شود',
+        severity: 'INFO'
+      });
     }
 
     steps.push({
       stepNumber: 9,
       titleFa: 'گام ۹: محاسبه PRZ و سطوح سه‌گانه TMV',
-      status: proj.przZones.length > 0 || proj.tmvSummary ? 'PASSED' : 'SKIPPED',
+      status:
+        proj.fibValidation && !proj.fibValidation.isValid
+          ? 'BLOCKED'
+          : fibWarnings.length > 0 || Boolean(proj.tmvPrimeApproxIdealWarningFa)
+          ? 'WARNING'
+          : proj.przZones.length > 0 || proj.tmvSummary
+          ? 'PASSED'
+          : 'SKIPPED',
       summaryFa: proj.tmvSummary
         ? `Prime ${proj.tmvSummary.prime.toLocaleString()} · Ideal ${proj.tmvSummary.ideal100.toLocaleString()} · Alt ${proj.tmvSummary.alternate1618.toLocaleString()}`
         : 'منتظر تکمیل ۲ پیوت برای TMV',
       detailsFa: [
         proj.projectionPairNoteFa || '',
         proj.overlapReport?.noteFa || '',
-        proj.forbidWave5RetracementFa || ''
+        proj.forbidWave5RetracementFa || '',
+        ...fibWarnings
       ].filter(Boolean),
       sessions: ['جلسه ۷', 'جلسه ۸', 'جلسه ۱۸'],
       edgeCases: step9Edges
@@ -636,6 +895,18 @@ export class TopDownPipelineEngine {
         sessionRef: 'جلسه ۱۱',
         conditionFa: `رتریسمنت (${finalEntry.retracementPct}٪) < ۵۰٪`,
         actionFa: 'ورود نکن (جلوگیری از FOMO)',
+        severity: 'WARNING'
+      });
+    }
+    if (finalEntry.retracementPct > 65 && finalEntry.retracementPct < 74) {
+      pushEdge(step10Edges, {
+        id: 'T13_CROSS_618',
+        tableNumber: 13,
+        tableNameFa: 'جدول ۱۳: ورود و سیگنال',
+        ruleRef: '13.5',
+        sessionRef: 'جلسه ۱۱',
+        conditionFa: `قیمت (${finalEntry.retracementPct}٪) از ۶۱.۸٪ عبور کرده و به سمت ۷۸.۶٪ می‌رود`,
+        actionFa: 'صبر تا رسیدن به ۷۸.۶٪ و تأیید کندل',
         severity: 'WARNING'
       });
     }
@@ -682,13 +953,37 @@ export class TopDownPipelineEngine {
     const step11Edges: TriggeredEdgeCase[] = [];
     const finalTrailing = PatternEngines.analyzeExtensionAndTrailing(
       scenario,
-      candles,
+      workingCandles,
       proj.tmvSummary?.prime,
       proj.tmvSummary?.ideal100,
       proj.tmvSummary?.alternate1618,
       parentWaveLabel
     );
 
+    if (finalTrailing.trailingStopStatus === 'INACTIVE_WARNING') {
+      pushEdge(step11Edges, {
+        id: 'T14_NO_TRAILING_STOP',
+        tableNumber: 14,
+        tableNameFa: 'جدول ۱۴: مدیریت ریسک',
+        ruleRef: '14.1',
+        sessionRef: 'جلسه ۱۱',
+        conditionFa: 'حد ضرر متحرک فعال نیست (داده موج مبنا ناکافی)',
+        actionFa: 'NO_TRAILING_STOP — پیش از ورود، حد ابطال را مشخص کنید',
+        severity: 'WARNING'
+      });
+    }
+    if (finalTrailing.isTerminalFromW3ExtOverlap) {
+      pushEdge(step11Edges, {
+        id: 'T14_W3_EXT_OVERLAP',
+        tableNumber: 14,
+        tableNameFa: 'جدول ۱۴: مدیریت ریسک',
+        ruleRef: '11.13',
+        sessionRef: 'جلسه ۶، ۱۸',
+        conditionFa: 'موج ۳ کشیده شده و موج ۴ با موج ۱ تداخل کرده است',
+        actionFa: 'ساختار به ترمینال / قطر تغییر وضعیت داد؛ ریسک را کاهش دهید',
+        severity: 'WARNING'
+      });
+    }
     if (finalEntry.riskRewardRatio !== null && finalEntry.riskRewardRatio < 1) {
       pushEdge(step11Edges, {
         id: 'T14_8',
@@ -717,10 +1012,15 @@ export class TopDownPipelineEngine {
     steps.push({
       stepNumber: 11,
       titleFa: 'گام ۱۱: مدیریت ریسک، نسبت R/R و استاپ متحرک TMV',
-      status: finalTrailing.trailingStopStage === 'IMMEDIATE_PROFIT_TAKING' ? 'WARNING' : 'PASSED',
-      summaryFa: `${finalTrailing.trailingStopLabelFa} · ${finalEntry.riskRewardVerdictFa}`,
+      status:
+        finalTrailing.trailingStopStage === 'IMMEDIATE_PROFIT_TAKING' ||
+        finalTrailing.trailingStopStatus === 'INACTIVE_WARNING'
+          ? 'WARNING'
+          : 'PASSED',
+      summaryFa: `${finalTrailing.trailingStopLabelFa}${finalTrailing.trailingStopPrice !== null && finalTrailing.trailingStopPrice !== undefined ? ` (${finalTrailing.trailingStopPrice.toLocaleString()})` : ''} · ${finalEntry.riskRewardVerdictFa}`,
       detailsFa: [
         finalTrailing.trailingStopDescFa,
+        ...(finalTrailing.extensionUnconfirmedReasonFa ? [finalTrailing.extensionUnconfirmedReasonFa] : []),
         ...finalTrailing.partialProfitPlanFa
       ],
       sessions: ['جلسه ۶', 'جلسه ۹', 'جلسه ۱۱', 'جلسه ۱۵', 'جلسه ۱۸', 'جلسه ۱۹'],
@@ -737,7 +1037,7 @@ export class TopDownPipelineEngine {
     return {
       marketType,
       startTf,
-      finalTf: timeframe,
+      finalTf: multiTfSummary.finalTf || timeframe,
       maxAllowedDegree: specMaxDegree,
       reachedDegree: Math.min(currentDegreeLevel, maxAllowedVisualDegree),
       absoluteBottomIndex: bottomEval.absoluteBottomIdx,
@@ -751,7 +1051,19 @@ export class TopDownPipelineEngine {
       priorityRankedCandidates,
       futureScenarios,
       entryActionFa: finalEntry.entryZoneLabelFa,
-      riskActionFa: `${finalTrailing.trailingStopLabelFa} | ${finalEntry.riskRewardVerdictFa}`
+      riskActionFa: `${finalTrailing.trailingStopLabelFa} | ${finalEntry.riskRewardVerdictFa}`,
+      trailingStopPrice: finalTrailing.trailingStopPrice ?? null,
+      trailingStopStatus: finalTrailing.trailingStopStatus,
+      multiTfRefinementSummary: multiTfSummary,
+      fibValidationWarnings: fibWarnings,
+      relabelingSuggestions: multiTfSummary.relabelingSuggestions,
+      promotionOpportunity: {
+        shouldPromote: promo.shouldPromote,
+        canPromoteDegree: promo.canPromoteDegree,
+        fromDegree: promo.fromDegree,
+        toDegree: promo.toDegree,
+        reasonFa: promo.reasonFa
+      }
     };
   }
 }

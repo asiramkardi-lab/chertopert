@@ -9,6 +9,7 @@
 import React, { useMemo, useState } from 'react';
 import { Candle, WaveRole, WaveScenario } from '../types/elliott';
 import { TopDownPipelineEngine } from '../engine/topDownPipeline';
+import { DEGREE_CONFIGS } from '../engine/fractalEngine';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -18,28 +19,33 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
-  ShieldCheck
+  ShieldCheck,
+  ArrowUpCircle
 } from 'lucide-react';
 
 interface TopDownPipelineAuditProps {
   candles: Candle[];
+  candlesByTf?: Record<string, Candle[]>;
   scenario: WaveScenario;
   scenarios?: WaveScenario[];
   marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
   timeframe?: string;
   parentRole?: WaveRole;
   parentWaveLabel?: string;
+  onPromoteDegree?: () => void;
   compact?: boolean;
 }
 
 export const TopDownPipelineAudit: React.FC<TopDownPipelineAuditProps> = ({
   candles,
+  candlesByTf,
   scenario,
   scenarios,
   marketType = 'CRYPTO',
   timeframe,
   parentRole = 'ROOT',
   parentWaveLabel = '',
+  onPromoteDegree,
   compact = false
 }) => {
   const [selectedStep, setSelectedStep] = useState<number>(0);
@@ -49,6 +55,7 @@ export const TopDownPipelineAudit: React.FC<TopDownPipelineAuditProps> = ({
     () =>
       TopDownPipelineEngine.run({
         candles,
+        candlesByTf,
         scenario,
         scenarios,
         marketType,
@@ -56,7 +63,7 @@ export const TopDownPipelineAudit: React.FC<TopDownPipelineAuditProps> = ({
         parentRole,
         parentWaveLabel
       }),
-    [candles, scenario, scenarios, marketType, timeframe, parentRole, parentWaveLabel]
+    [candles, candlesByTf, scenario, scenarios, marketType, timeframe, parentRole, parentWaveLabel]
   );
 
   const activeStep = report.steps.find(s => s.stepNumber === selectedStep) || report.steps[0];
@@ -185,6 +192,53 @@ export const TopDownPipelineAudit: React.FC<TopDownPipelineAuditProps> = ({
                 </ul>
               )}
 
+              {activeStep.stepNumber === 4 && report.multiTfRefinementSummary && (
+                <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5 text-[10.5px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-400">مسیر پالایش چندتایم‌فریمی:</span>
+                    <span className="font-mono text-cyan-300 font-bold">
+                      {report.multiTfRefinementSummary.traversedTimeframes.join(' ← ') || report.finalTf}
+                    </span>
+                  </div>
+                  {report.relabelingSuggestions && report.relabelingSuggestions.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t border-slate-800/80">
+                      <div className="text-[10px] font-bold text-amber-300">پیشنهاد بازنگری لیبل‌ها:</div>
+                      {report.relabelingSuggestions.map((item, idx) => (
+                        <div key={idx} className="text-amber-200 leading-relaxed">
+                          • {item}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeStep.stepNumber === 6 &&
+                report.promotionOpportunity?.shouldPromote &&
+                onPromoteDegree && (
+                  <button
+                    type="button"
+                    onClick={onPromoteDegree}
+                    className="w-full py-2 px-3 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 text-indigo-200 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <ArrowUpCircle className="w-3.5 h-3.5 text-indigo-300" />
+                    <span>
+                      ارتقاء درجه به {DEGREE_CONFIGS[report.promotionOpportunity.toDegree].nameFa}
+                    </span>
+                  </button>
+                )}
+
+              {activeStep.stepNumber === 9 &&
+                report.fibValidationWarnings &&
+                report.fibValidationWarnings.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-amber-950/25 border border-amber-500/35 space-y-1 text-[10px] text-amber-200">
+                    <div className="font-bold text-amber-300">هشدارهای ابزار فیبوناچی:</div>
+                    {report.fibValidationWarnings.map((w, idx) => (
+                      <div key={idx}>• {w}</div>
+                    ))}
+                  </div>
+                )}
+
               {activeStep.edgeCases.length > 0 && (
                 <div className="pt-1 space-y-1">
                   <div className="text-[10px] font-bold text-amber-300">
@@ -242,6 +296,31 @@ export const TopDownPipelineAudit: React.FC<TopDownPipelineAuditProps> = ({
                   <span>مدیریت ریسک:</span>
                 </span>
                 <span className="text-left font-medium text-emerald-300">{report.riskActionFa}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-slate-300 pt-1 border-t border-slate-800/70">
+                <span className="text-slate-400 shrink-0">تراز استاپ متحرک (TMV):</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono tabular-nums font-bold text-white">
+                    {report.trailingStopPrice !== null && report.trailingStopPrice !== undefined
+                      ? report.trailingStopPrice.toLocaleString()
+                      : 'تعریف‌نشده'}
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded border text-[9.5px] font-bold ${
+                      report.trailingStopStatus === 'ACTIVE'
+                        ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                        : report.trailingStopStatus === 'IMMEDIATE_EXIT'
+                        ? 'bg-rose-500/15 border-rose-500/35 text-rose-300'
+                        : 'bg-amber-500/15 border-amber-500/35 text-amber-300'
+                    }`}
+                  >
+                    {report.trailingStopStatus === 'ACTIVE'
+                      ? 'فعال'
+                      : report.trailingStopStatus === 'IMMEDIATE_EXIT'
+                      ? 'خروج فوری'
+                      : 'هشدار عدم استاپ'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
