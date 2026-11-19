@@ -933,7 +933,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     };
   }, [activeHoveredScenario, candles.length, width, height, minPrice, priceRange, showVolume]);
 
-  // Scale-adaptive PRZ Horizontal Bounding Box coordinates anchored strictly to the last wave's vertices
+  // Scale-adaptive & Timeframe-Synchronized PRZ Horizontal Bounding Box coordinates
   const renderedPrzBoxes = useMemo(() => {
     if (!effectiveShowPRZ || !projectionReport || projectionReport.przZones.length === 0 || candles.length === 0) {
       return [];
@@ -946,6 +946,18 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     const maxIdx = Math.max(1, candles.length - 1);
     const xAt = (idx: number) => padding.left + (idx / maxIdx) * usableW;
     const yAt = (price: number) => plotBottom - ((price - minPrice) / Math.max(1e-6, priceRange)) * usableH;
+
+    // Calibrate minimum horizontal projection horizon by active timeframe
+    const tfMinShareMap: Record<string, number> = {
+      '1M': 0.24,
+      '1W': 0.28,
+      '1D': 0.34,
+      '4H': 0.4,
+      '1H': 0.46,
+      '15M': 0.52
+    };
+    const tfMinShare = tfMinShareMap[timeframe] ?? 0.34;
+    const minTfBandW = Math.min(usableW, Math.max(140, usableW * tfMinShare));
 
     const verts = activeScenario.vertices;
     const prevV = verts.length >= 2 ? verts[verts.length - 2] : verts[0];
@@ -961,31 +973,45 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         const rawYBot = yAt(lo);
         if (rawYBot < plotTop || rawYTop > plotBottom) return null;
 
-        const yTop = Math.max(plotTop, Math.min(plotBottom - 10, rawYTop));
-        const yBot = Math.min(plotBottom, Math.max(yTop + 10, rawYBot));
-        const bandH = Math.max(10, yBot - yTop);
+        const yTop = Math.max(plotTop, Math.min(plotBottom - 16, rawYTop));
+        const yBot = Math.min(plotBottom, Math.max(yTop + 16, rawYBot));
+        const bandH = Math.max(16, yBot - yTop);
+        const yMid = Math.max(yTop + 2, Math.min(yBot - 2, yAt(prz.midPrice)));
 
         const sIdx = prz.isPrimary ? lastWaveStartIdx : (prz.startCandleIndex ?? prz.anchorCandleIndex ?? lastWaveStartIdx);
         const eIdx = prz.isPrimary ? lastWaveEndIdx : (prz.endCandleIndex ?? lastWaveEndIdx);
-        const rawX1 = xAt(Math.max(0, Math.min(maxIdx, sIdx)));
-        const rawX2 = xAt(Math.max(0, Math.min(maxIdx, eIdx)));
-        const xStart = Math.max(padding.left, Math.min(endX - 68, Math.min(rawX1, rawX2)));
-        const xEnd = Math.max(xStart + 68, Math.min(endX, Math.max(rawX1, rawX2)));
-        const bandW = Math.max(68, xEnd - xStart);
+        const clampedSIdx = Math.max(0, Math.min(maxIdx, sIdx));
+        const clampedEIdx = Math.max(clampedSIdx + 1, Math.min(maxIdx, eIdx));
 
-        const anchorVertX = lastV ? Math.max(xStart, Math.min(xEnd, xAt(lastV.candleIndex))) : xStart;
-        const anchorVertY = lastV ? Math.max(plotTop, Math.min(plotBottom, yAt(lastV.price))) : yTop + bandH / 2;
+        const rawX1 = xAt(clampedSIdx);
+        const rawX2 = xAt(clampedEIdx);
+        const xEnd = Math.min(endX, Math.max(padding.left + minTfBandW, Math.max(rawX1, rawX2)));
+        const maxAllowedXStart = Math.max(padding.left, xEnd - minTfBandW);
+        const xStart = Math.max(padding.left, Math.min(maxAllowedXStart, Math.min(rawX1, rawX2)));
+        const bandW = Math.max(120, xEnd - xStart);
+
+        const anchorVertX = lastV ? Math.max(padding.left, Math.min(endX, xAt(lastV.candleIndex))) : xStart;
+        const anchorVertY = lastV ? Math.max(plotTop, Math.min(plotBottom, yAt(lastV.price))) : yMid;
+        const candleSpan = Math.max(1, Math.round(clampedEIdx - clampedSIdx));
+        const currentClose = candles[candles.length - 1]?.close ?? 0;
+        const distPct = currentClose > 0 ? (((prz.midPrice - currentClose) / currentClose) * 100).toFixed(1) : '0.0';
+        const signedDist = Number(distPct) > 0 ? `+${distPct}%` : `${distPct}%`;
 
         return {
           prz,
+          hiPrice: hi,
+          loPrice: lo,
           yTop,
           yBot,
+          yMid,
           bandH,
           xStart,
           xEnd,
           bandW,
           anchorVertX,
-          anchorVertY
+          anchorVertY,
+          candleSpan,
+          signedDist
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -993,7 +1019,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     effectiveShowPRZ,
     projectionReport,
     activeScenario.vertices,
-    candles.length,
+    candles,
+    timeframe,
     width,
     height,
     padding.left,
@@ -1724,16 +1751,6 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
               <stop offset="100%" stopColor="#ef4444" stopOpacity="0.05" />
             </linearGradient>
-            <linearGradient id="przBullGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.24" />
-              <stop offset="50%" stopColor="#fbbf24" stopOpacity="0.09" />
-              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.22" />
-            </linearGradient>
-            <linearGradient id="przBearGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#fb923c" stopOpacity="0.24" />
-              <stop offset="50%" stopColor="#f97316" stopOpacity="0.09" />
-              <stop offset="100%" stopColor="#fb923c" stopOpacity="0.22" />
-            </linearGradient>
             <linearGradient id="tmvBullZoneGrad" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.24" />
               <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.10" />
@@ -2086,25 +2103,21 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
             return (
               <g>
-                {/* 1. Luminous Horizontal PRZ Bounding Box (Strictly Anchored to Last Wave's Vertices) */}
+                {/* 1. SVG Interactive Layer & Price-Axis Alignment for Glassmorphic PRZ Container */}
                 {effectiveShowPRZ &&
                   renderedPrzBoxes.map(box => {
-                    const { prz, yTop, yBot, bandH, xStart, xEnd, bandW, anchorVertX, anchorVertY } = box;
+                    const { prz, hiPrice, loPrice, yTop, yBot, yMid, bandH, xStart, xEnd, bandW, anchorVertX, anchorVertY } = box;
                     const isBullZone = prz.direction === 'BULLISH';
                     const isHovered = hoveredZoneId === prz.id;
-                    const strokeCol = prz.isPrimary ? (isBullZone ? '#f59e0b' : '#fb923c') : '#d97706';
-                    const fillUrl = isBullZone ? 'url(#przBullGrad)' : 'url(#przBearGrad)';
-                    const midY = yTop + bandH / 2;
-                    const dirTag = isBullZone ? '↑ حمایت بازگشتی' : '↓ مقاومت بازگشتی';
-                    const labelText = `PRZ · ${prz.labelFa.replace(/^PRZ\s*/i, '')} · ${prz.confidence}%`;
-                    const badgeW = Math.min(Math.max(150, bandW - 14), Math.max(185, labelText.length * 5.2 + 28));
-                    const badgeX = Math.max(padding.left + 8, Math.min(xStart + 10, xEnd - badgeW - 8));
-                    const preferredLabelY = bandH >= 32 ? yTop + 6 : yTop - 22 >= plotTop ? yTop - 22 : yBot + 4;
-                    const labelY = resolveTagY(preferredLabelY, badgeX, badgeW, 19);
-                    const axisY = prz.isPrimary ? resolveAxisY(midY, 20) : null;
-                    const cornerSize = Math.min(10, bandH * 0.34, bandW * 0.12);
-                    const distPct = lastPrice > 0 ? (((prz.midPrice - lastPrice) / lastPrice) * 100).toFixed(1) : '0.0';
-                    const signedDist = Number(distPct) > 0 ? `+${distPct}%` : `${distPct}%`;
+                    const strokeCol = prz.isPrimary ? (isBullZone ? '#fbbf24' : '#fb923c') : '#d97706';
+                    const axisY = prz.isPrimary ? resolveAxisY(yMid, 20) : null;
+                    const przHeaderY = bandH >= 36 ? yTop + 4 : yTop - 26 >= plotTop ? yTop - 24 : yBot + 4;
+                    usedInlineBadgeRects.push({
+                      x: Math.max(padding.left + 8, xEnd - Math.min(bandW, 240)),
+                      y: przHeaderY,
+                      w: Math.min(bandW, 240),
+                      h: 20
+                    });
 
                     return (
                       <g
@@ -2113,164 +2126,72 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                         onMouseLeave={() => setHoveredZoneId(prev => (prev === prz.id ? null : prev))}
                         className="cursor-pointer"
                         opacity={hoveredZoneId && !isHovered ? 0.55 : prz.isPrimary ? 1 : 0.72}
-                        style={{ transition: 'opacity 150ms ease' }}
+                        style={{ transition: 'opacity 160ms ease' }}
                       >
-                        {/* Semi-Transparent Horizontal Glass Zone Fill */}
+                        {/* Transparent hit-target aligned to Glassmorphic PRZ Horizontal Container */}
                         <rect
                           x={xStart}
                           y={yTop}
                           width={bandW}
                           height={bandH}
-                          rx="3"
-                          fill={fillUrl}
-                          fillOpacity={isHovered ? 1 : prz.isPrimary ? 0.82 : 0.55}
-                          stroke={strokeCol}
-                          strokeWidth={isHovered ? '1.6' : prz.isPrimary ? '1.1' : '0.85'}
-                          strokeDasharray={isHovered ? undefined : '5 3'}
-                          strokeOpacity={isHovered ? '0.95' : prz.isPrimary ? '0.78' : '0.45'}
-                          filter={isHovered ? 'url(#zone-hover-glow)' : undefined}
+                          fill="transparent"
                         />
 
-                        {/* Explicit Horizontal High, Mid & Low Boundary Rails */}
-                        <line x1={xStart} y1={yTop} x2={xEnd} y2={yTop} stroke={strokeCol} strokeWidth={isHovered ? '1.6' : '1.15'} strokeOpacity="0.88" />
-                        <line x1={xStart} y1={yBot} x2={xEnd} y2={yBot} stroke={strokeCol} strokeWidth={isHovered ? '1.6' : '1.15'} strokeOpacity="0.88" />
-                        {bandH >= 20 && (
-                          <line
-                            x1={xStart + 6}
-                            y1={midY}
-                            x2={xEnd - 6}
-                            y2={midY}
-                            stroke={strokeCol}
-                            strokeWidth="0.9"
-                            strokeDasharray="2 4"
-                            strokeOpacity={isHovered ? '0.78' : '0.42'}
-                          />
-                        )}
-
-                        {/* 4 Crisp L-Corner Brackets */}
-                        <path
-                          d={`M ${xStart} ${yTop + cornerSize} L ${xStart} ${yTop} L ${xStart + cornerSize} ${yTop}
-                              M ${xEnd - cornerSize} ${yTop} L ${xEnd} ${yTop} L ${xEnd} ${yTop + cornerSize}
-                              M ${xStart} ${yBot - cornerSize} L ${xStart} ${yBot} L ${xStart + cornerSize} ${yBot}
-                              M ${xEnd - cornerSize} ${yBot} L ${xEnd} ${yBot} L ${xEnd} ${yBot - cornerSize}`}
-                          fill="none"
-                          stroke={strokeCol}
-                          strokeWidth={isHovered ? '2.2' : '1.8'}
-                          strokeOpacity="0.98"
-                        />
-
-                        {/* Last-Wave Vertex Anchor Connector */}
+                        {/* Last-Wave Vertex Neon Anchor Connector */}
                         {prz.isPrimary && (
                           <line
                             x1={anchorVertX}
                             y1={anchorVertY}
                             x2={anchorVertX}
-                            y2={midY}
+                            y2={yMid}
                             stroke={strokeCol}
-                            strokeWidth="1"
-                            strokeDasharray="2 2"
-                            strokeOpacity="0.65"
+                            strokeWidth="1.2"
+                            strokeDasharray="3 3"
+                            strokeOpacity={isHovered ? '0.92' : '0.68'}
+                            filter={isHovered ? 'url(#zone-hover-glow)' : undefined}
                             pointerEvents="none"
                           />
                         )}
                         <circle
                           cx={xStart}
-                          cy={midY}
-                          r={isHovered ? 4 : prz.isPrimary ? 3.2 : 2.3}
+                          cy={yMid}
+                          r={isHovered ? 4.4 : prz.isPrimary ? 3.5 : 2.5}
                           fill={strokeCol}
                           stroke="#020617"
-                          strokeWidth="1.2"
+                          strokeWidth="1.4"
+                          filter="url(#zone-hover-glow)"
                           pointerEvents="none"
                         />
 
-                        {/* Sleek Horizontal PRZ Pill Tag */}
-                        <g pointerEvents="none">
-                          <rect
-                            x={badgeX}
-                            y={labelY}
-                            width={badgeW}
-                            height="19"
-                            rx="5"
-                            fill="#020617"
-                            fillOpacity={isHovered ? '0.96' : '0.88'}
-                            stroke={strokeCol}
-                            strokeOpacity={isHovered ? '0.95' : '0.7'}
-                            strokeWidth={isHovered ? '1.1' : '0.8'}
-                          />
-                          <circle cx={badgeX + 9} cy={labelY + 9.5} r="2.6" fill={strokeCol} />
-                          <text
-                            x={badgeX + 16}
-                            y={labelY + 12.5}
-                            fill={isBullZone ? '#fde68a' : '#fed7aa'}
-                            fontSize="9"
-                            fontWeight="700"
-                          >
-                            {labelText}
-                          </text>
-                        </g>
-
-                        {/* Hover Inspector Card for PRZ Horizontal Zone */}
-                        {isHovered && (
-                          <g pointerEvents="none">
-                            {(() => {
-                              const cardW = 246;
-                              const cardH = 44;
-                              const cardX = Math.max(padding.left + 8, Math.min(xEnd - cardW - 10, xStart + 14));
-                              const cardY = yTop - cardH - 8 >= plotTop ? yTop - cardH - 8 : Math.min(plotBottom - cardH - 6, yBot + 8);
-                              return (
-                                <>
-                                  <rect
-                                    x={cardX}
-                                    y={cardY}
-                                    width={cardW}
-                                    height={cardH}
-                                    rx="7"
-                                    fill="#090f1e"
-                                    fillOpacity="0.96"
-                                    stroke={strokeCol}
-                                    strokeWidth="1.1"
-                                  />
-                                  <text x={cardX + cardW - 10} y={cardY + 16} textAnchor="end" fill="#fde68a" fontSize="9.5" fontWeight="700">
-                                    {dirTag} · {signedDist}
-                                  </text>
-                                  <text
-                                    x={cardX + 10}
-                                    y={cardY + 16}
-                                    fill="#cbd5e1"
-                                    fontSize="9"
-                                    fontFamily="JetBrains Mono, monospace"
-                                  >
-                                    Mid {prz.midPrice.toLocaleString()}
-                                  </text>
-                                  <text
-                                    x={cardX + 10}
-                                    y={cardY + 33}
-                                    fill="#94a3b8"
-                                    fontSize="8.8"
-                                    fontFamily="JetBrains Mono, monospace"
-                                  >
-                                    {prz.lowPrice.toLocaleString()} – {prz.highPrice.toLocaleString()}
-                                  </text>
-                                  <text x={cardX + cardW - 10} y={cardY + 33} textAnchor="end" fill="#fbbf24" fontSize="8.5">
-                                    {prz.contributingRatios.slice(0, 2).join(' · ')}
-                                  </text>
-                                </>
-                              );
-                            })()}
-                          </g>
-                        )}
-
-                        {/* Right-Axis PRZ Mid-Price Pill */}
+                        {/* Right Price-Axis High/Low Tick Markers & PRZ Mid-Price Pill */}
                         {axisY !== null && (
                           <g pointerEvents="none">
+                            <line
+                              x1={endX - 2}
+                              y1={yTop}
+                              x2={endX + 2}
+                              y2={yTop}
+                              stroke={strokeCol}
+                              strokeWidth="1.4"
+                              strokeOpacity="0.85"
+                            />
+                            <line
+                              x1={endX - 2}
+                              y1={yBot}
+                              x2={endX + 2}
+                              y2={yBot}
+                              stroke={strokeCol}
+                              strokeWidth="1.4"
+                              strokeOpacity="0.85"
+                            />
                             <line
                               x1={endX - 1}
                               y1={yTop}
                               x2={endX - 1}
                               y2={yBot}
                               stroke={strokeCol}
-                              strokeWidth="2.4"
-                              strokeOpacity="0.9"
+                              strokeWidth="2.6"
+                              strokeOpacity="0.92"
                             />
                             <rect
                               x={endX + 2}
@@ -2278,9 +2199,9 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                               width="82"
                               height="19"
                               rx="4"
-                              fill="#451a03"
+                              fill="#291202"
                               stroke={strokeCol}
-                              strokeWidth="0.95"
+                              strokeWidth={isHovered ? '1.3' : '0.95'}
                             />
                             <text
                               x={endX + 6}
@@ -2292,6 +2213,9 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                             >
                               PRZ {prz.midPrice.toLocaleString()}
                             </text>
+                            {isHovered && (
+                              <title>{`${loPrice.toLocaleString()} - ${hiPrice.toLocaleString()}`}</title>
+                            )}
                           </g>
                         )}
                       </g>
@@ -3479,6 +3403,172 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
         </svg>
+
+        {/* Glassmorphic Graphical PRZ Containers (Frosted Glass, Luminous Gradients, Neon Borders, Timeframe & Price-Level Synced) */}
+        {effectiveShowPRZ &&
+          renderedPrzBoxes.map(box => {
+            const { prz, hiPrice, loPrice, yTop, yMid, bandH, xStart, bandW, candleSpan, signedDist } = box;
+            const isBullZone = prz.direction === 'BULLISH';
+            const isHovered = hoveredZoneId === prz.id;
+            const isDimmed = Boolean(hoveredZoneId && !isHovered);
+            const midPct = Math.max(8, Math.min(92, ((yMid - yTop) / Math.max(1, bandH)) * 100));
+            const labelInside = bandH >= 36;
+            const showAbove = !labelInside && yTop - 26 >= padding.top;
+
+            const neonHex = isBullZone ? '#fbbf24' : '#fb923c';
+            const accentHex = isBullZone ? '#f59e0b' : '#f97316';
+            const gradientBg = isBullZone
+              ? 'linear-gradient(105deg, rgba(245, 158, 11, 0.22) 0%, rgba(251, 191, 36, 0.08) 45%, rgba(16, 185, 129, 0.14) 100%)'
+              : 'linear-gradient(105deg, rgba(251, 146, 60, 0.22) 0%, rgba(249, 115, 22, 0.08) 45%, rgba(244, 63, 94, 0.15) 100%)';
+
+            return (
+              <div
+                key={`glass-prz-${prz.id}`}
+                aria-label={`ناحیه افقی PRZ در بازه ${loPrice.toLocaleString()} تا ${hiPrice.toLocaleString()}`}
+                className="absolute pointer-events-none select-none transition-all duration-200"
+                style={{
+                  left: `${(xStart / Math.max(1, width)) * 100}%`,
+                  top: `${(yTop / Math.max(1, height)) * 100}%`,
+                  width: `${(bandW / Math.max(1, width)) * 100}%`,
+                  height: `${(bandH / Math.max(1, height)) * 100}%`,
+                  opacity: isDimmed ? 0.5 : prz.isPrimary ? 1 : 0.72,
+                  zIndex: isHovered ? 6 : 3
+                }}
+              >
+                {/* Frosted Glassmorphism Box with Luminous Inner Glow & Neon Perimeter */}
+                <div
+                  className="relative w-full h-full rounded-[4px] overflow-hidden backdrop-blur-[5px]"
+                  style={{
+                    backgroundImage: `${gradientBg}, radial-gradient(ellipse at 50% 50%, ${
+                      isBullZone ? 'rgba(251, 191, 36, 0.16)' : 'rgba(251, 146, 60, 0.16)'
+                    } 0%, rgba(9, 14, 28, 0.34) 78%)`,
+                    border: `1px solid ${isHovered ? neonHex : `${accentHex}88`}`,
+                    boxShadow: isHovered
+                      ? `0 0 22px ${neonHex}55, inset 0 0 20px ${neonHex}26, inset 0 1px 0 rgba(255,255,255,0.28)`
+                      : `0 0 14px ${neonHex}26, inset 0 0 12px ${neonHex}14, inset 0 1px 0 rgba(255,255,255,0.16)`
+                  }}
+                >
+                  {/* Top & Bottom Neon Price-Level Rails */}
+                  <div
+                    className="absolute inset-x-0 top-0 h-[1.5px]"
+                    style={{
+                      background: `linear-gradient(90deg, ${neonHex}cc 0%, #fef3c7aa 50%, ${neonHex}cc 100%)`,
+                      boxShadow: `0 0 8px ${neonHex}99`
+                    }}
+                  />
+                  <div
+                    className="absolute inset-x-0 bottom-0 h-[1.5px]"
+                    style={{
+                      background: `linear-gradient(90deg, ${neonHex}cc 0%, #fef3c7aa 50%, ${neonHex}cc 100%)`,
+                      boxShadow: `0 0 8px ${neonHex}99`
+                    }}
+                  />
+
+                  {/* Mid-Price Equilibrium Neon Dashed Rail */}
+                  {bandH >= 20 && (
+                    <div
+                      className="absolute inset-x-2 border-t border-dashed"
+                      style={{
+                        top: `${midPct}%`,
+                        borderColor: isHovered ? `${neonHex}cc` : `${neonHex}66`
+                      }}
+                    />
+                  )}
+
+                  {/* 4 Luminous L-Corner Neon Brackets */}
+                  <span
+                    className="absolute top-0 left-0 w-2.5 h-2.5 border-t-2 border-l-2 rounded-tl-[2px]"
+                    style={{ borderColor: neonHex, filter: `drop-shadow(0 0 4px ${neonHex})` }}
+                  />
+                  <span
+                    className="absolute top-0 right-0 w-2.5 h-2.5 border-t-2 border-r-2 rounded-tr-[2px]"
+                    style={{ borderColor: neonHex, filter: `drop-shadow(0 0 4px ${neonHex})` }}
+                  />
+                  <span
+                    className="absolute bottom-0 left-0 w-2.5 h-2.5 border-b-2 border-l-2 rounded-bl-[2px]"
+                    style={{ borderColor: neonHex, filter: `drop-shadow(0 0 4px ${neonHex})` }}
+                  />
+                  <span
+                    className="absolute bottom-0 right-0 w-2.5 h-2.5 border-b-2 border-r-2 rounded-br-[2px]"
+                    style={{ borderColor: neonHex, filter: `drop-shadow(0 0 4px ${neonHex})` }}
+                  />
+
+                  {/* Clean Unboxed Metadata Header Inside Container (when band height permits) */}
+                  {labelInside && (
+                    <div className="relative z-10 flex items-center justify-between gap-3 px-3 pt-1.5 text-[10px] leading-none">
+                      <div className="flex items-center gap-1.5 min-w-0 truncate font-semibold text-amber-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                        <span className="text-amber-300 font-mono whitespace-nowrap">PRZ</span>
+                        <span aria-hidden="true" className="text-amber-400/60">·</span>
+                        <span className="truncate">{prz.labelFa.replace(/^PRZ\s*/i, '')}</span>
+                        <span aria-hidden="true" className="text-amber-400/60">·</span>
+                        <span className="font-mono text-cyan-200 whitespace-nowrap">{timeframe}</span>
+                        <span aria-hidden="true" className="text-amber-400/60">·</span>
+                        <span className="font-mono tabular-nums text-amber-200 whitespace-nowrap">{prz.confidence}%</span>
+                      </div>
+                      <div className="hidden sm:flex items-center gap-1.5 font-mono tabular-nums text-[9.5px] text-amber-200/95 whitespace-nowrap shrink-0 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                        <span>{loPrice.toLocaleString()}</span>
+                        <span className="text-amber-400/60">–</span>
+                        <span>{hiPrice.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Compact Floating Header Strip when Band is Thin (< 36px) */}
+                {!labelInside && (
+                  <div
+                    className="absolute right-2 flex items-center gap-2 px-2.5 py-1 rounded-md backdrop-blur-md text-[9.5px] whitespace-nowrap shadow-lg"
+                    style={{
+                      ...(showAbove ? { bottom: 'calc(100% + 5px)' } : { top: 'calc(100% + 5px)' }),
+                      background: 'rgba(8, 13, 26, 0.86)',
+                      border: `1px solid ${neonHex}77`,
+                      boxShadow: `0 0 12px ${neonHex}30`
+                    }}
+                  >
+                    <span className="font-mono font-bold text-amber-300">PRZ</span>
+                    <span aria-hidden="true" className="text-slate-600">·</span>
+                    <span className="text-amber-100 font-medium">{prz.labelFa.replace(/^PRZ\s*/i, '')}</span>
+                    <span aria-hidden="true" className="text-slate-600">·</span>
+                    <span className="font-mono text-cyan-300">{timeframe}</span>
+                    <span aria-hidden="true" className="text-slate-600">·</span>
+                    <span className="font-mono tabular-nums text-amber-200">{prz.confidence}%</span>
+                  </div>
+                )}
+
+                {/* Glassmorphic Hover Inspector Card */}
+                {isHovered && (
+                  <div
+                    className="absolute left-2 w-[264px] rounded-lg px-3 py-2 backdrop-blur-xl shadow-2xl"
+                    style={{
+                      ...(yTop - 68 >= padding.top ? { bottom: 'calc(100% + 8px)' } : { top: 'calc(100% + 8px)' }),
+                      background: 'linear-gradient(135deg, rgba(10, 16, 34, 0.92), rgba(28, 18, 8, 0.88))',
+                      border: `1px solid ${neonHex}bb`,
+                      boxShadow: `0 8px 28px rgba(0, 0, 0, 0.55), 0 0 18px ${neonHex}38`
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
+                      <span className={isBullZone ? 'text-amber-200' : 'text-orange-200'}>
+                        {isBullZone ? '↑ ناحیه حمایت بازگشتی PRZ' : '↓ ناحیه مقاومت بازگشتی PRZ'}
+                      </span>
+                      <span className="font-mono tabular-nums text-cyan-300">{signedDist}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-[9.5px] font-mono tabular-nums text-slate-300">
+                      <span>Mid {prz.midPrice.toLocaleString()}</span>
+                      <span>
+                        {loPrice.toLocaleString()} – {hiPrice.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="mt-1 pt-1 border-t border-amber-500/20 flex items-center justify-between text-[9px] text-amber-300/90">
+                      <span className="truncate">{prz.contributingRatios.slice(0, 2).join(' · ')}</span>
+                      <span className="font-mono tabular-nums text-slate-400 whitespace-nowrap">
+                        {candleSpan} کندل ({timeframe})
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
         {/* Inline Vertex Editor Popover (Rename / Delete / Drill-down) */}
         {selectedVertex && selectedVertexIndex !== null && (
