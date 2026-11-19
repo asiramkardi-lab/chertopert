@@ -1442,36 +1442,50 @@ export class TargetProjectionEngine {
         ? this.getRetracementImportanceLevels(verts[0].price, verts[1].price, scenario.direction)
         : undefined;
 
-    // Build Horizontal TMV Zones strictly anchored to the active Target prices from the rules/projection engine
+    // Build Horizontal TMV Zones strictly anchored to the active directional Target cluster from the rules/projection engine
     const tmvZones: TmvZone[] = [];
     const activeForwardTargets = targets.filter(t => !t.isInvalidation);
     const ruleEngineTargets = (scenario.targets || []).filter(t => !t.isInvalidation);
     const mergedTargetPool = activeForwardTargets.length > 0 ? activeForwardTargets : ruleEngineTargets;
 
     if (mergedTargetPool.length > 0 && scenario.patternType !== 'ENDING_DIAGONAL' && scenario.patternType !== 'ANTI_DIAGONAL') {
-      const sortedByConf = [...mergedTargetPool].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
-      const sortedByPrice = [...mergedTargetPool].sort((a, b) => a.price - b.price);
+      const dirAlignedPool = mergedTargetPool.filter(t =>
+        nextDirection === 'BULLISH' ? t.price >= lastV.price * 0.995 : t.price <= lastV.price * 1.005
+      );
+      const effectivePool = dirAlignedPool.length > 0 ? dirAlignedPool : mergedTargetPool;
+      const sortedByConf = [...effectivePool].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+      const sortedByPrice = [...effectivePool].sort((a, b) => a.price - b.price);
 
       const coreCluster = sortedByPrice.filter(t => (t.confidence ?? 80) >= 65);
       const bandPool = coreCluster.length >= 2 ? coreCluster : sortedByPrice;
 
-      const bandMin = bandPool[0].price;
-      const bandMax = bandPool[bandPool.length - 1].price;
-      let lowPrice = Math.max(0.1, roundPrice(bandMin));
-      let highPrice = Math.max(lowPrice + 0.1, roundPrice(bandMax));
+      // Keep the TMV horizontal box tightly centered around the top-2 primary high-confidence targets
+      // so extreme stretch extensions (e.g. 2.618x) render as individual target rungs without stretching TMV vertically.
+      const primaryPair = sortedByConf.slice(0, Math.min(2, sortedByConf.length));
+      const idealPrice = sortedByConf[0].price;
+      const pairMin = Math.min(...primaryPair.map(t => t.price));
+      const pairMax = Math.max(...primaryPair.map(t => t.price));
+      const maxCorridorSpan = Math.max(totalSpan * 0.24, idealPrice * 0.045);
 
-      if (Math.abs(highPrice - lowPrice) / Math.max(1, bandMin) < 0.012) {
-        const pad = Math.max(0.5, bandMin * 0.018);
-        lowPrice = Math.max(0.1, roundPrice(bandMin - pad));
-        highPrice = roundPrice(bandMin + pad);
+      let lowPrice = Math.max(0.1, roundPrice(pairMin));
+      let highPrice = Math.max(lowPrice + 0.1, roundPrice(pairMax));
+
+      if (highPrice - lowPrice > maxCorridorSpan) {
+        lowPrice = Math.max(0.1, roundPrice(idealPrice - maxCorridorSpan * 0.45));
+        highPrice = roundPrice(idealPrice + maxCorridorSpan * 0.45);
       }
 
-      const activeWaveSpan = Math.max(2, Math.abs(lastV.candleIndex - prevV.candleIndex));
-      const tmvLookback = Math.max(2, Math.min(Math.round(activeWaveSpan * 0.35), Math.floor(maxCandleIdx * 0.2)));
-      const tmvStartCandle = Math.max(0, Math.min(maxCandleIdx - 3, lastV.candleIndex - tmvLookback));
+      if (Math.abs(highPrice - lowPrice) / Math.max(1, idealPrice) < 0.014) {
+        const pad = Math.max(0.5, idealPrice * 0.016);
+        lowPrice = Math.max(0.1, roundPrice(idealPrice - pad));
+        highPrice = roundPrice(idealPrice + pad);
+      }
+
+      const activeWaveSpan = Math.max(3, Math.abs(lastV.candleIndex - prevV.candleIndex));
+      const tmvLookback = Math.max(5, Math.min(Math.round(activeWaveSpan * 0.75), Math.floor(maxCandleIdx * 0.36)));
+      const tmvStartCandle = Math.max(0, Math.min(maxCandleIdx - 6, lastV.candleIndex - tmvLookback));
       const tmvEndCandle = maxCandleIdx;
 
-      const idealPrice = sortedByConf[0].price;
       const primePrice = sortedByPrice[0].price;
       const short0618Price = sortedByConf[Math.min(1, sortedByConf.length - 1)].price;
       const alternate1618Price = sortedByPrice[sortedByPrice.length - 1].price;

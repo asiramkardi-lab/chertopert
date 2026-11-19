@@ -5,9 +5,10 @@
  * Manages parallel counts, branching, locking, and historical replay.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Candle, WaveScenario, PatternFamily, WaveRole, WaveVertex } from '../types/elliott';
 import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole } from '../engine/rulesEngine';
+import { SmartRuleAlertEngine, ScenarioQuickStatusReport } from '../engine/smartRuleAlertEngine';
 import { ChartInteractionMode } from './ChartStudio';
 import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import {
@@ -66,8 +67,24 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
 }) => {
   const [showEditor, setShowEditor] = useState<boolean>(false);
   const [validationReportsById, setValidationReportsById] = useState<Record<string, ValidationSummary>>({});
+  const [quickPreviewId, setQuickPreviewId] = useState<string | null>(null);
 
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
+
+  const quickPreviewById = useMemo(() => {
+    const map: Record<string, ScenarioQuickStatusReport> = {};
+    scenarios.forEach(sc => {
+      const resolvedRole: WaveRole =
+        parentRole !== 'ROOT'
+          ? parentRole
+          : sc.parentLegLabel
+          ? inferWaveRole(sc.parentLegLabel.split('→').pop() || sc.parentLegLabel)
+          : 'ROOT';
+      const resolvedLabel = parentWaveLabel || sc.parentLegLabel || '';
+      map[sc.id] = SmartRuleAlertEngine.evaluateScenario(sc, candles, resolvedRole, resolvedLabel);
+    });
+    return map;
+  }, [scenarios, candles, parentRole, parentWaveLabel]);
 
   // Clean up reports only for deleted scenarios
   useEffect(() => {
@@ -143,16 +160,22 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
         </div>
       </div>
 
-      {/* Scenario Cards (with Per-Scenario Validate & Attached Diagnostic Card) */}
+      {/* Scenario Cards (with Hover Quick Preview Tooltip, Validate & Attached Diagnostic Card) */}
       <div
         className="flex flex-col gap-2.5"
-        onMouseLeave={() => onHoverScenario?.(null)}
+        onMouseLeave={() => {
+          setQuickPreviewId(null);
+          onHoverScenario?.(null);
+        }}
       >
-        {scenarios.map(sc => {
+        {scenarios.map((sc, scIdx) => {
           const isActive = sc.id === activeScenarioId;
           const scHardFails = sc.rulesResults.filter(r => r.type === 'HARD' && !r.passed).length;
           const scSummary = validationReportsById[sc.id];
           const scValidatedValid = scSummary ? scSummary.isValid && scSummary.rules.filter(r => r.type === 'HARD' && !r.passed).length === 0 : null;
+          const quickStatus = quickPreviewById[sc.id];
+          const showQuickTooltip = quickPreviewId === sc.id && Boolean(quickStatus);
+          const flipTooltipDown = scIdx === 0;
           const resolvedRole: WaveRole =
             parentRole !== 'ROOT'
               ? parentRole
@@ -162,17 +185,113 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
           const resolvedLabel = parentWaveLabel || sc.parentLegLabel || '';
 
           return (
-            <div key={sc.id} className="space-y-2">
+            <div key={sc.id} className="space-y-2 relative">
               <div
                 onClick={() => onSelectScenario(sc.id)}
-                onMouseEnter={() => onHoverScenario?.(sc.id)}
-                onMouseLeave={() => onHoverScenario?.(null)}
+                onMouseEnter={() => {
+                  setQuickPreviewId(sc.id);
+                  onHoverScenario?.(sc.id);
+                }}
+                onMouseLeave={() => {
+                  setQuickPreviewId(prev => (prev === sc.id ? null : prev));
+                  onHoverScenario?.(null);
+                }}
                 className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
                   isActive
                     ? 'bg-indigo-950/40 border-indigo-500/60 ring-1 ring-indigo-500/30'
                     : 'bg-slate-950/60 border-slate-800/80 hover:border-indigo-500/50'
                 }`}
               >
+                {/* Hover Quick Preview Tooltip */}
+                {showQuickTooltip && quickStatus && (
+                  <div
+                    role="tooltip"
+                    className={`pointer-events-none absolute left-2 right-2 z-40 rounded-xl bg-[#070d1b] border border-cyan-500/45 shadow-2xl p-3 space-y-2 ${
+                      flipTooltipDown ? 'top-full mt-1.5' : 'bottom-full mb-1.5'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-800/90 pb-1.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className="w-2 h-2 rounded-sm shrink-0"
+                          style={{ backgroundColor: sc.color || '#38bdf8' }}
+                        />
+                        <span className="text-[11px] font-bold text-white truncate">
+                          پیش‌نمایش سریع · {sc.name}
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-semibold shrink-0 ${
+                          quickStatus.isStructurallyInvalid
+                            ? 'text-rose-300'
+                            : quickStatus.alertSeverity === 'WARNING'
+                            ? 'text-amber-300'
+                            : 'text-emerald-300'
+                        }`}
+                      >
+                        {quickStatus.isStructurallyInvalid
+                          ? 'نیازمند اصلاح'
+                          : quickStatus.alertSeverity === 'WARNING'
+                          ? 'هشدار مرزی'
+                          : 'ساختار معتبر'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-[11px]">
+                      <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg px-2 py-1.5">
+                        <div className="text-[10px] text-slate-400">موج‌های تاییدشده</div>
+                        <div className="font-mono font-bold text-cyan-300 tabular-nums mt-0.5">
+                          {quickStatus.confirmedWavesCount} / {quickStatus.totalWavesCount}
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg px-2 py-1.5">
+                        <div className="text-[10px] text-slate-400">درصد انحراف</div>
+                        <div
+                          className={`font-mono font-bold tabular-nums mt-0.5 ${
+                            quickStatus.overallDeviationPct >= 15
+                              ? 'text-rose-300'
+                              : quickStatus.overallDeviationPct > 0
+                              ? 'text-amber-300'
+                              : 'text-emerald-300'
+                          }`}
+                        >
+                          {quickStatus.overallDeviationPct}%
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg px-2 py-1.5">
+                        <div className="text-[10px] text-slate-400">تارگت نهایی</div>
+                        <div className="font-mono font-bold text-emerald-300 tabular-nums mt-0.5">
+                          {quickStatus.finalTargetPrice !== null
+                            ? quickStatus.finalTargetPrice.toLocaleString()
+                            : '—'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400 font-mono tabular-nums">
+                      <span>
+                        ابطال:{' '}
+                        <strong className="text-rose-300">
+                          {quickStatus.invalidationPrice > 0
+                            ? quickStatus.invalidationPrice.toLocaleString()
+                            : '—'}
+                        </strong>
+                      </span>
+                      {quickStatus.finalTargetDistancePct !== null && (
+                        <span>
+                          فاصله تا تارگت ({quickStatus.finalTargetLabel}):{' '}
+                          <strong className="text-emerald-300">
+                            {quickStatus.finalTargetDistancePct >= 0
+                              ? `+${quickStatus.finalTargetDistancePct}%`
+                              : `${quickStatus.finalTargetDistancePct}%`}
+                          </strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-3 min-w-0">
                   <div
                     className="w-2.5 h-2.5 rounded-sm shrink-0"

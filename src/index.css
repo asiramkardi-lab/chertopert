@@ -38,6 +38,27 @@
   }
 }
 
+@keyframes feiExpectedFlow {
+  0% {
+    stroke-dashoffset: 64;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes feiExpectedPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
 .fei-wave-trace {
   stroke-dasharray: var(--wave-path-len, 1000);
   stroke-dashoffset: var(--wave-path-len, 1000);
@@ -47,6 +68,17 @@
 .fei-wave-glow-flow {
   stroke-dasharray: 12 36;
   animation: feiWaveFlow 1.35s linear infinite;
+}
+
+.fei-expected-flow {
+  stroke-dasharray: 10 22;
+  animation: feiExpectedFlow 1.65s linear infinite;
+}
+
+.fei-expected-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: feiExpectedPulse 2.1s ease-in-out infinite;
 }
 
 .fei-vertex-bloom {
@@ -63,9 +95,15 @@
     animation: none;
     opacity: 1;
   }
-  .fei-wave-glow-flow {
-    stroke-dasharray: none;
+  .fei-wave-glow-flow,
+  .fei-expected-flow {
+    stroke-dasharray: 6 5;
     animation: none;
+  }
+  .fei-expected-pulse {
+    animation: none;
+    opacity: 0.9;
+    transform: none;
   }
   .fei-vertex-bloom {
     animation: none;

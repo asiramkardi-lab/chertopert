@@ -24,6 +24,8 @@ import { ScenarioManager } from './ScenarioManager';
 import { TfBoundaryReport } from './TfBoundaryReport';
 import { SddAndCodeViewer } from './SddAndCodeViewer';
 import { AnglePenetrationWidget } from './AnglePenetrationWidget';
+import { ConfluenceZonesWidget } from './ConfluenceZonesWidget';
+import { SmartRuleAlertWidget } from './SmartRuleAlertWidget';
 import { TargetProjectionPanel } from './TargetProjectionPanel';
 import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import { 
@@ -36,7 +38,8 @@ import {
   CornerDownLeft,
   Layers,
   Crosshair,
-  ArrowUpLeft
+  ArrowUpLeft,
+  Sparkles
 } from 'lucide-react';
 
 export type SidebarTab = 'COPILOT' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
@@ -104,7 +107,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   onPromoteDegree
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
-  const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'PRZ'>('RADAR');
+  const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'CONFLUENCE' | 'PRZ'>('RADAR');
 
   useEffect(() => {
     if (drillContext?.key) {
@@ -157,6 +160,15 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
       {/* Tab Body Content Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+        {/* Real-Time Bahari Smart Rule & Invalidation Alert Widget */}
+        <SmartRuleAlertWidget
+          scenario={activeScenario}
+          candles={candles}
+          parentRole={drillContext?.role || 'ROOT'}
+          parentWaveLabel={drillContext?.waveLabel || ''}
+          onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+        />
+
         {activeTab === 'COPILOT' && (
           <div className="space-y-4">
             {/* Real-time Status Card */}
@@ -173,23 +185,48 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               </span>
             </div>
 
-            {/* Quick Shortcut to Angle & Penetration Targets Widget */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('ANGLE_TARGETS')}
-              className="w-full p-3 rounded-xl bg-cyan-950/25 hover:bg-cyan-950/40 border border-cyan-500/35 hover:border-cyan-400/65 flex items-center justify-between gap-2 text-right transition-colors"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Crosshair className="w-4 h-4 text-cyan-300 shrink-0" />
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-white truncate">رادار زوایای برخورد و سطوح نفوذ</div>
-                  <div className="text-[10.5px] text-slate-400 truncate">
-                    مشاهده اهداف کوتاه‌مدت و میان‌مدت با درصد اطمینان
+            {/* Quick Shortcuts to Angle Radar & Fibonacci Confluence Zones */}
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetsSubView('CONFLUENCE');
+                  setActiveTab('ANGLE_TARGETS');
+                }}
+                className="w-full p-3 rounded-xl bg-emerald-950/25 hover:bg-emerald-950/40 border border-emerald-500/35 hover:border-emerald-400/65 flex items-center justify-between gap-2 text-right transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Sparkles className="w-4 h-4 text-emerald-300 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">ابزار بصری مناطق تلاقی فیبوناچی (Confluence)</div>
+                    <div className="text-[10.5px] text-slate-400 truncate">
+                      هم‌گرایی سطوح موج‌های مختلف با افکت نوری نقاط ورود مطمئن
+                    </div>
                   </div>
                 </div>
-              </div>
-              <ArrowUpLeft className="w-4 h-4 text-cyan-300 shrink-0" />
-            </button>
+                <ArrowUpLeft className="w-4 h-4 text-emerald-300 shrink-0" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetsSubView('RADAR');
+                  setActiveTab('ANGLE_TARGETS');
+                }}
+                className="w-full p-3 rounded-xl bg-cyan-950/25 hover:bg-cyan-950/40 border border-cyan-500/35 hover:border-cyan-400/65 flex items-center justify-between gap-2 text-right transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Crosshair className="w-4 h-4 text-cyan-300 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">رادار زوایای برخورد و سطوح نفوذ</div>
+                    <div className="text-[10.5px] text-slate-400 truncate">
+                      مشاهده اهداف کوتاه‌مدت و میان‌مدت با درصد اطمینان
+                    </div>
+                  </div>
+                </div>
+                <ArrowUpLeft className="w-4 h-4 text-cyan-300 shrink-0" />
+              </button>
+            </div>
 
             {/* 11-Step Pipeline & Boundary Tables Audit */}
             <TopDownPipelineAudit
@@ -226,28 +263,39 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
         {activeTab === 'ANGLE_TARGETS' && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
+            <div className="grid grid-cols-3 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
               <button
                 type="button"
                 onClick={() => setTargetsSubView('RADAR')}
-                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
                   targetsSubView === 'RADAR'
                     ? 'bg-cyan-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                رادار زوایا و نفوذ
+                رادار زوایا
+              </button>
+              <button
+                type="button"
+                onClick={() => setTargetsSubView('CONFLUENCE')}
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsSubView === 'CONFLUENCE'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                تلاقی فیبوناچی
               </button>
               <button
                 type="button"
                 onClick={() => setTargetsSubView('PRZ')}
-                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
                   targetsSubView === 'PRZ'
                     ? 'bg-indigo-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                تارگت‌های تفصیلی PRZ
+                تارگت‌های PRZ
               </button>
             </div>
 
@@ -257,6 +305,11 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                 candles={candles}
                 parentRole={drillContext?.role || 'ROOT'}
                 parentWaveLabel={drillContext?.waveLabel || ''}
+              />
+            ) : targetsSubView === 'CONFLUENCE' ? (
+              <ConfluenceZonesWidget
+                scenario={activeScenario}
+                candles={candles}
               />
             ) : (
               <TargetProjectionPanel

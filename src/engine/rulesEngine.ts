@@ -20,6 +20,14 @@ import {
 import { PivotDetector, getPivotWindowForTimeframe } from './pivotDetector';
 import { FractalEngine } from './fractalEngine';
 import { TargetProjectionEngine } from './targetProjectionEngine';
+import {
+  evaluateWave2Retracement,
+  evaluateWave3NotShortest,
+  evaluateWave4Overlap,
+  evaluateZigzagWaveB,
+  evaluateFlatWaveB,
+  cleanFloat
+} from './waveToleranceLayer';
 
 export type WaveExtensionTarget = 'WAVE_1' | 'WAVE_3' | 'WAVE_5' | null;
 export type MislabelingStatus = 'CLEAN' | 'MISLABELING' | 'VALID_ALTERNATIVE' | 'INVALID';
@@ -309,18 +317,19 @@ export class RulesEngine {
     if (isCorrectivePattern) {
       // Corrective pattern validations (C22, C23, C24, C26)
       if (pattern === 'ZIGZAG' && vertices.length >= 4 && len1 > 0) {
-        const bRatio = retrace2 / len1;
+        const zzB = evaluateZigzagWaveB(len1, retrace2);
+        const bRatio = zzB.ratio;
         const cCoversB = isBull ? p3 > p1 : p3 < p1;
         rules.push({
           ruleId: 'ZIGZAG_B_RETRACE',
           name: 'Zigzag Wave B < 100% Wave A',
           nameFa: 'موج B در زیگزاگ باید کمتر از ۱۰۰٪ موج A اصلاح کند',
           type: 'HARD',
-          passed: bRatio < 1.0,
-          score: bRatio < 1.0 ? 100 : 0,
+          passed: zzB.passed,
+          score: zzB.passed ? 100 : 0,
           conceptId: 'C22',
           messageFa: `اصلاح موج B برابر ${(bRatio * 100).toFixed(1)}٪ موج A است.`,
-          canBeSolvedByAlternate: bRatio >= 1.0 ? 'FLAT_EXPANDED' : undefined
+          canBeSolvedByAlternate: !zzB.passed ? 'FLAT_EXPANDED' : undefined
         });
         rules.push({
           ruleId: 'ZIGZAG_C_COVERS_B',
@@ -339,8 +348,9 @@ export class RulesEngine {
         vertices.length >= 3 &&
         len1 > 0
       ) {
-        const bRatio = retrace2 / len1;
-        const flatBValid = bRatio >= 0.618;
+        const flatB = evaluateFlatWaveB(len1, retrace2);
+        const bRatio = flatB.ratio;
+        const flatBValid = flatB.passed;
         rules.push({
           ruleId: 'FLAT_B_MIN',
           name: 'Flat Wave B >= 61.8% Wave A',
@@ -442,11 +452,12 @@ export class RulesEngine {
       }
     } else {
       // Motive Patterns (Ideal Cycle, Terminal, Anti-Terminal, Diagonals)
-      // 1. RULE 1 (Cardinal): Wave 2 cannot retrace 100% of Wave 1 (Table 4: 99.9% valid borderline, 100% invalid)
+      // 1. RULE 1 (Cardinal): Wave 2 cannot retrace 100% of Wave 1 (0.1% float-safe Tolerance Layer)
       if (vertices.length >= 3) {
-        const retraceRatio2 = len1 > 0 ? retrace2 / len1 : 0;
-        const rule1Passed = isBull ? p2 > p0 : p2 < p0;
-        const isBorderline99 = rule1Passed && retraceRatio2 >= 0.985;
+        const w2Eval = evaluateWave2Retracement(cleanFloat(len1), cleanFloat(retrace2));
+        const retraceRatio2 = w2Eval.ratio;
+        const rule1Passed = w2Eval.passed;
+        const isBorderline99 = w2Eval.isBorderline999;
 
         rules.push({
           ruleId: 'CARDINAL_RULE_1',
@@ -470,10 +481,10 @@ export class RulesEngine {
         }
       }
 
-      // 2. RULE 2 (Cardinal): Wave 3 cannot be the shortest among 1, 3, 5 (Table 4: equality W3=W1=W5 is valid)
+      // 2. RULE 2 (Cardinal): Wave 3 cannot be the shortest among 1, 3, 5 (0.1% float-safe Tolerance Layer)
       if (vertices.length >= 6) {
-        const isWave3Shortest = len3 < len1 && len3 < len5;
-        const rule2Passed = !isWave3Shortest;
+        const w3Eval = evaluateWave3NotShortest(cleanFloat(len1), cleanFloat(len3), cleanFloat(len5));
+        const rule2Passed = w3Eval.passed;
 
         rules.push({
           ruleId: 'CARDINAL_RULE_2',
@@ -489,14 +500,14 @@ export class RulesEngine {
         });
       }
 
-      // 3. RULE 3 (Cardinal): Wave 4 overlap with Wave 1 (Table 4: exact touch valid borderline, >=0.1% overlap fails)
+      // 3. RULE 3 (Cardinal): Wave 4 overlap with Wave 1 (0.1% float-safe Tolerance Layer)
       if (vertices.length >= 5) {
-        const overlapTolerance = Math.abs(len1) * 0.001;
-        const hasExactTouch = Math.abs(p4 - p1) <= overlapTolerance;
-        const hasOverlap = isBull ? p4 < p1 - overlapTolerance : p4 > p1 + overlapTolerance;
+        const w4Eval = evaluateWave4Overlap(p1, p4, len1, isBull);
+        const hasExactTouch = w4Eval.hasExactTouch;
+        const hasOverlap = w4Eval.hasOverlap;
 
         if (pattern === 'IDEAL_CYCLE') {
-          const rule3Passed = !hasOverlap;
+          const rule3Passed = w4Eval.passedIdealCycle;
           rules.push({
             ruleId: 'CARDINAL_RULE_3',
             name: 'Cardinal Rule 3: Wave 4 Price Overlap',
@@ -509,7 +520,7 @@ export class RulesEngine {
               ? hasExactTouch
                 ? `موج ۴ (${p4.toLocaleString()}) با سقف موج ۱ تماس مرزی دارد بدون نفوذ — معتبر مرزی (جدول ۴.۵).`
                 : `موج ۴ (${p4.toLocaleString()}) وارد حریم موج ۱ (${p1.toLocaleString()}) نشده است.`
-              : `نقض قانون ۳ (جدول ۴.۶): موج ۴ (${p4.toLocaleString()}) با نفوذ > ۰.۱٪ وارد محدوده قیمتی موج ۱ (${p1.toLocaleString()}) شده است.`,
+              : `نقض قانون ۳ (جدول ۴.۶): موج ۴ (${p4.toLocaleString()}) با نفوذ >= ۰.۱٪ (${w4Eval.penetrationPct}٪) وارد محدوده قیمتی موج ۱ (${p1.toLocaleString()}) شده است.`,
             canBeSolvedByAlternate: hasOverlap ? (vertices.length >= 6 && len5 > len3 ? 'ANTI_TERMINAL' : 'TERMINAL') : undefined
           });
 

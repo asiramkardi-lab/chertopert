@@ -12,6 +12,7 @@ import { DEGREE_CONFIGS } from '../engine/fractalEngine';
 import { PATTERN_LABELS_FA, RulesEngine, ValidationSummary } from '../engine/rulesEngine';
 import { TargetProjectionEngine } from '../engine/targetProjectionEngine';
 import { TrendStrengthIndicator, TrendSignalLevel } from '../engine/trendStrengthIndicator';
+import { guardManualVertexEdit } from '../engine/waveToleranceLayer';
 import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import { PatternValidator } from './PatternValidator';
 import { RuleViolationToast, ActiveViolationToast, ValidWaveSnapshot } from './RuleViolationToast';
@@ -134,8 +135,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [showTargets, setShowTargets] = useState<boolean>(true);
   const [showFibLayers, setShowFibLayers] = useState<boolean>(true);
   const [hoveredExtLayerId, setHoveredExtLayerId] = useState<string | null>(null);
+  const [hoveredZoneId, setHoveredZoneId] = useState<string | null>(null);
   const [internalShowPRZ, setInternalShowPRZ] = useState<boolean>(true);
   const [internalShowTMV, setInternalShowTMV] = useState<boolean>(true);
+  const [showExpectedPath, setShowExpectedPath] = useState<boolean>(true);
   const [tmvSpanMode, setTmvSpanMode] = useState<'COMPACT' | 'ANALYSIS' | 'FULL'>('ANALYSIS');
   const [tmvCustomRatio, setTmvCustomRatio] = useState<number | null>(null);
   const [draggingTmvEdge, setDraggingTmvEdge] = useState<boolean>(false);
@@ -143,6 +146,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [showVolume, setShowVolume] = useState<boolean>(true);
   const [showTrendStrength, setShowTrendStrength] = useState<boolean>(true);
   const [snapToCandleExtreme, setSnapToCandleExtreme] = useState<boolean>(true);
+  const [ruleGuardEnabled, setRuleGuardEnabled] = useState<boolean>(true);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const [drillNotice, setDrillNotice] = useState<string | null>(null);
   const [diagnosticOpenById, setDiagnosticOpenById] = useState<Record<string, boolean>>({});
@@ -212,6 +216,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     setSelectedVertexIndex(null);
     setHoveredLeg(null);
     setHoveredExtLayerId(null);
+    setHoveredZoneId(null);
     setDrillNotice(null);
     setTmvCustomRatio(null);
     dragMovedRef.current = false;
@@ -728,13 +733,25 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     setDragMoved(true);
 
     const { candleIndex, price, timestamp } = getIndexAndPriceFromCoords(mouseX, mouseY);
+    const guarded = ruleGuardEnabled
+      ? guardManualVertexEdit(
+          activeScenario.patternType,
+          activeScenario.vertices,
+          draggingVertexIndex,
+          candleIndex,
+          price,
+          activeScenario.direction,
+          candles
+        )
+      : { candleIndex, price, timestamp, clampedByRules: [] };
+
     const updated = activeScenario.vertices.map((v, i) =>
       i === draggingVertexIndex
         ? {
             ...v,
-            candleIndex,
-            price,
-            timestamp
+            candleIndex: guarded.candleIndex,
+            price: guarded.price,
+            timestamp: guarded.timestamp
           }
         : v
     );
@@ -814,7 +831,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       const defaultLabels = ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C', 'D', 'E'];
       const nextLabel = defaultLabels[nextIdx] || `W${nextIdx}`;
 
-      const newVertex: WaveVertex = {
+      const rawVertex: WaveVertex = {
         label: nextLabel,
         candleIndex,
         price,
@@ -822,10 +839,26 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         isConfirmed: true
       };
 
-      const nextList =
-        interactionMode === 'DRAW_SCRATCH'
-          ? [...current, newVertex].sort((a, b) => a.candleIndex - b.candleIndex)
-          : [...current, newVertex].sort((a, b) => a.candleIndex - b.candleIndex);
+      const tentative = [...current, rawVertex].sort((a, b) => a.candleIndex - b.candleIndex);
+      const insertedIdx = tentative.indexOf(rawVertex);
+      const guarded =
+        ruleGuardEnabled && insertedIdx >= 0
+          ? guardManualVertexEdit(
+              activeScenario.patternType,
+              tentative,
+              insertedIdx,
+              rawVertex.candleIndex,
+              rawVertex.price,
+              activeScenario.direction,
+              candles
+            )
+          : null;
+
+      const nextList = tentative.map((v, idx) =>
+        guarded && idx === insertedIdx
+          ? { ...v, candleIndex: guarded.candleIndex, price: guarded.price, timestamp: guarded.timestamp }
+          : v
+      );
 
       onUpdateVertices(nextList);
       return;
@@ -899,6 +932,323 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       totalLength: Math.max(1, Math.ceil(totalLength))
     };
   }, [activeHoveredScenario, candles.length, width, height, minPrice, priceRange, showVolume]);
+
+  // Scale-adaptive PRZ Horizontal Bounding Box coordinates anchored strictly to the last wave's vertices
+  const renderedPrzBoxes = useMemo(() => {
+    if (!effectiveShowPRZ || !projectionReport || projectionReport.przZones.length === 0 || candles.length === 0) {
+      return [];
+    }
+    const plotTop = padding.top;
+    const plotBottom = height - padding.bottom - volumeHeight;
+    const endX = width - padding.right;
+    const usableW = Math.max(1, endX - padding.left);
+    const usableH = Math.max(1, plotBottom - plotTop);
+    const maxIdx = Math.max(1, candles.length - 1);
+    const xAt = (idx: number) => padding.left + (idx / maxIdx) * usableW;
+    const yAt = (price: number) => plotBottom - ((price - minPrice) / Math.max(1e-6, priceRange)) * usableH;
+
+    const verts = activeScenario.vertices;
+    const prevV = verts.length >= 2 ? verts[verts.length - 2] : verts[0];
+    const lastV = verts[verts.length - 1];
+    const lastWaveStartIdx = prevV ? Math.min(prevV.candleIndex, lastV?.candleIndex ?? prevV.candleIndex) : 0;
+    const lastWaveEndIdx = Math.max(maxIdx, lastV?.candleIndex ?? maxIdx);
+
+    return projectionReport.przZones
+      .map(prz => {
+        const hi = Math.max(prz.lowPrice, prz.highPrice);
+        const lo = Math.min(prz.lowPrice, prz.highPrice);
+        const rawYTop = yAt(hi);
+        const rawYBot = yAt(lo);
+        if (rawYBot < plotTop || rawYTop > plotBottom) return null;
+
+        const yTop = Math.max(plotTop, Math.min(plotBottom - 10, rawYTop));
+        const yBot = Math.min(plotBottom, Math.max(yTop + 10, rawYBot));
+        const bandH = Math.max(10, yBot - yTop);
+
+        const sIdx = prz.isPrimary ? lastWaveStartIdx : (prz.startCandleIndex ?? prz.anchorCandleIndex ?? lastWaveStartIdx);
+        const eIdx = prz.isPrimary ? lastWaveEndIdx : (prz.endCandleIndex ?? lastWaveEndIdx);
+        const rawX1 = xAt(Math.max(0, Math.min(maxIdx, sIdx)));
+        const rawX2 = xAt(Math.max(0, Math.min(maxIdx, eIdx)));
+        const xStart = Math.max(padding.left, Math.min(endX - 68, Math.min(rawX1, rawX2)));
+        const xEnd = Math.max(xStart + 68, Math.min(endX, Math.max(rawX1, rawX2)));
+        const bandW = Math.max(68, xEnd - xStart);
+
+        const anchorVertX = lastV ? Math.max(xStart, Math.min(xEnd, xAt(lastV.candleIndex))) : xStart;
+        const anchorVertY = lastV ? Math.max(plotTop, Math.min(plotBottom, yAt(lastV.price))) : yTop + bandH / 2;
+
+        return {
+          prz,
+          yTop,
+          yBot,
+          bandH,
+          xStart,
+          xEnd,
+          bandW,
+          anchorVertX,
+          anchorVertY
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }, [
+    effectiveShowPRZ,
+    projectionReport,
+    activeScenario.vertices,
+    candles.length,
+    width,
+    height,
+    padding.left,
+    padding.right,
+    padding.top,
+    padding.bottom,
+    volumeHeight,
+    minPrice,
+    priceRange,
+    priceZoom
+  ]);
+
+  // Scale-adaptive TMV Horizontal Bounding Box coordinates (mirrors PRZ horizontal geometry)
+  const renderedTmvBoxes = useMemo(() => {
+    if (!effectiveShowTMV || !projectionReport || projectionReport.tmvZones.length === 0 || candles.length === 0) {
+      return [];
+    }
+    const plotTop = padding.top;
+    const plotBottom = height - padding.bottom - volumeHeight;
+    const endX = width - padding.right;
+    const usableW = Math.max(80, endX - padding.left);
+    const usableH = Math.max(1, plotBottom - plotTop);
+    const maxIdx = Math.max(1, candles.length - 1);
+    const xAt = (idx: number) => padding.left + (idx / maxIdx) * usableW;
+    const yAt = (price: number) => plotBottom - ((price - minPrice) / Math.max(1e-6, priceRange)) * usableH;
+
+    return projectionReport.tmvZones.map(tmv => {
+      // Responsive horizontal width synchronized with Analysis Window / Mode / Custom Drag
+      const xEnd = endX;
+      let xStart = padding.left;
+      const minHorizW = Math.min(usableW, Math.max(128, usableW * 0.24));
+
+      if (tmvCustomRatio !== null) {
+        const customW = Math.max(minHorizW, Math.min(usableW, usableW * tmvCustomRatio));
+        xStart = Math.max(padding.left, xEnd - customW);
+      } else if (tmvSpanMode === 'FULL') {
+        xStart = padding.left;
+      } else if (tmvSpanMode === 'COMPACT') {
+        const anchorX = xAt(Math.max(0, Math.min(maxIdx, tmv.anchorCandleIndex ?? tmv.startCandleIndex)));
+        const compactW = Math.max(minHorizW, Math.min(usableW * 0.36, Math.max(minHorizW, xEnd - anchorX + 36)));
+        xStart = Math.max(padding.left, xEnd - compactW);
+      } else {
+        const analysisRawX1 = xAt(Math.max(0, Math.min(maxIdx, tmv.startCandleIndex)));
+        const minAnalysisW = Math.max(minHorizW, usableW * 0.32);
+        const maxAnalysisW = usableW * 0.74;
+        const desiredW = Math.max(minAnalysisW, Math.min(maxAnalysisW, xEnd - analysisRawX1));
+        xStart = Math.max(padding.left, xEnd - desiredW);
+      }
+      const bandW = Math.max(minHorizW, xEnd - xStart);
+
+      const hi = Math.max(tmv.lowPrice, tmv.highPrice);
+      const lo = Math.min(tmv.lowPrice, tmv.highPrice);
+      const rawYTop = yAt(hi);
+      const rawYBot = yAt(lo);
+      const rawIdealY = yAt(tmv.ideal100Price);
+      const showBand = !(rawYBot < plotTop || rawYTop > plotBottom);
+
+      let yTop = Math.max(plotTop, Math.min(plotBottom - 18, rawYTop));
+      let yBot = Math.min(plotBottom, Math.max(yTop + 18, rawYBot));
+
+      // Enforce horizontal box proportion (bandW > bandH) centered around Ideal TMV price
+      const maxAllowedH = Math.max(26, Math.min(usableH * 0.28, bandW * 0.45));
+      if (yBot - yTop > maxAllowedH) {
+        const centerY = Math.max(plotTop + maxAllowedH / 2, Math.min(plotBottom - maxAllowedH / 2, rawIdealY));
+        yTop = Math.max(plotTop, centerY - maxAllowedH / 2);
+        yBot = Math.min(plotBottom, centerY + maxAllowedH / 2);
+      }
+      const bandH = Math.max(18, yBot - yTop);
+      const idealY = Math.max(plotTop + 2, Math.min(plotBottom - 2, rawIdealY));
+
+      return {
+        tmv,
+        showBand,
+        yTop,
+        yBot,
+        bandH,
+        idealY,
+        xStart,
+        xEnd,
+        bandW
+      };
+    });
+  }, [
+    effectiveShowTMV,
+    projectionReport,
+    candles.length,
+    width,
+    height,
+    padding.left,
+    padding.right,
+    padding.top,
+    padding.bottom,
+    volumeHeight,
+    minPrice,
+    priceRange,
+    priceZoom,
+    tmvSpanMode,
+    tmvCustomRatio
+  ]);
+
+  // Curved Fractal Expected Path (Flow-Path Bezier curve with confidence-proportional opacity)
+  const expectedPathData = useMemo(() => {
+    if (!showExpectedPath || hideZoneControls || activeScenario.vertices.length < 2 || candles.length === 0) {
+      return null;
+    }
+    const plotTop = padding.top;
+    const plotBottom = height - padding.bottom - volumeHeight;
+    const endX = width - padding.right;
+    const usableW = Math.max(1, endX - padding.left);
+    const usableH = Math.max(1, plotBottom - plotTop);
+    const maxIdx = Math.max(1, candles.length - 1);
+    const xAt = (idx: number) => padding.left + (idx / maxIdx) * usableW;
+    const yAt = (price: number) => Math.max(plotTop + 8, Math.min(plotBottom - 8, plotBottom - ((price - minPrice) / Math.max(1e-6, priceRange)) * usableH));
+
+    const verts = activeScenario.vertices;
+    const lastV = verts[verts.length - 1];
+    const prevV = verts[verts.length - 2];
+    const cleanLast = lastV.label.replace(/[()VW\s]/g, '').toUpperCase();
+    const isCycleFinished = cleanLast === '5' || cleanLast === 'C';
+
+    const nextDir: 'BULLISH' | 'BEARISH' =
+      projectionReport?.nextDirection ||
+      (isCycleFinished
+        ? lastV.price >= prevV.price
+          ? 'BEARISH'
+          : 'BULLISH'
+        : lastV.price >= prevV.price
+        ? 'BULLISH'
+        : 'BEARISH');
+
+    // Determine target price along expected fractal trajectory
+    const primaryPrz = projectionReport?.przZones.find(z => z.isPrimary) || projectionReport?.przZones[0];
+    const primaryTmv = projectionReport?.tmvZones.find(z => z.isPrimary) || projectionReport?.tmvZones[0];
+    const validTargets = (projectionReport?.targets || activeScenario.targets).filter(t => !t.isInvalidation && t.price > 0);
+    const dirTargets = validTargets.filter(t =>
+      nextDir === 'BULLISH' ? t.price > lastV.price : t.price < lastV.price
+    );
+
+    let destPrice = lastV.price * (nextDir === 'BULLISH' ? 1.07 : 0.93);
+    if (primaryTmv && ((nextDir === 'BULLISH' && primaryTmv.ideal100Price > lastV.price) || (nextDir === 'BEARISH' && primaryTmv.ideal100Price < lastV.price))) {
+      destPrice = primaryTmv.ideal100Price;
+    } else if (primaryPrz && ((nextDir === 'BULLISH' && primaryPrz.midPrice > lastV.price) || (nextDir === 'BEARISH' && primaryPrz.midPrice < lastV.price))) {
+      destPrice = primaryPrz.midPrice;
+    } else if (dirTargets.length > 0) {
+      const sorted = [...dirTargets].sort((a, b) => Math.abs(a.price - lastV.price) - Math.abs(b.price - lastV.price));
+      destPrice = sorted[Math.min(sorted.length - 1, 1)].price;
+    }
+
+    const startX = xAt(Math.max(0, Math.min(maxIdx, lastV.candleIndex)));
+    const startY = yAt(lastV.price);
+    const destY = yAt(destPrice);
+
+    // Project horizontally toward the right plot boundary (at least 72px span)
+    const availRight = Math.max(68, endX - startX - 10);
+    const spanX = Math.min(availRight, Math.max(82, usableW * 0.24));
+    const endPtX = Math.min(endX - 8, startX + spanX);
+    const deltaY = destY - startY;
+
+    // Select fractal subwave cadence:
+    // - End of W5 / C (Bahari: no same-degree retracement -> 3-wave A-B-C next cycle start)
+    // - Corrective / Triangle / Flat -> 3-wave or breakout cadence
+    // - Developing Motive impulse (e.g. from W2/W4 into W3/W5) -> 5-subwave fractal impulse curve
+    const isCorrectiveCadence =
+      isCycleFinished ||
+      parentRole === 'CORRECTIVE' ||
+      ['2', '4', 'B', 'D'].includes(cleanLast) === false &&
+        ['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING', 'TRIANGLE_CONVERGING', 'TRIANGLE_EXPANDING', 'COMPLEX_COMBINATION'].includes(
+          activeScenario.patternType
+        );
+
+    const rawPts: Array<{ x: number; y: number }> = isCorrectiveCadence
+      ? [
+          { x: startX, y: startY },
+          { x: startX + spanX * 0.36, y: startY + deltaY * 0.56 },
+          { x: startX + spanX * 0.64, y: startY + deltaY * 0.32 },
+          { x: endPtX, y: destY }
+        ]
+      : [
+          { x: startX, y: startY },
+          { x: startX + spanX * 0.20, y: startY + deltaY * 0.24 },
+          { x: startX + spanX * 0.34, y: startY + deltaY * 0.14 },
+          { x: startX + spanX * 0.64, y: startY + deltaY * 0.74 },
+          { x: startX + spanX * 0.79, y: startY + deltaY * 0.58 },
+          { x: endPtX, y: destY }
+        ];
+
+    const clampedPts = rawPts.map(pt => ({
+      x: Math.max(padding.left + 4, Math.min(endX - 6, pt.x)),
+      y: Math.max(plotTop + 10, Math.min(plotBottom - 10, pt.y))
+    }));
+
+    // Convert waypoints to smooth Catmull-Rom Cubic Bezier path
+    const buildSmoothBezier = (pts: Array<{ x: number; y: number }>) => {
+      if (pts.length < 2) return '';
+      let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[Math.max(0, i - 1)];
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        const p3 = pts[Math.min(pts.length - 1, i + 2)];
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+        d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+      }
+      return d;
+    };
+
+    const pathD = buildSmoothBezier(clampedPts);
+    const tip = clampedPts[clampedPts.length - 1];
+    const prevTip = clampedPts[clampedPts.length - 2];
+    const angleRad = Math.atan2(tip.y - prevTip.y, tip.x - prevTip.x);
+    const arrowLen = 8.5;
+    const arrowLeftX = tip.x - arrowLen * Math.cos(angleRad - Math.PI / 6);
+    const arrowLeftY = tip.y - arrowLen * Math.sin(angleRad - Math.PI / 6);
+    const arrowRightX = tip.x - arrowLen * Math.cos(angleRad + Math.PI / 6);
+    const arrowRightY = tip.y - arrowLen * Math.sin(angleRad + Math.PI / 6);
+    const arrowPath = `M ${arrowLeftX.toFixed(1)} ${arrowLeftY.toFixed(1)} L ${tip.x.toFixed(1)} ${tip.y.toFixed(1)} L ${arrowRightX.toFixed(1)} ${arrowRightY.toFixed(1)}`;
+
+    const confidencePct = Math.max(20, Math.min(98, Math.round(activeScenario.confidenceScore || 65)));
+    const coreOpacity = Math.round((0.26 + (confidencePct / 100) * 0.70) * 100) / 100;
+    const haloOpacity = Math.round((0.08 + (confidencePct / 100) * 0.28) * 100) / 100;
+    const strokeColor = nextDir === 'BULLISH' ? '#22d3ee' : '#f472b6';
+
+    return {
+      pathD,
+      arrowPath,
+      tip,
+      destPrice: Math.round(destPrice),
+      confidencePct,
+      coreOpacity,
+      haloOpacity,
+      strokeColor,
+      cadenceLabelFa: isCorrectiveCadence ? 'ساختار فرکتال ۳موجی' : 'ساختار فرکتال ۵موجی',
+      nextDir
+    };
+  }, [
+    showExpectedPath,
+    hideZoneControls,
+    activeScenario,
+    projectionReport,
+    parentRole,
+    candles.length,
+    width,
+    height,
+    padding.left,
+    padding.right,
+    padding.top,
+    padding.bottom,
+    volumeHeight,
+    minPrice,
+    priceRange,
+    priceZoom
+  ]);
 
   const gridSteps = 6;
   const gridLines = useMemo(() => {
@@ -1072,6 +1422,18 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             آهنربا
           </button>
 
+          <button
+            onClick={() => setRuleGuardEnabled(prev => !prev)}
+            className={`px-2 py-1 text-[11px] rounded-lg border whitespace-nowrap transition-colors ${
+              ruleGuardEnabled
+                ? 'bg-emerald-500/15 border-emerald-500/45 text-emerald-200 font-semibold'
+                : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+            }`}
+            title="جلوگیری خودکار از نقض قوانین سه‌گانه بنیادین هنگام جابه‌جایی دستی نقاط موج در چارت"
+          >
+            محافظ قوانین
+          </button>
+
           {!hideZoneControls && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 shrink-0">
@@ -1118,6 +1480,17 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                   }`}
                 >
                   اهداف
+                </button>
+                <button
+                  onClick={() => setShowExpectedPath(prev => !prev)}
+                  title="نمایش یا مخفی کردن مسیر منحنی پیش‌بینی‌شده با انیمیشن جریان مسیر (Flow-Path)"
+                  className={`px-2 py-1 text-[11px] rounded-md whitespace-nowrap transition-colors ${
+                    showExpectedPath
+                      ? 'bg-cyan-500/25 text-cyan-200 font-semibold'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  مسیر پیش‌بینی
                 </button>
               </div>
 
@@ -1352,24 +1725,24 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <stop offset="100%" stopColor="#ef4444" stopOpacity="0.05" />
             </linearGradient>
             <linearGradient id="przBullGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.18" />
-              <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.10" />
-              <stop offset="100%" stopColor="#fbbf24" stopOpacity="0.20" />
+              <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.24" />
+              <stop offset="50%" stopColor="#fbbf24" stopOpacity="0.09" />
+              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.22" />
             </linearGradient>
             <linearGradient id="przBearGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#fb923c" stopOpacity="0.18" />
-              <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.10" />
-              <stop offset="100%" stopColor="#fb923c" stopOpacity="0.20" />
+              <stop offset="0%" stopColor="#fb923c" stopOpacity="0.24" />
+              <stop offset="50%" stopColor="#f97316" stopOpacity="0.09" />
+              <stop offset="100%" stopColor="#fb923c" stopOpacity="0.22" />
             </linearGradient>
             <linearGradient id="tmvBullZoneGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.16" />
-              <stop offset="50%" stopColor="#6366f1" stopOpacity="0.11" />
-              <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.20" />
+              <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.24" />
+              <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.10" />
+              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.22" />
             </linearGradient>
             <linearGradient id="tmvBearZoneGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#a855f7" stopOpacity="0.16" />
+              <stop offset="0%" stopColor="#a855f7" stopOpacity="0.24" />
               <stop offset="50%" stopColor="#6366f1" stopOpacity="0.10" />
-              <stop offset="100%" stopColor="#ec4899" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#ec4899" stopOpacity="0.22" />
             </linearGradient>
             <linearGradient id="fibLayerPrimary" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#10b981" stopOpacity="0.26" />
@@ -1397,6 +1770,13 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <feMerge>
                 <feMergeNode in="blurOuter" />
                 <feMergeNode in="blurInner" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <filter id="zone-hover-glow" x="-10%" y="-25%" width="120%" height="150%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="zoneBlur" />
+              <feMerge>
+                <feMergeNode in="zoneBlur" />
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
             </filter>
@@ -1706,59 +2086,68 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
             return (
               <g>
-                {/* 1. PRZ Horizontal Rectangular Bounding Box (Anchored to Last Wave's Vertices) */}
+                {/* 1. Luminous Horizontal PRZ Bounding Box (Strictly Anchored to Last Wave's Vertices) */}
                 {effectiveShowPRZ &&
-                  projectionReport &&
-                  projectionReport.przZones.map(prz => {
-                    const rawYTop = getY(prz.highPrice);
-                    const rawYBot = getY(prz.lowPrice);
-                    if (rawYBot < plotTop || rawYTop > plotBottom) return null;
-
-                    const yTop = Math.max(plotTop, Math.min(plotBottom - 10, rawYTop));
-                    const yBot = Math.min(plotBottom, Math.max(yTop + 10, rawYBot));
-                    const bandH = Math.max(10, yBot - yTop);
-
-                    const startIdx = prz.startCandleIndex ?? prz.anchorCandleIndex ?? fallbackStartIdx;
-                    const endIdx = prz.endCandleIndex ?? fallbackEndIdx;
-                    const rawXStart = getX(startIdx);
-                    const rawXEnd = getX(endIdx);
-                    const xStart = Math.max(padding.left, Math.min(endX - 72, Math.min(rawXStart, rawXEnd)));
-                    const xEnd = Math.max(xStart + 72, Math.min(endX, Math.max(rawXStart, rawXEnd)));
-                    const bandW = Math.max(72, xEnd - xStart);
-
+                  renderedPrzBoxes.map(box => {
+                    const { prz, yTop, yBot, bandH, xStart, xEnd, bandW, anchorVertX, anchorVertY } = box;
                     const isBullZone = prz.direction === 'BULLISH';
+                    const isHovered = hoveredZoneId === prz.id;
                     const strokeCol = prz.isPrimary ? (isBullZone ? '#f59e0b' : '#fb923c') : '#d97706';
-                    const fillCol = isBullZone ? '#f59e0b' : '#fb923c';
-                    const dirTag = isBullZone ? '↑ حمایت' : '↓ مقاومت';
-                    const labelText = `${prz.labelFa} · ${dirTag} · ${prz.confidence}%`;
-                    const badgeW = Math.min(
-                      Math.max(140, bandW - 14),
-                      Math.max(175, labelText.length * 5.4 + 24)
-                    );
-                    const badgeX = Math.max(padding.left + 6, Math.min(xStart + 8, xEnd - badgeW - 6));
-                    const preferredLabelY = bandH >= 28 ? yTop + 5 : yTop - 21 >= plotTop ? yTop - 21 : yBot + 3;
-                    const labelY = resolveTagY(preferredLabelY, badgeX, badgeW, 18);
-                    const axisY = prz.isPrimary ? resolveAxisY(yTop + bandH / 2, 20) : null;
-                    const cornerSize = Math.min(8, bandH * 0.32, bandW * 0.12);
+                    const fillUrl = isBullZone ? 'url(#przBullGrad)' : 'url(#przBearGrad)';
+                    const midY = yTop + bandH / 2;
+                    const dirTag = isBullZone ? '↑ حمایت بازگشتی' : '↓ مقاومت بازگشتی';
+                    const labelText = `PRZ · ${prz.labelFa.replace(/^PRZ\s*/i, '')} · ${prz.confidence}%`;
+                    const badgeW = Math.min(Math.max(150, bandW - 14), Math.max(185, labelText.length * 5.2 + 28));
+                    const badgeX = Math.max(padding.left + 8, Math.min(xStart + 10, xEnd - badgeW - 8));
+                    const preferredLabelY = bandH >= 32 ? yTop + 6 : yTop - 22 >= plotTop ? yTop - 22 : yBot + 4;
+                    const labelY = resolveTagY(preferredLabelY, badgeX, badgeW, 19);
+                    const axisY = prz.isPrimary ? resolveAxisY(midY, 20) : null;
+                    const cornerSize = Math.min(10, bandH * 0.34, bandW * 0.12);
+                    const distPct = lastPrice > 0 ? (((prz.midPrice - lastPrice) / lastPrice) * 100).toFixed(1) : '0.0';
+                    const signedDist = Number(distPct) > 0 ? `+${distPct}%` : `${distPct}%`;
 
                     return (
-                      <g key={prz.id} pointerEvents="none" opacity={prz.isPrimary ? 1 : 0.65}>
-                        {/* Low-Opacity Horizontal Bounding Box Fill */}
+                      <g
+                        key={prz.id}
+                        onMouseEnter={() => setHoveredZoneId(prz.id)}
+                        onMouseLeave={() => setHoveredZoneId(prev => (prev === prz.id ? null : prev))}
+                        className="cursor-pointer"
+                        opacity={hoveredZoneId && !isHovered ? 0.55 : prz.isPrimary ? 1 : 0.72}
+                        style={{ transition: 'opacity 150ms ease' }}
+                      >
+                        {/* Semi-Transparent Horizontal Glass Zone Fill */}
                         <rect
                           x={xStart}
                           y={yTop}
                           width={bandW}
                           height={bandH}
-                          rx="2"
-                          fill={fillCol}
-                          fillOpacity={prz.isPrimary ? 0.12 : 0.07}
+                          rx="3"
+                          fill={fillUrl}
+                          fillOpacity={isHovered ? 1 : prz.isPrimary ? 0.82 : 0.55}
                           stroke={strokeCol}
-                          strokeWidth={prz.isPrimary ? '1.15' : '0.85'}
-                          strokeDasharray={prz.isPrimary ? '5 3' : '3 4'}
-                          strokeOpacity={prz.isPrimary ? '0.82' : '0.52'}
+                          strokeWidth={isHovered ? '1.6' : prz.isPrimary ? '1.1' : '0.85'}
+                          strokeDasharray={isHovered ? undefined : '5 3'}
+                          strokeOpacity={isHovered ? '0.95' : prz.isPrimary ? '0.78' : '0.45'}
+                          filter={isHovered ? 'url(#zone-hover-glow)' : undefined}
                         />
 
-                        {/* 4 Crisp Corner Brackets reinforcing Bounding Box geometry */}
+                        {/* Explicit Horizontal High, Mid & Low Boundary Rails */}
+                        <line x1={xStart} y1={yTop} x2={xEnd} y2={yTop} stroke={strokeCol} strokeWidth={isHovered ? '1.6' : '1.15'} strokeOpacity="0.88" />
+                        <line x1={xStart} y1={yBot} x2={xEnd} y2={yBot} stroke={strokeCol} strokeWidth={isHovered ? '1.6' : '1.15'} strokeOpacity="0.88" />
+                        {bandH >= 20 && (
+                          <line
+                            x1={xStart + 6}
+                            y1={midY}
+                            x2={xEnd - 6}
+                            y2={midY}
+                            stroke={strokeCol}
+                            strokeWidth="0.9"
+                            strokeDasharray="2 4"
+                            strokeOpacity={isHovered ? '0.78' : '0.42'}
+                          />
+                        )}
+
+                        {/* 4 Crisp L-Corner Brackets */}
                         <path
                           d={`M ${xStart} ${yTop + cornerSize} L ${xStart} ${yTop} L ${xStart + cornerSize} ${yTop}
                               M ${xEnd - cornerSize} ${yTop} L ${xEnd} ${yTop} L ${xEnd} ${yTop + cornerSize}
@@ -1766,54 +2155,122 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                               M ${xEnd - cornerSize} ${yBot} L ${xEnd} ${yBot} L ${xEnd} ${yBot - cornerSize}`}
                           fill="none"
                           stroke={strokeCol}
-                          strokeWidth="1.8"
-                          strokeOpacity="0.95"
+                          strokeWidth={isHovered ? '2.2' : '1.8'}
+                          strokeOpacity="0.98"
                         />
 
-                        {/* Anchor Vertex Marker on Left Edge of Last Wave */}
+                        {/* Last-Wave Vertex Anchor Connector */}
+                        {prz.isPrimary && (
+                          <line
+                            x1={anchorVertX}
+                            y1={anchorVertY}
+                            x2={anchorVertX}
+                            y2={midY}
+                            stroke={strokeCol}
+                            strokeWidth="1"
+                            strokeDasharray="2 2"
+                            strokeOpacity="0.65"
+                            pointerEvents="none"
+                          />
+                        )}
                         <circle
                           cx={xStart}
-                          cy={yTop + bandH / 2}
-                          r={prz.isPrimary ? 3.2 : 2.3}
+                          cy={midY}
+                          r={isHovered ? 4 : prz.isPrimary ? 3.2 : 2.3}
                           fill={strokeCol}
                           stroke="#020617"
-                          strokeWidth="1"
+                          strokeWidth="1.2"
+                          pointerEvents="none"
                         />
 
-                        {/* Compact PRZ Label Badge */}
-                        <rect
-                          x={badgeX}
-                          y={labelY}
-                          width={badgeW}
-                          height="18"
-                          rx="4"
-                          fill="#020617"
-                          fillOpacity="0.9"
-                          stroke={strokeCol}
-                          strokeOpacity="0.72"
-                          strokeWidth="0.8"
-                        />
-                        <text
-                          x={badgeX + 7}
-                          y={labelY + 12}
-                          fill={isBullZone ? '#fde68a' : '#fed7aa'}
-                          fontSize="9"
-                          fontWeight="700"
-                        >
-                          {labelText}
-                        </text>
+                        {/* Sleek Horizontal PRZ Pill Tag */}
+                        <g pointerEvents="none">
+                          <rect
+                            x={badgeX}
+                            y={labelY}
+                            width={badgeW}
+                            height="19"
+                            rx="5"
+                            fill="#020617"
+                            fillOpacity={isHovered ? '0.96' : '0.88'}
+                            stroke={strokeCol}
+                            strokeOpacity={isHovered ? '0.95' : '0.7'}
+                            strokeWidth={isHovered ? '1.1' : '0.8'}
+                          />
+                          <circle cx={badgeX + 9} cy={labelY + 9.5} r="2.6" fill={strokeCol} />
+                          <text
+                            x={badgeX + 16}
+                            y={labelY + 12.5}
+                            fill={isBullZone ? '#fde68a' : '#fed7aa'}
+                            fontSize="9"
+                            fontWeight="700"
+                          >
+                            {labelText}
+                          </text>
+                        </g>
+
+                        {/* Hover Inspector Card for PRZ Horizontal Zone */}
+                        {isHovered && (
+                          <g pointerEvents="none">
+                            {(() => {
+                              const cardW = 246;
+                              const cardH = 44;
+                              const cardX = Math.max(padding.left + 8, Math.min(xEnd - cardW - 10, xStart + 14));
+                              const cardY = yTop - cardH - 8 >= plotTop ? yTop - cardH - 8 : Math.min(plotBottom - cardH - 6, yBot + 8);
+                              return (
+                                <>
+                                  <rect
+                                    x={cardX}
+                                    y={cardY}
+                                    width={cardW}
+                                    height={cardH}
+                                    rx="7"
+                                    fill="#090f1e"
+                                    fillOpacity="0.96"
+                                    stroke={strokeCol}
+                                    strokeWidth="1.1"
+                                  />
+                                  <text x={cardX + cardW - 10} y={cardY + 16} textAnchor="end" fill="#fde68a" fontSize="9.5" fontWeight="700">
+                                    {dirTag} · {signedDist}
+                                  </text>
+                                  <text
+                                    x={cardX + 10}
+                                    y={cardY + 16}
+                                    fill="#cbd5e1"
+                                    fontSize="9"
+                                    fontFamily="JetBrains Mono, monospace"
+                                  >
+                                    Mid {prz.midPrice.toLocaleString()}
+                                  </text>
+                                  <text
+                                    x={cardX + 10}
+                                    y={cardY + 33}
+                                    fill="#94a3b8"
+                                    fontSize="8.8"
+                                    fontFamily="JetBrains Mono, monospace"
+                                  >
+                                    {prz.lowPrice.toLocaleString()} – {prz.highPrice.toLocaleString()}
+                                  </text>
+                                  <text x={cardX + cardW - 10} y={cardY + 33} textAnchor="end" fill="#fbbf24" fontSize="8.5">
+                                    {prz.contributingRatios.slice(0, 2).join(' · ')}
+                                  </text>
+                                </>
+                              );
+                            })()}
+                          </g>
+                        )}
 
                         {/* Right-Axis PRZ Mid-Price Pill */}
                         {axisY !== null && (
-                          <>
+                          <g pointerEvents="none">
                             <line
                               x1={endX - 1}
                               y1={yTop}
                               x2={endX - 1}
                               y2={yBot}
                               stroke={strokeCol}
-                              strokeWidth="2.2"
-                              strokeOpacity="0.88"
+                              strokeWidth="2.4"
+                              strokeOpacity="0.9"
                             />
                             <rect
                               x={endX + 2}
@@ -1835,47 +2292,22 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                             >
                               PRZ {prz.midPrice.toLocaleString()}
                             </text>
-                          </>
+                          </g>
                         )}
                       </g>
                     );
                   })}
 
-                {/* 2. Horizontal Width-Adjustable TMV Target Ribbons (Strictly Synced to Rule-Engine Targets) */}
+                {/* 2. Luminous Horizontal Width-Adjustable TMV Target Zone (Mirrors PRZ Horizontal Bounding Box UI/UX) */}
                 {effectiveShowTMV &&
-                  projectionReport &&
-                  projectionReport.tmvZones.map(tmv => {
-                    const rawYTop = getY(tmv.highPrice);
-                    const rawYBot = getY(tmv.lowPrice);
-                    const showBand = !(rawYBot < plotTop || rawYTop > plotBottom);
-
-                    const yTop = Math.max(plotTop, Math.min(plotBottom - 12, rawYTop));
-                    const yBot = Math.min(plotBottom, Math.max(yTop + 12, rawYBot));
-                    const bandH = Math.max(12, yBot - yTop);
-
+                  renderedTmvBoxes.map(box => {
+                    const { tmv, showBand, yTop, yBot, bandH, idealY, xStart, xEnd, bandW } = box;
                     const isBullZone = tmv.direction === 'BULLISH';
-                    const strokeCol = isBullZone ? '#38bdf8' : '#a855f7';
+                    const isHovered = hoveredZoneId === tmv.id || draggingTmvEdge;
+                    const strokeCol = isBullZone ? '#38bdf8' : '#c084fc';
+                    const accentCol = isBullZone ? '#22d3ee' : '#e879f9';
                     const fillUrl = isBullZone ? 'url(#tmvBullZoneGrad)' : 'url(#tmvBearZoneGrad)';
-
-                    // Compute responsive horizontal span from Analysis Window / Span Mode / Custom Drag
-                    const tmvX2 = endX;
-                    let tmvX1 = padding.left;
-                    if (tmvCustomRatio !== null) {
-                      const customW = Math.max(72, Math.min(plotW, plotW * tmvCustomRatio));
-                      tmvX1 = Math.max(padding.left, tmvX2 - customW);
-                    } else if (tmvSpanMode === 'FULL') {
-                      tmvX1 = padding.left;
-                    } else if (tmvSpanMode === 'COMPACT') {
-                      const compactW = Math.max(96, Math.min(plotW * 0.3, Math.max(96, tmvX2 - getX(tmv.anchorCandleIndex ?? tmv.startCandleIndex))));
-                      tmvX1 = Math.max(padding.left, tmvX2 - compactW);
-                    } else {
-                      const analysisRawX1 = getX(tmv.startCandleIndex);
-                      const minAnalysisW = Math.max(120, plotW * 0.24);
-                      const maxAnalysisW = plotW * 0.72;
-                      const desiredW = Math.max(minAnalysisW, Math.min(maxAnalysisW, tmvX2 - analysisRawX1));
-                      tmvX1 = Math.max(padding.left, tmvX2 - desiredW);
-                    }
-                    const tmvBandW = Math.max(72, tmvX2 - tmvX1);
+                    const cornerSize = Math.min(10, bandH * 0.34, bandW * 0.12);
 
                     const tmvLevels =
                       tmv.targetPrices && tmv.targetPrices.length > 0
@@ -1890,111 +2322,194 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                           ];
                     tmvLevels.forEach(lvl => tmvTargetPricesForDedup.push(lvl.price));
 
-                    const tmvText = `${tmv.labelFa} · ${tmv.ideal100Price.toLocaleString()}`;
-                    const tmvBadgeW = Math.min(
-                      Math.max(150, tmvBandW - 18),
-                      Math.max(180, tmvText.length * 5.2 + 24)
-                    );
-                    const tmvBadgeX = Math.max(padding.left + 8, Math.min(tmvX1 + 10, tmvX2 - tmvBadgeW - 6));
-                    const tmvTagY = showBand ? resolveTagY(yTop + 4, tmvBadgeX, tmvBadgeW, 18) : 0;
+                    const tmvText = `TMV افقی (${tmv.basisPairLabel}) · هدف ${tmv.ideal100Price.toLocaleString()}`;
+                    const tmvBadgeW = Math.min(Math.max(165, bandW - 20), Math.max(195, tmvText.length * 5.0 + 28));
+                    const tmvBadgeX = Math.max(padding.left + 8, Math.min(xStart + 14, xEnd - tmvBadgeW - 8));
+                    const preferredTmvY = bandH >= 32 ? yTop + 6 : yTop - 22 >= plotTop ? yTop - 22 : yBot + 4;
+                    const tmvTagY = showBand ? resolveTagY(preferredTmvY, tmvBadgeX, tmvBadgeW, 19) : 0;
+                    const distPct = lastPrice > 0 ? (((tmv.ideal100Price - lastPrice) / lastPrice) * 100).toFixed(1) : '0.0';
+                    const signedDist = Number(distPct) > 0 ? `+${distPct}%` : `${distPct}%`;
 
                     return (
-                      <g key={tmv.id}>
+                      <g
+                        key={tmv.id}
+                        onMouseEnter={() => setHoveredZoneId(tmv.id)}
+                        onMouseLeave={() => setHoveredZoneId(prev => (prev === tmv.id ? null : prev))}
+                        opacity={hoveredZoneId && !isHovered ? 0.58 : 1}
+                        style={{ transition: 'opacity 150ms ease' }}
+                      >
                         {showBand && (
-                          <g pointerEvents="none">
+                          <g>
+                            {/* Luminous Horizontal TMV Corridor Bounding Box */}
                             <rect
-                              x={tmvX1}
+                              x={xStart}
                               y={yTop}
-                              width={tmvBandW}
+                              width={bandW}
                               height={bandH}
-                              rx="2"
+                              rx="3"
                               fill={fillUrl}
-                            />
-                            <line
-                              x1={tmvX1}
-                              y1={yTop}
-                              x2={tmvX2}
-                              y2={yTop}
+                              fillOpacity={isHovered ? 1 : 0.85}
                               stroke={strokeCol}
-                              strokeWidth="1.15"
-                              strokeDasharray="6 3"
-                              strokeOpacity="0.82"
+                              strokeWidth={isHovered ? '1.55' : '1.05'}
+                              strokeDasharray={isHovered ? undefined : '6 3'}
+                              strokeOpacity={isHovered ? '0.95' : '0.68'}
+                              filter={isHovered ? 'url(#zone-hover-glow)' : undefined}
                             />
+
+                            {/* Crisp Horizontal Top & Bottom Corridor Rails */}
+                            <line x1={xStart} y1={yTop} x2={xEnd} y2={yTop} stroke={strokeCol} strokeWidth={isHovered ? '1.6' : '1.2'} strokeOpacity="0.9" pointerEvents="none" />
+                            <line x1={xStart} y1={yBot} x2={xEnd} y2={yBot} stroke={strokeCol} strokeWidth={isHovered ? '1.6' : '1.2'} strokeOpacity="0.9" pointerEvents="none" />
+
+                            {/* 4 Sharp L-Corner Brackets Matching PRZ */}
+                            <path
+                              d={`M ${xStart} ${yTop + cornerSize} L ${xStart} ${yTop} L ${xStart + cornerSize} ${yTop}
+                                  M ${xEnd - cornerSize} ${yTop} L ${xEnd} ${yTop} L ${xEnd} ${yTop + cornerSize}
+                                  M ${xStart} ${yBot - cornerSize} L ${xStart} ${yBot} L ${xStart + cornerSize} ${yBot}
+                                  M ${xEnd - cornerSize} ${yBot} L ${xEnd} ${yBot} L ${xEnd} ${yBot - cornerSize}`}
+                              fill="none"
+                              stroke={accentCol}
+                              strokeWidth={isHovered ? '2.2' : '1.8'}
+                              strokeOpacity="0.98"
+                              pointerEvents="none"
+                            />
+
+                            {/* Right-Axis Span Bracket */}
                             <line
-                              x1={tmvX1}
-                              y1={yBot}
-                              x2={tmvX2}
+                              x1={endX - 1}
+                              y1={yTop}
+                              x2={endX - 1}
                               y2={yBot}
                               stroke={strokeCol}
-                              strokeWidth="1.15"
-                              strokeDasharray="6 3"
-                              strokeOpacity="0.82"
+                              strokeWidth="2.4"
+                              strokeOpacity="0.88"
+                              pointerEvents="none"
                             />
 
-                            {/* TMV Label Pill */}
-                            <rect
-                              x={tmvBadgeX}
-                              y={tmvTagY}
-                              width={tmvBadgeW}
-                              height="18"
-                              rx="4"
-                              fill="#020617"
-                              fillOpacity="0.9"
-                              stroke={strokeCol}
-                              strokeOpacity="0.62"
-                              strokeWidth="0.8"
-                            />
-                            <text
-                              x={tmvBadgeX + 7}
-                              y={tmvTagY + 12}
-                              fill={isBullZone ? '#bae6fd' : '#e9d5ff'}
-                              fontSize="9"
-                              fontWeight="700"
+                            {/* Sleek Horizontal TMV Header Pill */}
+                            <g pointerEvents="none">
+                              <rect
+                                x={tmvBadgeX}
+                                y={tmvTagY}
+                                width={tmvBadgeW}
+                                height="19"
+                                rx="5"
+                                fill="#020617"
+                                fillOpacity={isHovered ? '0.96' : '0.88'}
+                                stroke={strokeCol}
+                                strokeOpacity={isHovered ? '0.95' : '0.68'}
+                                strokeWidth={isHovered ? '1.1' : '0.8'}
+                              />
+                              <rect x={tmvBadgeX + 6.5} y={tmvTagY + 6.5} width="6" height="6" rx="1.5" fill={accentCol} />
+                              <text
+                                x={tmvBadgeX + 16}
+                                y={tmvTagY + 12.5}
+                                fill={isBullZone ? '#bae6fd' : '#f3e8ff'}
+                                fontSize="9"
+                                fontWeight="700"
+                              >
+                                {tmvText}
+                              </text>
+                            </g>
+
+                            {/* Compact Centered Left-Border Pill Grip for Horizontal Width Adjustment (↔) */}
+                            <g
+                              className="cursor-ew-resize"
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setDraggingTmvEdge(true);
+                              }}
                             >
-                              {tmvText}
-                            </text>
+                              <title>برای تغییر عرض افقی ناحیه TMV به چپ یا راست بکشید</title>
+                              <rect x={xStart - 8} y={yTop} width={16} height={bandH} fill="transparent" />
+                              <rect
+                                x={xStart - 7}
+                                y={idealY - 11}
+                                width="14"
+                                height="22"
+                                rx="4"
+                                fill="#090f1e"
+                                stroke={accentCol}
+                                strokeWidth={draggingTmvEdge ? '1.6' : '1.1'}
+                              />
+                              <path
+                                d={`M ${xStart - 4} ${idealY} L ${xStart - 1.5} ${idealY - 2.5} M ${xStart - 4} ${idealY} L ${xStart - 1.5} ${idealY + 2.5}
+                                    M ${xStart + 4} ${idealY} L ${xStart + 1.5} ${idealY - 2.5} M ${xStart + 4} ${idealY} L ${xStart + 1.5} ${idealY + 2.5}
+                                    M ${xStart - 3.5} ${idealY} L ${xStart + 3.5} ${idealY}`}
+                                fill="none"
+                                stroke={accentCol}
+                                strokeWidth="1.2"
+                                strokeLinecap="round"
+                              />
+                            </g>
+
+                            {/* Hover Inspector Card for TMV Horizontal Zone */}
+                            {isHovered && !draggingTmvEdge && (
+                              <g pointerEvents="none">
+                                {(() => {
+                                  const topRungs = tmvLevels.slice(0, 3);
+                                  const cardW = 264;
+                                  const cardH = 38 + topRungs.length * 14;
+                                  const cardX = Math.max(padding.left + 8, Math.min(xEnd - cardW - 10, xStart + 16));
+                                  const cardY =
+                                    yTop - cardH - 8 >= plotTop ? yTop - cardH - 8 : Math.min(plotBottom - cardH - 6, yBot + 8);
+                                  return (
+                                    <>
+                                      <rect
+                                        x={cardX}
+                                        y={cardY}
+                                        width={cardW}
+                                        height={cardH}
+                                        rx="7"
+                                        fill="#090f1e"
+                                        fillOpacity="0.96"
+                                        stroke={accentCol}
+                                        strokeWidth="1.1"
+                                      />
+                                      <text x={cardX + cardW - 10} y={cardY + 15} textAnchor="end" fill={accentCol} fontSize="9.5" fontWeight="700">
+                                        {isBullZone ? '↑ ناحیه افقی اهداف TMV' : '↓ ناحیه افقی اهداف TMV'} · {signedDist}
+                                      </text>
+                                      <text
+                                        x={cardX + 10}
+                                        y={cardY + 15}
+                                        fill="#cbd5e1"
+                                        fontSize="8.8"
+                                        fontFamily="JetBrains Mono, monospace"
+                                      >
+                                        {tmv.lowPrice.toLocaleString()}–{tmv.highPrice.toLocaleString()}
+                                      </text>
+                                      {topRungs.map((r, rIdx) => (
+                                        <g key={`${tmv.id}-tip-${r.id}-${rIdx}`}>
+                                          <text
+                                            x={cardX + 10}
+                                            y={cardY + 32 + rIdx * 14}
+                                            fill="#e2e8f0"
+                                            fontSize="8.8"
+                                            fontWeight="bold"
+                                            fontFamily="JetBrains Mono, monospace"
+                                          >
+                                            {r.price.toLocaleString()}
+                                          </text>
+                                          <text
+                                            x={cardX + cardW - 10}
+                                            y={cardY + 32 + rIdx * 14}
+                                            textAnchor="end"
+                                            fill="#94a3b8"
+                                            fontSize="8.5"
+                                          >
+                                            {r.ratioLabel}
+                                          </text>
+                                        </g>
+                                      ))}
+                                    </>
+                                  );
+                                })()}
+                              </g>
+                            )}
                           </g>
                         )}
 
-                        {/* Interactive Left-Edge Width Resize Handle for Horizontal TMV Ribbon */}
-                        {showBand && (
-                          <g
-                            className="cursor-ew-resize"
-                            onMouseDown={e => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setDraggingTmvEdge(true);
-                            }}
-                          >
-                            <title>برای تغییر عرض افقی نوار TMV به چپ یا راست بکشید</title>
-                            <rect
-                              x={tmvX1 - 6}
-                              y={yTop}
-                              width={12}
-                              height={bandH}
-                              fill="transparent"
-                            />
-                            <line
-                              x1={tmvX1}
-                              y1={yTop + 2}
-                              x2={tmvX1}
-                              y2={yBot - 2}
-                              stroke={strokeCol}
-                              strokeWidth={draggingTmvEdge ? '2.6' : '2'}
-                              strokeOpacity="0.92"
-                            />
-                            <circle
-                              cx={tmvX1}
-                              cy={yTop + bandH / 2}
-                              r={draggingTmvEdge ? 4 : 3}
-                              fill="#020617"
-                              stroke={strokeCol}
-                              strokeWidth="1.5"
-                            />
-                          </g>
-                        )}
-
-                        {/* Horizontal Target Price Levels Rendered Strictly from Computed Targets Inside [tmvX1, tmvX2] */}
+                        {/* Horizontal Target Price Rungs Rendered Strictly Inside/Across [xStart, xEnd] */}
                         {tmvLevels.map((lvl, lvlIdx) => {
                           const lvlY = getY(lvl.price);
                           if (lvlY < plotTop + 4 || lvlY > plotBottom - 4) return null;
@@ -2004,15 +2519,23 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                           return (
                             <g key={`${tmv.id}-${lvl.id}-${lvlIdx}`} pointerEvents="none">
                               <line
-                                x1={tmvX1}
+                                x1={xStart}
                                 y1={lvlY}
-                                x2={tmvX2}
+                                x2={xEnd}
                                 y2={lvlY}
-                                stroke={isIdeal ? strokeCol : '#818cf8'}
-                                strokeWidth={isIdeal ? '1.5' : '1.05'}
-                                strokeDasharray={isIdeal ? '7 3' : '3 3'}
-                                strokeOpacity={isIdeal ? '0.94' : '0.78'}
+                                stroke={isIdeal ? accentCol : '#818cf8'}
+                                strokeWidth={isIdeal ? (isHovered ? '2' : '1.55') : '1.05'}
+                                strokeDasharray={isIdeal ? '8 3' : '3 3'}
+                                strokeOpacity={isIdeal ? '0.96' : '0.78'}
                               />
+                              {isIdeal && (
+                                <polygon
+                                  points={`${xStart + 10},${lvlY} ${xStart + 14},${lvlY - 3.5} ${xStart + 18},${lvlY} ${xStart + 14},${lvlY + 3.5}`}
+                                  fill={accentCol}
+                                  stroke="#020617"
+                                  strokeWidth="0.9"
+                                />
+                              )}
                               {lvlAxisY !== null && (
                                 <g>
                                   <rect
@@ -2022,13 +2545,13 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                                     height="19"
                                     rx="4"
                                     fill={isIdeal ? (isBullZone ? '#0c4a6e' : '#3b0764') : '#1e1b4b'}
-                                    stroke={isIdeal ? strokeCol : '#818cf8'}
-                                    strokeWidth={isIdeal ? '0.95' : '0.8'}
+                                    stroke={isIdeal ? accentCol : '#818cf8'}
+                                    strokeWidth={isIdeal ? '1' : '0.8'}
                                   />
                                   <text
                                     x={endX + 6}
                                     y={lvlAxisY + 3.5}
-                                    fill={isIdeal ? (isBullZone ? '#7dd3fc' : '#e9d5ff') : '#c7d2fe'}
+                                    fill={isIdeal ? (isBullZone ? '#7dd3fc' : '#f3e8ff') : '#c7d2fe'}
                                     fontSize="8.8"
                                     fontWeight="bold"
                                     fontFamily="JetBrains Mono, monospace"
@@ -2468,6 +2991,103 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 </g>
               );
             })}
+
+          {/* Curved Fractal Expected Path (Flow-Path Animation + Confidence-Proportional Opacity) */}
+          {expectedPathData && (
+            <g pointerEvents="none">
+              {/* Soft Confidence-Scaled Outer Glow */}
+              <path
+                d={expectedPathData.pathD}
+                fill="none"
+                stroke={expectedPathData.strokeColor}
+                strokeWidth="7.5"
+                strokeOpacity={expectedPathData.haloOpacity}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                filter="url(#elliott-wave-glow)"
+              />
+              {/* Smooth Bezier Base Guide */}
+              <path
+                d={expectedPathData.pathD}
+                fill="none"
+                stroke={expectedPathData.strokeColor}
+                strokeWidth="2.4"
+                strokeOpacity={expectedPathData.coreOpacity}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              {/* Animated Flow-Path Stream */}
+              <path
+                d={expectedPathData.pathD}
+                fill="none"
+                stroke="#ffffff"
+                strokeWidth="2"
+                strokeOpacity={Math.min(0.95, expectedPathData.coreOpacity + 0.14)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="fei-expected-flow"
+              />
+              {/* Directional Arrowhead at Projected Terminal */}
+              <path
+                d={expectedPathData.arrowPath}
+                fill="none"
+                stroke={expectedPathData.strokeColor}
+                strokeWidth="2.4"
+                strokeOpacity={Math.min(1, expectedPathData.coreOpacity + 0.1)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              {/* Terminal Target Beacon */}
+              <circle
+                cx={expectedPathData.tip.x}
+                cy={expectedPathData.tip.y}
+                r="7.5"
+                fill={expectedPathData.strokeColor}
+                fillOpacity={expectedPathData.haloOpacity}
+                className="fei-expected-pulse"
+              />
+              <circle
+                cx={expectedPathData.tip.x}
+                cy={expectedPathData.tip.y}
+                r="3.5"
+                fill="#ffffff"
+                fillOpacity={expectedPathData.coreOpacity}
+                stroke={expectedPathData.strokeColor}
+                strokeWidth="1.6"
+              />
+              {/* Compact Confidence & Path Badge */}
+              {(() => {
+                const bx = Math.max(padding.left + 8, Math.min(width - padding.right - 156, expectedPathData.tip.x - 144));
+                const by = expectedPathData.tip.y - 26 >= padding.top + 4 ? expectedPathData.tip.y - 24 : expectedPathData.tip.y + 10;
+                return (
+                  <g opacity={Math.max(0.7, expectedPathData.coreOpacity)}>
+                    <rect
+                      x={bx}
+                      y={by}
+                      width="148"
+                      height="19"
+                      rx="5"
+                      fill="#020617"
+                      fillOpacity="0.92"
+                      stroke={expectedPathData.strokeColor}
+                      strokeOpacity="0.68"
+                      strokeWidth="0.9"
+                    />
+                    <text
+                      x={bx + 74}
+                      y={by + 12.5}
+                      textAnchor="middle"
+                      fill="#e0f2fe"
+                      fontSize="9"
+                      fontWeight="700"
+                    >
+                      مسیر پیش‌بینی · {expectedPathData.confidencePct}%
+                    </text>
+                  </g>
+                );
+              })()}
+            </g>
+          )}
 
           {/* Active Scenario Vertices + TrendStrengthIndicator Color-Coded Signal Icons */}
           {activeScenario.vertices.map((vertex, idx) => {
@@ -3170,18 +3790,57 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           )}
         </div>
 
-        {/* Completed Structure Fibonacci Basis Chip */}
-        {effectiveShowFibLayers && projectionReport?.completedStructure && (
-          <div className="hidden lg:flex absolute bottom-3 left-3 items-center gap-2 bg-slate-950/90 border border-emerald-500/35 px-2.5 py-1.5 rounded-lg text-[10.5px] text-slate-200 shadow-lg pointer-events-none">
-            <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="text-slate-400">مبنای اکستنشن:</span>
-            <strong className="text-emerald-300 font-semibold">
-              {projectionReport.completedStructure.structureLabelFa}
-            </strong>
-            <span className="text-slate-600">·</span>
-            <span className="font-mono tabular-nums text-cyan-300">
-              {projectionReport.extensionLayers?.length || 0} لایه
-            </span>
+        {/* Bottom-Left Horizontal Zones & Fibonacci Basis Strip */}
+        {!hideZoneControls && (
+          <div className="hidden lg:flex flex-col items-start gap-1.5 absolute bottom-3 left-3 z-10 pointer-events-auto">
+            {(renderedPrzBoxes.length > 0 || renderedTmvBoxes.length > 0) && (
+              <div className="flex items-center gap-1.5 bg-slate-950/90 border border-slate-800 px-2 py-1 rounded-lg text-[10px] shadow-lg">
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    togglePRZ();
+                  }}
+                  className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded whitespace-nowrap transition-colors ${
+                    effectiveShowPRZ
+                      ? 'bg-amber-500/15 text-amber-200 border border-amber-500/35'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                  title="نمایش / مخفی‌سازی مستطیل افقی بازگشت PRZ"
+                >
+                  <span className="w-2.5 h-1.5 rounded-[2px] bg-amber-400 inline-block" />
+                  <span>PRZ افقی</span>
+                </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleTMV();
+                  }}
+                  className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded whitespace-nowrap transition-colors ${
+                    effectiveShowTMV
+                      ? 'bg-sky-500/15 text-sky-200 border border-sky-500/35'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                  title="نمایش / مخفی‌سازی مستطیل افقی اهداف TMV"
+                >
+                  <span className="w-2.5 h-1.5 rounded-[2px] bg-sky-400 inline-block" />
+                  <span>TMV افقی</span>
+                </button>
+              </div>
+            )}
+
+            {effectiveShowFibLayers && projectionReport?.completedStructure && (
+              <div className="flex items-center gap-2 bg-slate-950/90 border border-emerald-500/35 px-2.5 py-1.5 rounded-lg text-[10.5px] text-slate-200 shadow-lg pointer-events-none">
+                <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="text-slate-400">مبنای اکستنشن:</span>
+                <strong className="text-emerald-300 font-semibold">
+                  {projectionReport.completedStructure.structureLabelFa}
+                </strong>
+                <span className="text-slate-600">·</span>
+                <span className="font-mono tabular-nums text-cyan-300">
+                  {projectionReport.extensionLayers?.length || 0} لایه
+                </span>
+              </div>
+            )}
           </div>
         )}
 
