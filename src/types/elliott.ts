@@ -637,3 +637,32 @@ export interface DrillDownContext {
   degree: WaveDegree;
   legIndex?: number;
 }
+
+export type PatternMatrixCategory =
+  | 'IMPULSE_TERMINAL'
+  | 'DIAGONAL_ANTI'
+  | 'CORRECTIVE_FLAT'
+  | 'TRIANGLE_COMPLEX';
+
+export interface PatternHypothesisEvaluation {
+  patternType: PatternFamily;
+  category: PatternMatrixCategory;
+  categoryLabelFa: string;
+  labelFa: string;
+  shortLabelFa: string;
+  status: 'VALID' | 'WARNING' | 'INVALID';
+  statusLabelFa: string;
+  validityScore: number;
+  idealnessScore: number;
+  confidenceScore: number;
+  hardPassCount: number;
+  hardTotalCount: number;
+  passedRuleCount: number;
+  totalRuleCount: number;
+  keyFeatureFa: string;
+  primaryReasonFa: string;
+  rules: RuleValidationItem[];
+  isCurrent: boolean;
+  isBestFit: boolean;
+}
+

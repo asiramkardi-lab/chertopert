@@ -693,7 +693,62 @@ describe('Category 3 Cardinal Rules & 0.1% Tolerance Layer (RulesEngine)', () =>
       expect(w5Item?.valid).toBe(false);
       expect(wCItem?.valid).toBe(false);
     });
+
+    it('All-Pattern Evaluator: evaluates all 15 PatternFamily states simultaneously (Ideal, Terminal, Anti-Terminal, Diagonals, Anti-Diagonal, Anti-Cycle, Zigzag, Flats, Triangles, Complex)', () => {
+      // 1) Clean Ideal Cycle ranks IDEAL_CYCLE as best fit
+      const idealEval = RulesEngine.evaluateAllPatterns(
+        buildVertices([100, 160, 130, 250, 205, 290]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles,
+        'IDEAL_CYCLE'
+      );
+      expect(idealEval.length).toBe(15);
+      expect(idealEval.find(e => e.isBestFit)?.patternType).toBe('IDEAL_CYCLE');
+      expect(idealEval.find(e => e.patternType === 'IDEAL_CYCLE')?.status).toBe('VALID');
+
+      // 2) Overlapping short-W5 wedge fails IDEAL_CYCLE while passing TERMINAL and ENDING_DIAGONAL
+      const termEval = RulesEngine.evaluateAllPatterns(
+        buildVertices([100, 220, 150, 255, 195, 270]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles,
+        'IDEAL_CYCLE'
+      );
+      expect(termEval.find(e => e.patternType === 'IDEAL_CYCLE')?.status).toBe('INVALID');
+      expect(termEval.find(e => e.patternType === 'TERMINAL')?.status).not.toBe('INVALID');
+      expect(
+        termEval
+          .find(e => e.patternType === 'ENDING_DIAGONAL')
+          ?.rules.find(r => r.ruleId === 'DIAGONAL_VARIANT_PROFILE')?.passed
+      ).toBe(true);
+
+      // 3) Broadening overlapping funnel passes ANTI_TERMINAL and ANTI_DIAGONAL while failing TERMINAL truncation
+      const antiEval = RulesEngine.evaluateAllPatterns(
+        buildVertices([100, 160, 130, 220, 145, 320]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles,
+        'ANTI_TERMINAL'
+      );
+      expect(
+        antiEval
+          .find(e => e.patternType === 'ANTI_TERMINAL')
+          ?.rules.find(r => r.ruleId === 'ANTI_TERMINAL_W5_EXT')?.passed
+      ).toBe(true);
+      expect(
+        antiEval
+          .find(e => e.patternType === 'ANTI_DIAGONAL')
+          ?.rules.find(r => r.ruleId === 'DIAGONAL_VARIANT_PROFILE')?.passed
+      ).toBe(true);
+      expect(
+        antiEval
+          .find(e => e.patternType === 'TERMINAL')
+          ?.rules.find(r => r.ruleId === 'TERMINAL_W5_TRUNCATION')?.passed
+      ).toBe(false);
+    });
   });
 });
-
-

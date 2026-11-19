@@ -14,6 +14,7 @@ import {
   ValidationSummary,
   WaveFixSuggestion
 } from '../engine/rulesEngine';
+import { AllPatternsEvaluationMatrix } from './AllPatternsEvaluationMatrix';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -69,6 +70,19 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
     candles,
     parentRole,
     parentWaveLabel
+  );
+
+  const allPatternEvaluations = React.useMemo(
+    () =>
+      RulesEngine.evaluateAllPatterns(
+        scenario.vertices,
+        scenario.direction,
+        parentRole,
+        parentWaveLabel,
+        candles,
+        scenario.patternType
+      ),
+    [scenario.vertices, scenario.direction, scenario.patternType, parentRole, parentWaveLabel, candles]
   );
 
   // Compute wave length comparison & retracements for visual telemetry
@@ -489,6 +503,24 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
             </div>
           </div>
         )}
+
+        {/* Complete 15-Pattern Comparison Matrix (Ideal / Terminal / Anti-Terminal / Diagonals / Anti-Diagonal / Corrective) */}
+        <AllPatternsEvaluationMatrix
+          evaluations={allPatternEvaluations}
+          currentPattern={scenario.patternType}
+          isLocked={scenario.isLocked}
+          onApplyPattern={
+            onApplyPattern
+              ? pattern => {
+                  onApplyPattern(pattern);
+                  if (onRevalidate) {
+                    setTimeout(() => onRevalidate(), 0);
+                  }
+                }
+              : undefined
+          }
+          compact
+        />
       </div>
     </div>
   );

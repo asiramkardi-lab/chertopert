@@ -7,6 +7,8 @@
 
 import {
   PatternFamily,
+  PatternHypothesisEvaluation,
+  PatternMatrixCategory,
   WaveVertex,
   RuleValidationItem,
   WaveDirection,
@@ -364,30 +366,98 @@ export class RulesEngine {
             : `اصلاح موج B برابر ${(bRatio * 100).toFixed(1)}٪ (<۶۱.۸٪) است؛ الگو به زیگزاگ نزدیک‌تر است.`,
           canBeSolvedByAlternate: flatBValid ? undefined : 'ZIGZAG'
         });
+        if (vertices.length >= 4 && retrace2 > 0) {
+          const bPct = bRatio * 100;
+          const lenC = isBull ? p3 - p2 : p2 - p3;
+          const cPctOfB = (Math.max(0, lenC) / retrace2) * 100;
+          const subtypeMatch =
+            pattern === 'FLAT_REGULAR'
+              ? bPct >= 80 && bPct <= 102 && cPctOfB >= 80
+              : pattern === 'FLAT_EXPANDED'
+              ? bPct > 100.1 && cPctOfB >= 61.8
+              : bPct > 100.1 && cPctOfB < 61.8;
+          rules.push({
+            ruleId: 'FLAT_VARIANT_FIT',
+            name: 'Flat Subtype Proportion Fit (Session 13)',
+            nameFa: 'تطبیق زیرنوع فلت (متعارف / گسترش‌یافته / رانینگ)',
+            type: 'STRUCTURE',
+            passed: subtypeMatch,
+            score: subtypeMatch ? 100 : 52,
+            conceptId: 'C23',
+            messageFa:
+              pattern === 'FLAT_RUNNING'
+                ? subtypeMatch
+                  ? `فلت رانینگ (B=${bPct.toFixed(1)}٪ > ۱۰۰٪ و C=${cPctOfB.toFixed(1)}٪ < ۶۱.۸٪)؛ هشدار جلسه ۱۳: این نوع منسوخ و پرریسک است.`
+                  : `نسبت‌های فعلی (B=${bPct.toFixed(1)}٪، C=${cPctOfB.toFixed(1)}٪) با فلت رانینگ مطابقت ندارد.`
+                : subtypeMatch
+                ? `نسبت B=${bPct.toFixed(1)}٪ و C=${cPctOfB.toFixed(1)}٪ با ${
+                    pattern === 'FLAT_EXPANDED' ? 'فلت گسترش‌یافته/نامنظم' : 'فلت متعارف'
+                  } منطبق است.`
+                : `نسبت B=${bPct.toFixed(1)}٪ و C=${cPctOfB.toFixed(1)}٪ با الگوی ${
+                    pattern === 'FLAT_EXPANDED' ? 'فلت گسترش‌یافته (B > ۱۰۰٪)' : 'فلت متعارف (۸۱–۱۰۰٪)'
+                  } هماهنگ نیست.`,
+            canBeSolvedByAlternate:
+              !subtypeMatch && flatBValid
+                ? bPct > 100.1
+                  ? cPctOfB < 61.8
+                    ? 'FLAT_RUNNING'
+                    : 'FLAT_EXPANDED'
+                  : 'FLAT_REGULAR'
+                : undefined
+          });
+        }
         if (!flatBValid) {
           suggestedAlternative = 'ZIGZAG';
           alternativeReason = 'موج B کمتر از ۶۱.۸٪ موج A اصلاح کرده؛ بررسی به‌عنوان زیگزاگ پیشنهاد می‌شود.';
         }
       } else if (
-        (pattern === 'TRIANGLE_CONVERGING' || pattern === 'TRIANGLE_EXPANDING') &&
-        vertices.length >= 5
+        pattern === 'TRIANGLE_CONVERGING' ||
+        pattern === 'TRIANGLE_EXPANDING'
       ) {
-        const legA = Math.abs(p1 - p0);
-        const legC = Math.abs(p3 - p2);
-        const isConverging = legC < legA;
-        const ok = pattern === 'TRIANGLE_CONVERGING' ? isConverging : !isConverging;
-        rules.push({
-          ruleId: 'TRIANGLE_GEOMETRY',
-          name: 'Triangle Converging/Diverging Geometry',
-          nameFa: 'هندسه خطوط همگرا/واگرا در مثلث (A-B-C-D-E)',
-          type: 'STRUCTURE',
-          passed: ok,
-          score: ok ? 100 : 40,
-          conceptId: 'C24',
-          messageFa: ok
-            ? 'نسبت طول موج‌های مثلث با هندسه انتخاب‌شده هم‌خوانی دارد.'
-            : 'هندسه موج‌های مثلث با نوع همگرا/واگرا مطابقت ندارد.'
-        });
+        if (vertices.length < 5) {
+          rules.push({
+            ruleId: 'TRIANGLE_MIN_LEGS',
+            name: 'Triangle 5-Leg (A-B-C-D-E) Requirement',
+            nameFa: 'حداقل اضلاع مثلث (A-B-C-D-E)',
+            type: 'HARD',
+            passed: false,
+            score: 0,
+            conceptId: 'C24',
+            messageFa: `مثلث حداقل ۵ ضلع (۵ تا ۶ پیوت) دارد؛ اکنون ${vertices.length} پیوت ثبت شده است.`,
+            canBeSolvedByAlternate: 'ZIGZAG'
+          });
+        } else {
+          const legA = Math.abs(p1 - p0);
+          const legC = Math.abs(p3 - p2);
+          const upperA = Math.max(p1, p2);
+          const upperC = Math.max(p3, p4);
+          const lowerB = Math.min(p1, p2);
+          const lowerD = Math.min(p3, p4);
+          const triHeight = Math.max(0.01, upperA - lowerB);
+          const upperFlat = Math.abs(upperC - upperA) / triHeight <= 0.08;
+          const lowerFlat = Math.abs(lowerD - lowerB) / triHeight <= 0.08;
+          const isConvergingSides =
+            (upperC < upperA && !upperFlat && (lowerD > lowerB || lowerFlat)) ||
+            (upperFlat && lowerD > lowerB && !lowerFlat) ||
+            legC < legA;
+          const isDivergingSides =
+            (upperC > upperA && !upperFlat && (lowerD < lowerB || lowerFlat)) ||
+            (upperFlat && lowerD < lowerB && !lowerFlat) ||
+            legC > legA;
+          const ok = pattern === 'TRIANGLE_CONVERGING' ? isConvergingSides : isDivergingSides;
+          rules.push({
+            ruleId: 'TRIANGLE_GEOMETRY',
+            name: 'Triangle Converging/Diverging Geometry',
+            nameFa: 'هندسه خطوط همگرا/صعودی/نزولی/واگرا در مثلث (A-B-C-D-E)',
+            type: 'STRUCTURE',
+            passed: ok,
+            score: ok ? 100 : 40,
+            conceptId: 'C24',
+            messageFa: ok
+              ? 'نسبت طول و شیب خطوط مثلث با هندسه انتخاب‌شده هم‌خوانی دارد.'
+              : 'هندسه موج‌های مثلث با نوع همگرا/واگرا مطابقت ندارد.'
+          });
+        }
       } else if (pattern === 'COMPLEX_COMBINATION' && vertices.length >= 3) {
         const xSpan = Math.abs(vertices[2].candleIndex - vertices[1].candleIndex);
         const xValid = xSpan >= 3;
@@ -594,29 +664,77 @@ export class RulesEngine {
         }
       }
 
-      // 3b. Table 9: Diagonal Subwave Structure Verification (waves 3 and 5 must not be 5-subwave impulses in standard 3-3-3-3-3 diagonals)
-      if (pattern.includes('DIAGONAL') && vertices.length >= 6 && candles && candles.length >= 12) {
-        const countSub = (aIdx: number, bIdx: number) => {
-          const s = Math.max(0, Math.min(candles.length - 1, Math.min(aIdx, bIdx)));
-          const e = Math.max(s, Math.min(candles.length - 1, Math.max(aIdx, bIdx)));
-          const slice = candles.slice(s, e + 1);
-          if (slice.length < 7) return 3;
-          return PivotDetector.detectPivots(slice, 1, 1, 0.45).length >= 4 ? 5 : 3;
-        };
-        const sub3 = countSub(vertices[2].candleIndex, vertices[3].candleIndex);
-        const sub5 = countSub(vertices[4].candleIndex, vertices[5].candleIndex);
-        const diagSubOk = sub3 === 3 && sub5 === 3;
+      // 3b. Table 9: Diagonal Subwave & Variant Profile Verification
+      if (pattern.includes('DIAGONAL') && vertices.length >= 6) {
+        let sub1 = 3;
+        let sub3 = 3;
+        let sub5 = 3;
+        if (candles && candles.length >= 12) {
+          const countSub = (aIdx: number, bIdx: number) => {
+            const s = Math.max(0, Math.min(candles.length - 1, Math.min(aIdx, bIdx)));
+            const e = Math.max(s, Math.min(candles.length - 1, Math.max(aIdx, bIdx)));
+            const slice = candles.slice(s, e + 1);
+            if (slice.length < 7) return 3;
+            return PivotDetector.detectPivots(slice, 1, 1, 0.45).length >= 4 ? 5 : 3;
+          };
+          sub1 = countSub(vertices[0].candleIndex, vertices[1].candleIndex);
+          sub3 = countSub(vertices[2].candleIndex, vertices[3].candleIndex);
+          sub5 = countSub(vertices[4].candleIndex, vertices[5].candleIndex);
+          const diagSubOk = sub3 === 3 && sub5 === 3;
+          rules.push({
+            ruleId: 'DIAGONAL_SUBWAVES',
+            name: 'Diagonal 3-3-3-3-3 Subwave Check (Table 9)',
+            nameFa: 'کنترل ریزساختار ۳موجی امواج ۳ و ۵ در قطر (جدول ۹)',
+            type: 'STRUCTURE',
+            passed: diagSubOk,
+            score: diagSubOk ? 100 : 45,
+            conceptId: 'C20',
+            messageFa: diagSubOk
+              ? 'ساختار درونی امواج ۳ و ۵ با الگوی سه‌موجی قطر (۳-۳-۳-۳-۳) منطبق است.'
+              : `هشدار قطر: زیرموج‌های غیرمنتظره ۵موجی در ${sub3 === 5 ? 'موج ۳' : ''}${sub3 === 5 && sub5 === 5 ? ' و ' : ''}${sub5 === 5 ? 'موج ۵' : ''} مشاهده شد.`
+          });
+        }
+
+        const w5CoversW4Diag = isBull ? p5 >= p3 * 0.999 : p5 <= p3 * 1.001;
+        const isDecreasingWedge = len5 <= len3 * 1.05 && (len3 <= len1 * 1.05 || len5 < len1);
+        const isIncreasingFunnel = len5 > len3 || (len3 > len1 && len5 >= len3 * 0.95);
+        const variantPassed =
+          pattern === 'ANTI_DIAGONAL'
+            ? isIncreasingFunnel && w5CoversW4Diag
+            : pattern === 'ANTI_LEADING_DIAGONAL'
+            ? (sub1 === 3 || (len1 > 0 && retrace2 / len1 >= 0.55)) && w5CoversW4Diag
+            : isDecreasingWedge && w5CoversW4Diag;
+
         rules.push({
-          ruleId: 'DIAGONAL_SUBWAVES',
-          name: 'Diagonal 3-3-3-3-3 Subwave Check (Table 9)',
-          nameFa: 'کنترل ریزساختار ۳موجی امواج ۳ و ۵ در قطر (جدول ۹)',
+          ruleId: 'DIAGONAL_VARIANT_PROFILE',
+          name: 'Diagonal / Anti-Diagonal Strength & Slope Profile (Session 9)',
+          nameFa:
+            pattern === 'ANTI_DIAGONAL'
+              ? 'ویژگی قیف بازشونده آنتی‌قطر (قدرت افزایشی — جلسه ۹)'
+              : pattern === 'ANTI_LEADING_DIAGONAL'
+              ? 'ویژگی قطر پیشرو آنتی (موج ۱ سه‌موجی / اصلاح عمیق ۲ — جلسه ۹)'
+              : 'ویژگی شیب همگرا / کاهش قدرت در قطر (جلسه ۹)',
           type: 'STRUCTURE',
-          passed: diagSubOk,
-          score: diagSubOk ? 100 : 45,
+          passed: variantPassed,
+          score: variantPassed ? 98 : 48,
           conceptId: 'C20',
-          messageFa: diagSubOk
-            ? 'ساختار درونی امواج ۳ و ۵ با الگوی سه‌موجی قطر (۳-۳-۳-۳-۳) منطبق است.'
-            : `هشدار قطر: زیرموج‌های غیرمنتظره ۵موجی در ${sub3 === 5 ? 'موج ۳' : ''}${sub3 === 5 && sub5 === 5 ? ' و ' : ''}${sub5 === 5 ? 'موج ۵' : ''} مشاهده شد.`
+          messageFa: !w5CoversW4Diag
+            ? 'موج ۵ هنوز ۱۰۰٪ موج ۴ را پوشش نداده است (CB-Wave).'
+            : variantPassed
+            ? pattern === 'ANTI_DIAGONAL'
+              ? 'قدرت امواج افزایشی (موج ۵ > موج ۳) و مطابق الگوی آنتی‌قطر است.'
+              : pattern === 'ANTI_LEADING_DIAGONAL'
+              ? 'ساختار و شیب امواج با الگوی قطر پیشرو آنتی سازگار است.'
+              : 'شیب کاهشی/همگرا در طول امواج ۱ تا ۵ با الگوی قطر سازگار است.'
+            : pattern === 'ANTI_DIAGONAL'
+            ? 'آنتی‌قطر نیازمند قدرت افزایشی (موج ۵ بزرگ‌تر از ۳) است؛ قطر پایانی/پیشرو محتمل‌تر است.'
+            : 'قدرت امواج کاهشی نیست (موج ۵ کشیده‌تر از ۳ شده)؛ بررسی به‌عنوان آنتی‌قطر پیشنهاد می‌شود.',
+          canBeSolvedByAlternate:
+            !variantPassed && pattern !== 'ANTI_DIAGONAL' && isIncreasingFunnel
+              ? 'ANTI_DIAGONAL'
+              : !variantPassed && pattern === 'ANTI_DIAGONAL' && isDecreasingWedge
+              ? 'ENDING_DIAGONAL'
+              : undefined
         });
       }
 
@@ -643,16 +761,19 @@ export class RulesEngine {
           });
         } else if (pattern === 'ANTI_TERMINAL') {
           const isW5Extended = len5 > len3;
+          const w5CoversW4 = isBull ? p5 >= p3 * 0.999 : p5 <= p3 * 1.001;
           const isBroadening = len5 > len3 && len3 >= len1 * 0.9;
           rules.push({
             ruleId: 'ANTI_TERMINAL_W5_EXT',
-            name: 'Anti-Terminal Wave 5 Extension',
-            nameFa: 'کشیدگی موج ۵ و رفتار قیف بازشونده در آنتی‌ترمینال (۶-۳ / ۶-۷)',
+            name: 'Anti-Terminal Wave 5 Extension & CB-Wave Coverage',
+            nameFa: 'کشیدگی موج ۵، پوشش موج ۴ و قیف بازشونده در آنتی‌ترمینال (۶-۳ / ۶-۷)',
             type: 'STRUCTURE',
-            passed: isW5Extended,
-            score: isW5Extended ? (isBroadening ? 100 : 88) : 35,
+            passed: isW5Extended && w5CoversW4,
+            score: isW5Extended && w5CoversW4 ? (isBroadening ? 100 : 88) : 35,
             conceptId: 'C19',
-            messageFa: isW5Extended
+            messageFa: !w5CoversW4
+              ? 'خطای CB-Wave: موج ۵ پوشش ۱۰۰٪ موج ۴ را کامل نکرده است.'
+              : isW5Extended
               ? 'موج ۵ کشیدگی دارد (بزرگ‌تر از موج ۳) و رفتار قیف بازشونده آنتی‌ترمینال برقرار است.'
               : 'موج ۵ کشیدگی ندارد؛ الگوی ترمینال محتمل‌تر است.',
             canBeSolvedByAlternate: !isW5Extended ? 'TERMINAL' : undefined
@@ -1998,5 +2119,230 @@ export class RulesEngine {
     parentWaveLabel: string = ''
   ): ScenarioProjectionReport {
     return TargetProjectionEngine.projectScenario(scenario, candles, parentRole, parentWaveLabel);
+  }
+
+  /**
+   * Evaluates a wave structure simultaneously across ALL 15 Bahari Elliott PatternFamilies:
+   * Ideal Cycle, Terminal, Anti-Terminal, Leading Diagonal, Anti-Leading Diagonal,
+   * Ending Diagonal, Anti-Diagonal, Anti-Cycle, Zigzag, Flats (Regular/Expanded/Running),
+   * Triangles (Converging/Expanding), and Complex Combination.
+   */
+  public static evaluateAllPatterns(
+    vertices: WaveVertex[],
+    direction: WaveDirection = 'BULLISH',
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = '',
+    candles?: Candle[],
+    currentPattern?: PatternFamily
+  ): PatternHypothesisEvaluation[] {
+    const ALL_PATTERNS_META: Array<{
+      patternType: PatternFamily;
+      category: PatternMatrixCategory;
+      categoryLabelFa: string;
+      shortLabelFa: string;
+      keyFeatureFa: string;
+      priorityOrder: number;
+    }> = [
+      {
+        patternType: 'IDEAL_CYCLE',
+        category: 'IMPULSE_TERMINAL',
+        categoryLabelFa: 'ایده‌آل و ترمینال',
+        shortLabelFa: 'سیکل ایده‌آل',
+        keyFeatureFa: '۵ موج شتابدار بدون هم‌پوشانی موج ۴ و ۱ + پوشش موج ۴ توسط ۵',
+        priorityOrder: 1
+      },
+      {
+        patternType: 'TERMINAL',
+        category: 'IMPULSE_TERMINAL',
+        categoryLabelFa: 'ایده‌آل و ترمینال',
+        shortLabelFa: 'ترمینال',
+        keyFeatureFa: 'هم‌پوشانی موج ۴ با ۱ + موج ۵ کوتاه‌تر از ۳ (گوه‌ای کاهشی)',
+        priorityOrder: 6
+      },
+      {
+        patternType: 'ANTI_TERMINAL',
+        category: 'IMPULSE_TERMINAL',
+        categoryLabelFa: 'ایده‌آل و ترمینال',
+        shortLabelFa: 'آنتی‌ترمینال',
+        keyFeatureFa: 'هم‌پوشانی موج ۴ با ۱ + موج ۵ کشیده‌تر از ۳ (قیف بازشونده)',
+        priorityOrder: 7
+      },
+      {
+        patternType: 'LEADING_DIAGONAL',
+        category: 'DIAGONAL_ANTI',
+        categoryLabelFa: 'قطر و آنتی‌قطر',
+        shortLabelFa: 'قطر پیشرو',
+        keyFeatureFa: 'شروع موج ۱/A با هم‌پوشانی ۴ و ۱ و ساختار ۳-۳-۳-۳-۳ / ۵-۳-۵-۳-۵',
+        priorityOrder: 2
+      },
+      {
+        patternType: 'ANTI_LEADING_DIAGONAL',
+        category: 'DIAGONAL_ANTI',
+        categoryLabelFa: 'قطر و آنتی‌قطر',
+        shortLabelFa: 'قطر پیشرو آنتی',
+        keyFeatureFa: 'موج ۱–۲ به‌صورت ۳–۵ در ابتدای روند با هم‌پوشانی ۴ و ۱',
+        priorityOrder: 4
+      },
+      {
+        patternType: 'ENDING_DIAGONAL',
+        category: 'DIAGONAL_ANTI',
+        categoryLabelFa: 'قطر و آنتی‌قطر',
+        shortLabelFa: 'قطر پایانی',
+        keyFeatureFa: 'انتهای موج ۵/C به شکل گوه همگرا با ساختار ۳-۳-۳-۳-۳',
+        priorityOrder: 3
+      },
+      {
+        patternType: 'ANTI_DIAGONAL',
+        category: 'DIAGONAL_ANTI',
+        categoryLabelFa: 'قطر و آنتی‌قطر',
+        shortLabelFa: 'آنتی‌قطر',
+        keyFeatureFa: 'قطر بازشونده با قدرت افزایشی (موج ۵ > ۳) و هم‌پوشانی ۴ و ۱',
+        priorityOrder: 5
+      },
+      {
+        patternType: 'ANTI_CYCLE',
+        category: 'DIAGONAL_ANTI',
+        categoryLabelFa: 'قطر و آنتی‌قطر',
+        shortLabelFa: 'آنتی‌سیکل',
+        keyFeatureFa: 'ساختار ۳-۵ (هارمونیک یا گسترده با شکست مبدأ موج ۱)',
+        priorityOrder: 8
+      },
+      {
+        patternType: 'ZIGZAG',
+        category: 'CORRECTIVE_FLAT',
+        categoryLabelFa: 'اصلاحی و فلت',
+        shortLabelFa: 'زیگزاگ',
+        keyFeatureFa: 'اصلاح ۵-۳-۵ با موج B < ۱۰۰٪ A و پوشش کامل B توسط C',
+        priorityOrder: 9
+      },
+      {
+        patternType: 'FLAT_REGULAR',
+        category: 'CORRECTIVE_FLAT',
+        categoryLabelFa: 'اصلاحی و فلت',
+        shortLabelFa: 'فلت متعارف',
+        keyFeatureFa: 'ساختار ۳-۳-۵ با B و C در بازه ۸۱ تا ۱۰۰٪ موج قبلی',
+        priorityOrder: 10
+      },
+      {
+        patternType: 'FLAT_EXPANDED',
+        category: 'CORRECTIVE_FLAT',
+        categoryLabelFa: 'اصلاحی و فلت',
+        shortLabelFa: 'فلت گسترش‌یافته',
+        keyFeatureFa: 'فلت نامنظم با عبور موج B از سقف A (> ۱۰۰٪) و C ≥ ۶۱.۸٪',
+        priorityOrder: 11
+      },
+      {
+        patternType: 'FLAT_RUNNING',
+        category: 'CORRECTIVE_FLAT',
+        categoryLabelFa: 'اصلاحی و فلت',
+        shortLabelFa: 'فلت رانینگ',
+        keyFeatureFa: 'فلت جاری با B > ۱۰۰٪ و C < ۶۱.۸٪ (منسوخ و پرریسک)',
+        priorityOrder: 12
+      },
+      {
+        patternType: 'TRIANGLE_CONVERGING',
+        category: 'TRIANGLE_COMPLEX',
+        categoryLabelFa: 'مثلث و ترکیبی',
+        shortLabelFa: 'مثلث همگرا',
+        keyFeatureFa: 'پنج ضلع A-B-C-D-E همگرا، صعودی یا نزولی در موج ۲/۴/B',
+        priorityOrder: 13
+      },
+      {
+        patternType: 'TRIANGLE_EXPANDING',
+        category: 'TRIANGLE_COMPLEX',
+        categoryLabelFa: 'مثلث و ترکیبی',
+        shortLabelFa: 'مثلث واگرا',
+        keyFeatureFa: 'پنج ضلع A-B-C-D-E گسترشی با خطوط روند واگرا',
+        priorityOrder: 14
+      },
+      {
+        patternType: 'COMPLEX_COMBINATION',
+        category: 'TRIANGLE_COMPLEX',
+        categoryLabelFa: 'مثلث و ترکیبی',
+        shortLabelFa: 'ساختار ترکیبی',
+        keyFeatureFa: 'پیوند دو الگو با موج رابط X (حداقل ۳ کندل) — آخرین انتخاب',
+        priorityOrder: 15
+      }
+    ];
+
+    const evaluations = ALL_PATTERNS_META.map(meta => {
+      const summary = this.validateStructure(
+        meta.patternType,
+        vertices,
+        direction,
+        parentRole,
+        parentWaveLabel,
+        candles
+      );
+      const hardRules = summary.rules.filter(r => r.type === 'HARD');
+      const hardPassCount = hardRules.filter(r => r.passed).length;
+      const softAndStructFails = summary.rules.filter(r => r.type !== 'HARD' && !r.passed);
+      const passedRuleCount = summary.rules.filter(r => r.passed).length;
+
+      let status: PatternHypothesisEvaluation['status'] = 'VALID';
+      let statusLabelFa = 'تطبیق کامل';
+      if (!summary.isValid) {
+        status = 'INVALID';
+        statusLabelFa = 'نامعتبر';
+      } else if (softAndStructFails.length > 0 || summary.validityScore < 85) {
+        status = 'WARNING';
+        statusLabelFa = 'معتبر با هشدار';
+      }
+
+      const firstHardFail = hardRules.find(r => !r.passed);
+      const firstSoftFail = softAndStructFails[0];
+      const firstPass = summary.rules.find(r => r.passed);
+      const primaryReasonFa =
+        firstHardFail?.messageFa ||
+        firstSoftFail?.messageFa ||
+        firstPass?.messageFa ||
+        meta.keyFeatureFa;
+
+      return {
+        patternType: meta.patternType,
+        category: meta.category,
+        categoryLabelFa: meta.categoryLabelFa,
+        labelFa: PATTERN_LABELS_FA[meta.patternType],
+        shortLabelFa: meta.shortLabelFa,
+        status,
+        statusLabelFa,
+        validityScore: summary.validityScore,
+        idealnessScore: summary.idealnessScore,
+        confidenceScore: summary.confidenceScore,
+        hardPassCount,
+        hardTotalCount: hardRules.length,
+        passedRuleCount,
+        totalRuleCount: summary.rules.length,
+        keyFeatureFa: meta.keyFeatureFa,
+        primaryReasonFa,
+        rules: summary.rules,
+        isCurrent: meta.patternType === currentPattern,
+        isBestFit: false,
+        _priority: meta.priorityOrder
+      };
+    });
+
+    // Pick single highest-fit pattern deterministically
+    const ranked = [...evaluations].sort((a, b) => {
+      const aValid = a.status !== 'INVALID' ? 1 : 0;
+      const bValid = b.status !== 'INVALID' ? 1 : 0;
+      if (aValid !== bValid) return bValid - aValid;
+      if (a.status !== b.status) {
+        const rank = { VALID: 2, WARNING: 1, INVALID: 0 };
+        return rank[b.status] - rank[a.status];
+      }
+      if (b.confidenceScore !== a.confidenceScore) return b.confidenceScore - a.confidenceScore;
+      return a._priority - b._priority;
+    });
+
+    const bestPattern = ranked[0]?.patternType;
+
+    return evaluations.map(({ _priority, ...item }) => {
+      void _priority;
+      return {
+        ...item,
+        isBestFit: item.patternType === bestPattern
+      };
+    });
   }
 }

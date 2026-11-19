@@ -14,6 +14,7 @@ import {
   ValidationSummary
 } from '../engine/rulesEngine';
 import { PatternEngines } from '../engine/patternEngines';
+import { AllPatternsEvaluationMatrix } from './AllPatternsEvaluationMatrix';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -98,6 +99,7 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
   const [auditTick, setAuditTick] = useState<number>(0);
   const [appliedFlash, setAppliedFlash] = useState<string | null>(null);
   const [showWaveTraits, setShowWaveTraits] = useState<boolean>(false);
+  const [step1View, setStep1View] = useState<'ACTIVE' | 'ALL_PATTERNS'>('ACTIVE');
 
   const auditResult = useMemo(() => {
     // auditTick intentionally triggers deterministic re-evaluation when user clicks Re-Run
@@ -343,12 +345,55 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
     );
     const waveCharacteristics = PatternEngines.analyzeWaveCharacteristics(scenario, candles);
 
+    const allPatternEvaluations = RulesEngine.evaluateAllPatterns(
+      verts,
+      scenario.direction,
+      parentRole,
+      parentWaveLabel,
+      candles,
+      scenario.patternType
+    );
+
     const pType = scenario.patternType;
+    const isBullDir = scenario.direction === 'BULLISH';
+    const len1 = verts.length >= 2 ? Math.abs(verts[1].price - verts[0].price) : 0;
+    const len2 = verts.length >= 3 ? Math.abs(verts[2].price - verts[1].price) : 0;
+    const len3 = verts.length >= 4 ? Math.abs(verts[3].price - verts[2].price) : 0;
+    const len4 = verts.length >= 5 ? Math.abs(verts[4].price - verts[3].price) : 0;
+    const len5 = verts.length >= 6 ? Math.abs(verts[5].price - verts[4].price) : 0;
+    const hasOverlap41 =
+      verts.length >= 5 && (isBullDir ? verts[4].price <= verts[1].price : verts[4].price >= verts[1].price);
+
     const specializedReport =
-      pType === 'LEADING_DIAGONAL' ||
-      pType === 'ANTI_LEADING_DIAGONAL' ||
-      pType === 'ENDING_DIAGONAL' ||
-      pType === 'ANTI_DIAGONAL'
+      pType === 'IDEAL_CYCLE' ||
+      pType === 'TERMINAL' ||
+      pType === 'ANTI_TERMINAL' ||
+      pType === 'ANTI_CYCLE'
+        ? {
+            kind: 'MOTIVE' as const,
+            data: {
+              patternLabelFa: PATTERN_LABELS_FA[pType],
+              w2Pct: len1 > 0 ? Math.round((len2 / len1) * 1000) / 10 : 0,
+              w4Pct: len3 > 0 ? Math.round((len4 / len3) * 1000) / 10 : 0,
+              w5VsW3Fa:
+                verts.length < 6
+                  ? 'در انتظار موج ۵'
+                  : len5 < len3
+                  ? 'موج ۵ کوتاه‌تر از موج ۳ (رفتار ترمینال)'
+                  : 'موج ۵ کشیده‌تر/بلندتر از موج ۳',
+              overlapTextFa:
+                verts.length < 5
+                  ? 'در انتظار موج ۴'
+                  : hasOverlap41
+                  ? 'هم‌پوشانی موج ۴ با محدوده موج ۱ وجود دارد'
+                  : 'موج ۴ وارد حریم موج ۱ نشده است (ایده‌آل)',
+              confidence: summary.confidenceScore
+            }
+          }
+        : pType === 'LEADING_DIAGONAL' ||
+          pType === 'ANTI_LEADING_DIAGONAL' ||
+          pType === 'ENDING_DIAGONAL' ||
+          pType === 'ANTI_DIAGONAL'
         ? { kind: 'DIAGONAL' as const, data: PatternEngines.analyzeDiagonal(scenario, candles) }
         : pType === 'ZIGZAG'
         ? { kind: 'ZIGZAG' as const, data: PatternEngines.analyzeZigzag(scenario, candles) }
@@ -356,8 +401,6 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
         ? { kind: 'FLAT' as const, data: PatternEngines.analyzeFlat(scenario, candles) }
         : pType === 'TRIANGLE_CONVERGING' || pType === 'TRIANGLE_EXPANDING'
         ? { kind: 'TRIANGLE' as const, data: PatternEngines.analyzeTriangle(scenario, candles) }
-        : pType === 'COMPLEX_COMBINATION'
-        ? { kind: 'COMPLEX' as const, data: PatternEngines.analyzeComplexPattern(scenario, candles) }
         : { kind: 'COMPLEX' as const, data: PatternEngines.analyzeComplexPattern(scenario, candles) };
 
     return {
@@ -371,7 +414,8 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
       inputValidation,
       absoluteBottom,
       specializedReport,
-      waveCharacteristics
+      waveCharacteristics,
+      allPatternEvaluations
     };
   }, [scenario, candles, parentRole, parentWaveLabel, auditTick]);
 
@@ -558,9 +602,61 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
           </div>
         )}
 
-        {/* STEP 1: Strict Scan Summary */}
+        {/* STEP 1: Strict Scan Summary & All 15-Pattern Hypothesis Matrix */}
         {activeStep === 1 && (
           <div className="space-y-3">
+            {/* Step 1 Mode Switcher: Active Rules vs All 15 Patterns Matrix */}
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-950 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setStep1View('ACTIVE')}
+                className={`py-1.5 px-2.5 rounded-md text-[11px] font-semibold whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                  step1View === 'ACTIVE'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                جزئیات الگوی فعال
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep1View('ALL_PATTERNS')}
+                className={`py-1.5 px-2.5 rounded-md text-[11px] font-semibold whitespace-nowrap flex items-center justify-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                  step1View === 'ALL_PATTERNS'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>مقایسه تمام حالات</span>
+                <span className="font-mono tabular-nums text-[10px] opacity-85">
+                  ({auditResult.allPatternEvaluations.filter(e => e.status !== 'INVALID').length}/۱۵)
+                </span>
+              </button>
+            </div>
+
+            {step1View === 'ALL_PATTERNS' ? (
+              <AllPatternsEvaluationMatrix
+                evaluations={auditResult.allPatternEvaluations}
+                currentPattern={scenario.patternType}
+                isLocked={scenario.isLocked}
+                onApplyPattern={pattern => {
+                  if (scenario.isLocked || !onApplyPattern) return;
+                  onApplyPattern(pattern);
+                  const updated = RulesEngine.validateStructure(
+                    pattern,
+                    scenario.vertices,
+                    scenario.direction,
+                    parentRole,
+                    parentWaveLabel,
+                    candles
+                  );
+                  onValidationComplete?.(updated);
+                  setAppliedFlash(PATTERN_LABELS_FA[pattern].split('(')[0].trim());
+                }}
+                compact
+              />
+            ) : (
+              <>
             {/* Overall Score & Category Summary */}
             <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-800 flex items-center justify-between gap-3">
               <div className="space-y-1">
@@ -593,6 +689,99 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                   {auditResult.summary.validityScore}%
                 </div>
                 <div className="text-[10px] text-slate-500">نمره اعتبار</div>
+              </div>
+            </div>
+
+            {/* Key Pattern Families Quick Status Strip (Ideal / Terminal / Anti-Terminal / Diagonals / Anti-Diagonal / Anti-Cycle) */}
+            <div className="rounded-xl bg-slate-950/75 border border-slate-800 overflow-hidden">
+              <div className="px-3 py-2 border-b border-slate-800/80 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-slate-200">
+                  تطبیق سریع الگوهای اصلی و قطری
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setStep1View('ALL_PATTERNS')}
+                  className="text-[10.5px] font-semibold text-cyan-300 hover:text-cyan-200 whitespace-nowrap"
+                >
+                  مشاهده هر ۱۵ الگو
+                </button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-x-reverse divide-y divide-slate-800/70">
+                {auditResult.allPatternEvaluations
+                  .filter(e =>
+                    [
+                      'IDEAL_CYCLE',
+                      'TERMINAL',
+                      'ANTI_TERMINAL',
+                      'LEADING_DIAGONAL',
+                      'ANTI_LEADING_DIAGONAL',
+                      'ENDING_DIAGONAL',
+                      'ANTI_DIAGONAL',
+                      'ANTI_CYCLE'
+                    ].includes(e.patternType)
+                  )
+                  .map(ev => (
+                    <button
+                      key={ev.patternType}
+                      type="button"
+                      disabled={scenario.isLocked || !onApplyPattern}
+                      onClick={() => {
+                        if (!onApplyPattern || scenario.isLocked) return;
+                        onApplyPattern(ev.patternType);
+                        const updated = RulesEngine.validateStructure(
+                          ev.patternType,
+                          scenario.vertices,
+                          scenario.direction,
+                          parentRole,
+                          parentWaveLabel,
+                          candles
+                        );
+                        onValidationComplete?.(updated);
+                      }}
+                      className={`px-2.5 py-2 text-right transition-colors flex flex-col gap-0.5 ${
+                        ev.isCurrent
+                          ? 'bg-indigo-950/40'
+                          : 'hover:bg-slate-900/70'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 w-full">
+                        <span className="text-[10.5px] font-bold text-slate-100 truncate">
+                          {ev.shortLabelFa}
+                        </span>
+                        <span
+                          className={`font-mono tabular-nums text-[10px] font-bold shrink-0 ${
+                            ev.status === 'VALID'
+                              ? 'text-emerald-400'
+                              : ev.status === 'WARNING'
+                              ? 'text-amber-300'
+                              : 'text-rose-400'
+                          }`}
+                        >
+                          {ev.validityScore}%
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[9.5px] flex items-center gap-1 ${
+                          ev.status === 'VALID'
+                            ? 'text-emerald-300'
+                            : ev.status === 'WARNING'
+                            ? 'text-amber-300'
+                            : 'text-rose-400'
+                        }`}
+                      >
+                        {ev.status === 'VALID' ? (
+                          <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
+                        ) : ev.status === 'WARNING' ? (
+                          <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                        ) : (
+                          <XCircle className="w-2.5 h-2.5 shrink-0" />
+                        )}
+                        <span className="truncate">
+                          {ev.isCurrent ? 'الگوی فعال' : ev.statusLabelFa}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
               </div>
             </div>
 
@@ -745,12 +934,26 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                 </span>
                 <span className="font-mono tabular-nums text-slate-400">
                   اطمینان{' '}
-                  {auditResult.specializedReport.kind === 'COMPLEX'
-                    ? auditResult.specializedReport.data.confidence
-                    : auditResult.specializedReport.data.confidence}
+                  {auditResult.specializedReport.data.confidence <= 1
+                    ? Math.round(auditResult.specializedReport.data.confidence * 100)
+                    : Math.round(auditResult.specializedReport.data.confidence)}
                   %
                 </span>
               </div>
+
+              {auditResult.specializedReport.kind === 'MOTIVE' && (
+                <div className="space-y-1 text-slate-300">
+                  <div className="flex items-center justify-between font-semibold text-white">
+                    <span>{auditResult.specializedReport.data.patternLabelFa}</span>
+                    <span className="font-mono text-cyan-300 tabular-nums">
+                      W2: {auditResult.specializedReport.data.w2Pct}٪ · W4: {auditResult.specializedReport.data.w4Pct}٪
+                    </span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    {auditResult.specializedReport.data.overlapTextFa} · {auditResult.specializedReport.data.w5VsW3Fa}
+                  </p>
+                </div>
+              )}
 
               {auditResult.specializedReport.kind === 'DIAGONAL' && (
                 <div className="space-y-1 text-slate-300">
@@ -884,6 +1087,8 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                 </div>
               )}
             </div>
+              </>
+            )}
           </div>
         )}
 
