@@ -171,20 +171,20 @@ export const SddAndCodeViewer: React.FC = () => {
   const sessions9to19Markdown = `# مفاهیم استخراج‌شده جلسات ۹ تا ۱۹، شاخه‌های SDD (008..018) و پایپ‌لاین گام ۰ تا ۱۱
 
 ## ۱. جلسات ۹ تا ۱۴: الگوهای تخصصی (008..013)
-- [جلسه ۹ — 008] الگوهای قطر (۳-۳-۳-۳-۳): قطر پیشرو (ایده‌آل/آنتی)، ایمپالس قطر، آنتی‌قطر و قطر پایانی؛ تأیید با پوشش ۱۰۰٪ موج ۲ و هدف اصلاح ۵۰ تا >۶۱.۸٪.
-- [جلسه ۱۰ — 009] زیگزاگ‌ها: ایده‌آل (۵-۳-۵)، ساده (۳-۳-۳) و آنتی (۳-۵-۵)؛ الزام پوشش ۱۰۰٪ B، رده C (کوتاه/متعارف/کشیده)، تطبیق AB=CD و هدف پسازیگزاگ.
-- [جلسه ۱۱ — 010] استراتژی ورود: حداقل اصلاح ۵۰٪، ورود بهینه ۶۱.۸٪ و ۷۸.۶٪ (با شتاب)، Fallback روی ۵۰٪، امتیازدهی W2 در برابر A و برنامه ۲ مرحله‌ای ۵۰٪/۵۰٪.
+- [جلسه ۹ — 008] الگوهای قطر (۳-۳-۳-۳-۳): قطر پیشرو (ایده‌آل/آنتی)، ایمپالس قطر، آنتی‌قطر و قطر پایانی؛ تأیید با پوشش ۱۰۰٪ موج ۲، کنترل هم‌پوشانی موج ۴ و ۱، ریزساختار ۳موجی و هدف اصلاح ۵۰ تا >۶۱.۸٪.
+- [جلسه ۱۰ — 009] زیگزاگ‌ها: ایده‌آل (۵-۳-۵)، ساده (۳-۳-۳) و آنتی (۳-۵-۵)؛ الزام پوشش ۱۰۰٪ B، رده C (کوتاه/متعارف/کشیده با مرز ۱۶۱.۸٪)، تطبیق AB=CD و هدف پسازیگزاگ.
+- [جلسه ۱۱ — 010] استراتژی ورود: حداقل اصلاح ۵۰٪ (جلوگیری از FOMO و عبور ۶۱.۸ به ۷۸.۶)، ورود بهینه ۶۱.۸٪ و ۷۸.۶٪ با شتاب و تایید کندلی (چکش/پوشا/دوجی)، Fallback روی ۵۰٪، R/R ≥ ۱ و برنامه ۲ مرحله‌ای ۵۰٪/۵۰٪.
 - [جلسه ۱۲ و ۱۳ — 011/012] فلت‌ها (۳-۳-۵ با شرط B > ۶۱.۸٪ A): ۸ زیرگونه (متعارف، ناقص B/C/دوگانه، نامنظم، نامنظم ناقص/کشیده، رانینگ منسوخ) + گره‌گشایی زیرموج‌ها (Knot-Untangler).
-- [جلسه ۱۴ و ۱۵ — 013/014] مثلث‌ها (A-B-C-D-E): همگرا (۹۰٪) و واگرا (۱۰٪)؛ محدود به جایگاه ۲، ۴ یا B؛ قانون ۵۰٪ اصلاح پیش از Box 3 و مثلث پایانی.
+- [جلسه ۱۴ و ۱۵ — 013/014] مثلث‌ها (A-B-C-D-E): همگرا/واگرا، صعودی/نزولی (Ascending/Descending)، محدود/نامحدود (Limited/Unlimited)؛ محدود به جایگاه ۲ (۲۰٪)، ۴ (۵۰٪) یا B (۳۰٪)؛ قانون ۵۰٪ اصلاح و اتمام پیش از Box 3 (< ۶۶.۷٪).
 
 ## ۲. جلسات ۱۶ تا ۱۹: ترکیبی، اولویت شمارش، Trailing و ۸ موج (015..018)
-- [جلسه ۱۶ و ۱۷ — 015/016] ۹ ترکیب استاندارد اصلاحی (Z-X-Z..T-X-T) و ترکیب‌های اصلی (I-X-Z, G-X-F, I-X-I, G-X-G, T-X-T)؛ موج X با حداقل ۳ کندل؛ رتبه‌بندی اولویت ۱ تا ۷ (ساده پیش از ترکیبی) و پرهیز از ترکیبی پیچیده در انتهای باز بازار.
-- [جلسه ۱۸ — 017] کشیدگی امواج ۱/۳/۵ و حد ضرر متحرک پلکانی TMV: زیر موج ۲ ← تاچ Prime ← زیر ۶۱.۸٪ رتریسمنت (تاچ Ideal) ← زیر ۱۰۰٪ پروجکشن (تاچ Alternate)؛ هشدار چرخش فوری در موج ۵ > ۲۰۰٪ موج ۳.
-- [جلسه ۱۹ — 018] شخصیت‌شناسی ۸ موج (۱..۵، A..C): ویژگی حجم، تعداد ریز‌موج، هشدار تشخیص دشوار موج A و چک‌لیست ۴ ماده‌ای مدیریت سرمایه، حد ضرر و ریسک به ریوارد.
+- [جلسه ۱۶ و ۱۷ — 015/016] ۹ ترکیب استاندارد اصلاحی (Z-X-Z..T-X-T) و ترکیب‌های اصلی (I-X-Z, G-X-F, I-X-I, G-X-G, T-X-T)؛ موج X با حداقل ۳ کندل؛ اجرای قوانین بنیادین ۱، ۲ و ۳ درون ساختارهای ترکیبی؛ رتبه‌بندی اولویت ۱ تا ۷ و پرهیز از ترکیبی در انتهای باز بازار.
+- [جلسه ۱۸ — 017] کشیدگی امواج ۱/۳/۵ (با کنترل <۳۸.۲٪ و منع تشخیص موج ۱ بدون مرجع پیشین از کف مطلق) و حد ضرر متحرک پلکانی عددی TMV: زیر موج ۲ ← تاچ Prime ← زیر ۶۱.۸٪ (Ideal) ← زیر ۱۰۰٪ پروجکشن (Alternate)؛ سیو سود فوری در موج ۵ > ۲۰۰٪ یا ترمینال/قطر/مثلث پایانی و منع رتریسمنت روی موج ۵.
+- [جلسه ۱۹ — 018] شخصیت‌شناسی ۸ موج (۱..۵، A..C): ویژگی حجم، تعداد ریزموج (خطای موج ۳ سه‌موجی، تطابق موج ۵ سه‌موجی ← A پنج‌موجی، پوشش ۱۰۰٪ موج ۴ توسط ۵ و ۹۲٪ موج ۵ توسط C)، هشدار موج A و چک‌لیست مدیریت سرمایه و ریسک.
 
 ## ۳. خلاصه حدود ۲۶۰ Edge Case و پایپ‌لاین ۱۱ گام از بالا به پایین (Steps 0..11)
-- **گام ۰ (Pre-Flight Check)**: کنترل خالی بودن، حداقل ۱۰ کندل، NaN/Inf، قیمت منفی، High < Low، ترتیب زمانی، حرکت صفر، نرخ دوجی > ۵۰٪ و انتخاب تایم‌فریم آغازین (1D / 1W / 1M).
-- **گام‌های ۱ تا ۱۱**: ارزیابی حدود تایم‌فریم ← کف مطلق و کف‌های معتبر ← شمارش درجات کلان تا میانی (توقف درجه ۴) ← اعمال قوانین سه‌گانه و فیلتر دوجی ← تشخیص کشیدگی/ترمینال/قطر/زیگزاگ/فلت/مثلث/ترکیبی ← نگاشت افقی TMV و PRZ و پلن ورود ← تحلیل شخصیت ۸ موج و پایش حد ضرر متحرک.
+- **گام ۰ (Pre-Flight Check)**: کنترل خالی بودن، حداقل ۱۰ کندل، NaN/Inf (Forward-fill ≤۱۰٪)، قیمت منفی، High < Low، برچسب زمانی تکراری/خارج از ترتیب، حرکت صفر، حجم صفر، نرخ دوجی > ۵۰٪ و انتخاب تایم‌فریم آغازین (>۱۰ سال یا <۱ سال ← 1W).
+- **گام‌های ۱ تا ۱۱**: حدود تایم‌فریم بورس/فارکس ← کف مطلق و کف‌های معتبر ← پالایش چندتایم‌فریمی و ارتقاء درجه (توقف درجه ۴ بورس) ← قوانین سه‌گانه با تلرانس ۰.۱٪ و فیلتر دوجی ← کشیدگی/ترمینال/قطر/زیگزاگ/فلت/مثلث/ترکیبی ← TMV و PRZ افقی، اعتبارسنجی ابزار فیبوناچی، پلن ورود، Trailing Stop عددی و چک‌لیست ۸ موج.
 `;
 
   const sddMarkdown = `# SPEC-DRIVEN DEVELOPMENT (SDD) - GITHUB SPEC-KIT COMPLIANT
@@ -630,110 +630,136 @@ async def websocket_stream(websocket: WebSocket, symbol: str, timeframe: str):
 `;
 
   const nuxt4Code = `<!--
-NUXT 4 FRONTEND PRODUCTION WORKSPACE (P20, P01..P05, P12)
-Location: /frontend/pages/index.vue
-Features: Nuxt 4, Vue 3.5 Composition API, Pinia Stores, TradingView Advanced Charts Adapter
+NUXT 4 + NUXT UI v4 PRODUCTION WORKSPACE (Semantic Tokens, Responsive Grid, SDD Compliant)
+Locations:
+  - /frontend/app/composables/useWaveEngine.ts
+  - /frontend/app/pages/index.vue
+Principles: Semantic tokens (bg-default, border-muted, text-primary), UCard/UButton/UAlert/UBadge/UIcon, auto dark mode
 -->
+
+<!-- composables/useWaveEngine.ts -->
+export const useWaveEngine = () => {
+  const counts = ref<WaveCount[]>([])
+  const loading = ref(false)
+  const error = ref<string | null>(null)
+
+  const analyze = async (data: OHLCV[], minConfidence = 0.3) => {
+    loading.value = true
+    error.value = null
+    try {
+      const res = await $fetch<CountResponse>('/api/v1/waves/count', {
+        method: 'POST',
+        body: { data, min_confidence: minConfidence }
+      })
+      counts.value = res.counts
+    } catch (e: any) {
+      error.value = e.data?.detail || 'خطا در تحلیل موج‌شماری'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return { counts, loading, error, analyze }
+}
+
+<!-- pages/index.vue -->
 <template>
-  <div class="h-screen w-screen bg-[#070b14] text-slate-100 flex flex-col overflow-hidden font-['Vazirmatn',sans-serif]" dir="rtl">
-    <!-- Top Pro Navbar -->
-    <header class="h-14 bg-[#0a101f] border-b border-slate-800 px-4 flex items-center justify-between gap-4 shrink-0">
+  <div class="min-h-screen bg-default text-default p-6 space-y-6" dir="rtl">
+    <header class="flex items-center justify-between border-b border-muted pb-4">
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
-          FEI
-        </div>
+        <UIcon name="i-lucide-chart-candlestick" class="w-7 h-7 text-primary" />
         <div>
-          <h1 class="text-sm font-black text-white">دستیار هوشمند فرکتالی امواج الیوت (Nuxt 4 + TradingView)</h1>
-          <p class="text-[10px] text-slate-400">پیاده‌سازی کامل استانداردهای SDD بهاری</p>
+          <h1 class="text-xl font-bold text-primary">موتور تحلیل فرکتالی امواج الیوت (FEI + Nuxt UI v4)</h1>
+          <p class="text-xs text-muted">پایپ‌لاین گام ۰ تا ۱۱، قوانین سه‌گانه، TMV/PRZ و شخصیت ۸ موج</p>
         </div>
       </div>
 
-      <div class="flex items-center gap-2 font-mono text-xs">
-        <span class="text-slate-400">تایم‌فریم فعال:</span>
-        <button 
-          v-for="tf in ['1M', '1W', '1D', '4H', '1H', '15M']" 
+      <div class="flex items-center gap-2">
+        <UButton
+          v-for="tf in ['1M', '1W', '1D', '4H', '1H']"
           :key="tf"
+          :color="activeTf === tf ? 'primary' : 'neutral'"
+          :variant="activeTf === tf ? 'solid' : 'outline'"
+          size="xs"
+          :aria-label="'انتخاب تایم‌فریم ' + tf"
           @click="activeTf = tf"
-          :class="activeTf === tf ? 'bg-cyan-500 text-slate-950 font-bold' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'"
-          class="px-2.5 py-1 rounded-lg transition-all"
         >
           {{ tf }}
-        </button>
+        </UButton>
+        <UButton
+          icon="i-lucide-refresh-cw"
+          color="primary"
+          :loading="loading"
+          aria-label="اجرای تحلیل امواج"
+          @click="runAnalysis"
+        >
+          تحلیل امواج
+        </UButton>
       </div>
     </header>
 
-    <!-- Main Workspace (Chart Right, Sidebar Left in RTL) -->
-    <main class="flex-1 flex flex-col lg:flex-row gap-3 p-3 overflow-hidden">
-      <!-- RIGHT: TradingView Advanced Charts Canvas -->
-      <section class="flex-1 h-full flex flex-col bg-[#080d1a] border border-slate-800/80 rounded-2xl overflow-hidden relative">
-        <div class="h-11 bg-[#0c1427] border-b border-slate-800/80 px-4 flex items-center justify-between">
-          <span class="text-xs font-bold text-white font-mono">BTCUSDT • {{ activeTf }}</span>
-          <span class="text-[11px] text-emerald-400 font-mono">حرکت آخر: موج ۵ در حال تکمیل</span>
-        </div>
-        <div id="tv_chart_container" class="flex-1 w-full h-full relative">
-          <!-- TradingView Advanced Charts Widget mounted here via FEISaveLoadAdapter -->
-        </div>
-      </section>
+    <UAlert
+      v-if="error"
+      color="error"
+      :title="error"
+      icon="i-lucide-alert-circle"
+    />
 
-      <!-- LEFT: Sleek Tabbed Sidebar (Rules, Tree, Scenarios) -->
-      <aside class="w-full lg:w-[460px] h-full flex flex-col bg-[#0b1120] border border-slate-800/90 rounded-2xl overflow-hidden shadow-2xl shrink-0">
-        <!-- Tab Bar -->
-        <div class="bg-[#0f172a] border-b border-slate-800 p-2 flex items-center justify-between gap-1 overflow-x-auto text-xs">
-          <button 
-            v-for="tab in tabs" 
-            :key="tab.id"
-            @click="currentTab = tab.id"
-            :class="currentTab === tab.id ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:bg-slate-800'"
-            class="px-3 py-1.5 rounded-xl transition-all"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
-
-        <!-- Tab Body -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-4">
-          <!-- Review Mode Tab -->
-          <div v-if="currentTab === 'COPILOT'" class="space-y-3">
-            <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex justify-between items-center text-xs">
-              <span>امتیاز اعتبار ساختار (Validity):</span>
-              <span class="font-bold font-mono text-emerald-400">{{ validityScore }} / 100</span>
-            </div>
-            <div v-for="rule in hardRules" :key="rule.id" class="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs flex justify-between">
-              <span>{{ rule.nameFa }}</span>
-              <span :class="rule.passed ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'">
-                {{ rule.passed ? 'تأیید' : 'نقض شده' }}
-              </span>
-            </div>
+    <div v-if="counts.length" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <UCard class="lg:col-span-2 bg-default border border-muted">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold text-primary">نمودار و پیوت‌های تاییدشده ({{ activeTf }})</h2>
+            <UBadge color="success" variant="subtle">اعتبار: {{ Math.round(counts[0].confidence * 100) }}٪</UBadge>
           </div>
-        </div>
-      </aside>
-    </main>
+        </template>
+        <WaveChart :data="rawData" :counts="counts" />
+      </UCard>
+
+      <div class="space-y-4">
+        <UCard class="bg-default border border-muted">
+          <template #header>
+            <h2 class="font-semibold">امتیاز اعتبار و نقض قوانین</h2>
+          </template>
+          <div class="space-y-2">
+            <UAlert
+              v-for="(v, idx) in counts[0]?.violations || []"
+              :key="idx"
+              :color="v.severity === 'error' ? 'error' : 'warning'"
+              :title="v.description"
+              icon="i-lucide-shield-alert"
+            />
+            <UAlert
+              v-if="!(counts[0]?.violations?.length)"
+              color="success"
+              title="تمام قوانین بنیادین ۱، ۲ و ۳ برقرار هستند"
+              icon="i-lucide-check-circle"
+            />
+          </div>
+        </UCard>
+
+        <TrailingCard :result="extensionResult" />
+      </div>
+    </div>
+
+    <UCard v-else-if="!loading" class="text-center py-12 bg-default border border-muted">
+      <UIcon name="i-lucide-layers" class="w-10 h-10 mx-auto mb-3 text-muted opacity-60" />
+      <p class="text-sm text-muted">داده‌های OHLCV را بارگذاری کنید تا شمارش سلسله‌مراتبی اجرا شود.</p>
+    </UCard>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-
 const activeTf = ref('1D')
-const currentTab = ref('COPILOT')
-const validityScore = ref(94)
+const rawData = ref<OHLCV[]>([])
+const extensionResult = ref<ExtensionResponse | null>(null)
+const { counts, loading, error, analyze } = useWaveEngine()
 
-const tabs = [
-  { id: 'COPILOT', label: 'دستیار و قوانین' },
-  { id: 'FRACTAL', label: 'درخت فرکتالی' },
-  { id: 'SCENARIOS', label: 'سناریوها' }
-]
-
-const hardRules = ref([
-  { id: 'R1', nameFa: 'قانون اول: عدم پوشش ۱۰۰٪ موج ۱ توسط موج ۲', passed: true },
-  { id: 'R2', nameFa: 'قانون دوم: موج ۳ نباید کوتاه‌ترین موج باشد', passed: true },
-  { id: 'R3', nameFa: 'قانون سوم: عدم تداخل موج ۴ با حریم موج ۱', passed: true }
-])
-
-onMounted(() => {
-  // TradingView Advanced Charts initialization with IExternalSaveLoadAdapter
-  console.log('FEI Nuxt 4 Engine initialized.')
-})
+const runAnalysis = async () => {
+  if (rawData.value.length >= 10) {
+    await analyze(rawData.value)
+  }
+}
 </script>
 `;
 

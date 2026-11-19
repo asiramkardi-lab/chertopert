@@ -309,6 +309,9 @@ export interface TriangleAnalysisReport {
   detected: boolean;
   triangleType: 'CONTRACTING' | 'EXPANDING' | 'INVALID';
   triangleTypeLabelFa: string;
+  directionalVariant?: 'ASCENDING' | 'DESCENDING' | 'SYMMETRIC';
+  scopeVariant?: 'LIMITED' | 'UNLIMITED';
+  dominantWaveName?: 'COUNTER' | 'IRREGULAR' | 'LIMITED' | 'UNLIMITED';
   positionValid: boolean;
   positionSlotLabelFa: string;
   frequencyPct: string;
@@ -388,6 +391,7 @@ export interface WavePersonalityItem {
 export interface WaveCharacteristicsReport {
   items: WavePersonalityItem[];
   waveAIdentificationWarningFa?: string;
+  waveASubwaveMatchStandard?: boolean;
   capitalManagementChecklistFa: string[];
   overallConfidence: number;
   warnings: string[];

@@ -657,6 +657,20 @@ export class RulesEngine {
               : 'موج ۵ کشیدگی ندارد؛ الگوی ترمینال محتمل‌تر است.',
             canBeSolvedByAlternate: !isW5Extended ? 'TERMINAL' : undefined
           });
+        } else if (pattern === 'IDEAL_CYCLE') {
+          const w5CoversW4 = isBull ? p5 >= p3 * 0.999 : p5 <= p3 * 1.001;
+          rules.push({
+            ruleId: 'CB_WAVE5_COVERS_W4',
+            name: 'CB-Wave Wave 5 100% Coverage of Wave 4',
+            nameFa: 'الزام پوشش ۱۰۰٪ موج ۴ توسط موج ۵ در سبک بهاری (CB-Wave / ۶-۴)',
+            type: 'HARD',
+            passed: w5CoversW4,
+            score: w5CoversW4 ? 100 : 0,
+            conceptId: 'C19',
+            messageFa: w5CoversW4
+              ? 'موج ۵ از انتهای موج ۳ عبور کرده و ۱۰۰٪ موج ۴ را به‌درستی پوشش داده است.'
+              : 'خطای سبک بهاری (CB-Wave — ۶-۴): موج ۵ حتی ۱۰۰٪ موج ۴ را پوشش نداده است؛ شمارش اشتباه است و باید بازبینی شود.'
+          });
         }
       }
 
@@ -938,10 +952,10 @@ export class RulesEngine {
           targets.push(
             {
               id: 'T_TERM_W4',
-              label: 'هدف فوری بازگشت به موج ۴',
-              ratioLabel: 'Wave 4 Base',
+              label: 'هدف بازگشت ۱۰۰٪ موج ۵ توسط موج A (محدوده موج ۴)',
+              ratioLabel: '100% W5 / Wave 4 Base',
               price: Math.round(p4 * 10) / 10,
-              descriptionFa: 'بازگشت سریع ترمینال به محدوده موج ۴',
+              descriptionFa: 'بازگشت سریع موج A برابر ۱۰۰٪ کل موج ۵ ترمینال به محدوده کف/سقف موج ۴ (۶-۹)',
               type: 'TMV',
               confidence: 92
             },

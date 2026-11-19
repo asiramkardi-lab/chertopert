@@ -433,11 +433,16 @@ export class PatternEngines {
       subtypeLabelFa = 'فلت جاری (Running — منسوخ و پرریسک)';
       warnings.push('فلت جاری (B > ۱۰۰٪ و C < ۶۱.۸٪) ساختار فرکتال را به هم می‌ریزد و برای معامله توصیه نمی‌شود.');
     } else if (bPctOfA > 138.2) {
-      subtype = cPctOfB > 100 ? 'IRREGULAR_EXTENDED' : 'IRREGULAR_DEFICIENT';
-      subtypeLabelFa =
-        cPctOfB > 100
-          ? 'فلت نامنظم کشیده (Irregular-Extended: B > ۱۳۸.۲٪)'
-          : 'فلت نامنظم ناقص (Irregular-Deficient)';
+      if (cPctOfB < 81) {
+        subtype = 'IRREGULAR_DEFICIENT';
+        subtypeLabelFa = 'فلت نامنظم ناقص (Irregular-Deficient: B > ۱۳۸.۲٪ و C < ۸۱٪)';
+      } else if (cPctOfB >= 100) {
+        subtype = 'IRREGULAR_EXTENDED';
+        subtypeLabelFa = 'فلت نامنظم کشیده (Irregular-Extended: B > ۱۳۸.۲٪ و C ≥ ۱۰۰٪)';
+      } else {
+        subtype = 'IRREGULAR';
+        subtypeLabelFa = 'فلت نامنظم (Irregular: B > ۱۳۸.۲٪ و C در بازه ۸۱–۱۰۰٪)';
+      }
     } else if (bPctOfA > 100) {
       subtype = cPctOfB < 81 ? 'IRREGULAR_DEFICIENT' : 'IRREGULAR';
       subtypeLabelFa =
@@ -632,30 +637,82 @@ export class PatternEngines {
       warnings.push(subwaveMismatchWarningFa);
     }
 
-    // جدول ۸ (۸.۹ و ۸.۱۰): بررسی مستطیل (موازی) و خطوط روند مختلط
-    const isParallelRectangle =
-      legA > 0 &&
-      legB > 0 &&
-      Math.abs(legC - legA) / legA <= 0.06 &&
-      Math.abs(legD - legB) / legB <= 0.06;
-
+    // جدول ۸ (۸.۹ و ۸.۱۰) + جلسه ۱۵: بررسی مستطیل (موازی)، صعودی/نزولی، محدود/نامحدود و خطوط روند مختلط
     const topA = verts[1].price;
     const topC = verts[3].price;
     const botB = verts[2].price;
     const botD = verts[4].price;
-    const isBullDir = scenario.direction === 'BULLISH';
-    const topSlopeConv = isBullDir ? topC < topA : topC > topA;
-    const botSlopeConv = isBullDir ? botD > botB : botD < botB;
-    const isMixedTrendlines = !isParallelRectangle && topSlopeConv !== botSlopeConv;
+    const upperA = Math.max(topA, botB);
+    const upperC = Math.max(topC, botD);
+    const lowerB = Math.min(topA, botB);
+    const lowerD = Math.min(topC, botD);
+
+    const triangleHeight = Math.max(0.01, upperA - lowerB);
+    const upperFlat = Math.abs(upperC - upperA) / triangleHeight <= 0.08;
+    const lowerFlat = Math.abs(lowerD - lowerB) / triangleHeight <= 0.08;
+    const upperFalling = upperC < upperA && !upperFlat;
+    const upperRising = upperC > upperA && !upperFlat;
+    const lowerRising = lowerD > lowerB && !lowerFlat;
+    const lowerFalling = lowerD < lowerB && !lowerFlat;
+
+    const directionalVariant: TriangleAnalysisReport['directionalVariant'] =
+      upperFlat && lowerRising
+        ? 'ASCENDING'
+        : lowerFlat && upperFalling
+        ? 'DESCENDING'
+        : 'SYMMETRIC';
+
+    const isParallelRectangle =
+      (upperFlat && lowerFlat) ||
+      (legA > 0 &&
+        legB > 0 &&
+        Math.abs(legC - legA) / legA <= 0.06 &&
+        Math.abs(legD - legB) / legB <= 0.06 &&
+        directionalVariant === 'SYMMETRIC');
+
+    const isConvergingSides =
+      (upperFalling && (lowerRising || lowerFlat)) ||
+      (upperFlat && lowerRising);
+    const isDivergingSides =
+      (upperRising && (lowerFalling || lowerFlat)) ||
+      (upperFlat && lowerFalling);
+
+    const isMixedTrendlines =
+      !isParallelRectangle && !isConvergingSides && !isDivergingSides;
     const isRareWaveATriangle = posChar === 'A' || cleanPos === 'A';
 
-    const isContracting = !isParallelRectangle && !isMixedTrendlines && legC < legA && (scenario.patternType === 'TRIANGLE_CONVERGING' || legE <= legC);
-    const isExpanding = !isParallelRectangle && !isMixedTrendlines && legC > legA && (scenario.patternType === 'TRIANGLE_EXPANDING' || legE >= legC);
+    const scopeVariant: TriangleAnalysisReport['scopeVariant'] =
+      isRareWaveATriangle || subwaveCounts[0] === 5 ? 'UNLIMITED' : 'LIMITED';
+
+    const maxLeg = Math.max(legA, legB, legC, legD);
+    const dominantWaveName: TriangleAnalysisReport['dominantWaveName'] =
+      maxLeg === legA
+        ? 'COUNTER'
+        : maxLeg === legB
+        ? 'IRREGULAR'
+        : maxLeg === legC
+        ? 'LIMITED'
+        : 'UNLIMITED';
+
+    const isContracting =
+      !isParallelRectangle &&
+      !isMixedTrendlines &&
+      (isConvergingSides || (legC < legA && (scenario.patternType === 'TRIANGLE_CONVERGING' || legE <= legC)));
+    const isExpanding =
+      !isParallelRectangle &&
+      !isMixedTrendlines &&
+      !isContracting &&
+      (isDivergingSides || (legC > legA && (scenario.patternType === 'TRIANGLE_EXPANDING' || legE >= legC)));
     const triangleType: TriangleAnalysisReport['triangleType'] = isExpanding
       ? 'EXPANDING'
       : isContracting
       ? 'CONTRACTING'
       : 'INVALID';
+
+    // Counter-trend alignment check (Session 14.12 & 15.1): corrective triangle must not trend monotonically with impulse
+    const netDrift = Math.abs(verts[verts.length - 1].price - verts[0].price);
+    const isCounterTrendAligned =
+      positionValid && netDrift <= Math.max(0.01, Math.max(legA, legB) * 1.15);
 
     if (isParallelRectangle) {
       warnings.push('جدول ۸ (۸.۹): خطوط روند تقریباً موازی هستند؛ الگوی مستطیل محتمل است (مثلث همگرای استاندارد نیست).');
@@ -663,21 +720,31 @@ export class PatternEngines {
     if (isMixedTrendlines) {
       warnings.push('جدول ۸ (۸.۱۰): خطوط روند مختلط هستند (یک ضلع همگرا و ضلع مقابل واگرا)؛ مثلث نامعتبر است.');
     }
-    if (isRareWaveATriangle) {
-      warnings.push('جدول ۸ (۸.۱۷–۸.۱۸): مثلث نامحدود / تشکیل مثلث در جایگاه موج A بسیار نادر است؛ شمارش جایگزین کنترل شود.');
+    if (isRareWaveATriangle || scopeVariant === 'UNLIMITED') {
+      warnings.push('جدول ۸ (۸.۱۷–۸.۱۸) / جلسه ۱۵.۹: مثلث نامحدود (موج A به صورت مثلث یا جایگاه موج A) بسیار نادر است.');
     }
     if (triangleType === 'EXPANDING') {
       warnings.push('مثلث واگرا (Expanding) نایاب‌تر از مثلث مانع است؛ شمارش را بادقت کنترل کنید.');
     }
+    if (!isCounterTrendAligned) {
+      warnings.push('هشدار جلسه ۱۵.۱: مثلث هم‌جهت با روند اصلی (به جای اصلاحی) احتمالاً الگوی قطر است.');
+    }
+
+    const dirSuffix =
+      directionalVariant === 'ASCENDING'
+        ? ' — صعودی (Ascending: سقف افقی و کف‌های بالاتر)'
+        : directionalVariant === 'DESCENDING'
+        ? ' — نزولی (Descending: کف افقی و سقف‌های پایین‌تر)'
+        : '';
 
     const triangleTypeLabelFa = isParallelRectangle
       ? 'مستطیل / خطوط موازی (نیازمند تفکیک — جدول ۸.۹)'
       : isMixedTrendlines
       ? 'خطوط روند مختلط — مثلث نامعتبر (جدول ۸.۱۰)'
       : triangleType === 'EXPANDING'
-      ? 'مثلث واگرا / گسترشی (Expanding)'
+      ? `مثلث واگرا / گسترشی (Expanding)${dirSuffix}`
       : triangleType === 'CONTRACTING'
-      ? 'مثلث مانع / همگرا (Contracting — رایج)'
+      ? `مثلث مانع / همگرا (Contracting — رایج)${dirSuffix}`
       : 'هندسه مثلث نیازمند بازبینی خطوط روند';
 
     const retraceRatios = [legB / Math.max(0.01, legA), legC / Math.max(0.01, legB), legD / Math.max(0.01, legC)];
@@ -690,21 +757,21 @@ export class PatternEngines {
       warnings.push('جدول ۸ (۸.۱۵): برخی اضلاع مثلث کمتر از ۵۰٪ بازگشت داشته‌اند (غیرایده‌آل).');
     }
 
-    // Table 8: Completion Box Timing (<0.50 Before Box 3 = ideal, 0.50..0.75 Inside Box 3 = standard, >0.75 After Box 3 = non-ideal)
+    // Table 8 & Session 15.7: Ideal completion before 3rd box (< 2/3 = 0.667, inside box 3 = 0.667..0.85, after = > 0.85)
     const lastVertIdx = verts[verts.length - 1].candleIndex;
     const timingSpanRatio =
       candles.length > 0
         ? Math.round(((lastVertIdx - verts[0].candleIndex) / Math.max(1, candles.length - verts[0].candleIndex)) * 100) / 100
         : 0.55;
     const timingZone: TriangleAnalysisReport['timingZone'] =
-      timingSpanRatio < 0.5
+      timingSpanRatio < 0.667
         ? 'BEFORE_BOX_3'
-        : timingSpanRatio <= 0.75
+        : timingSpanRatio <= 0.85
         ? 'INSIDE_BOX_3'
         : 'AFTER_BOX_3';
-    const idealCompletionBeforeBox3 = timingZone !== 'AFTER_BOX_3';
+    const idealCompletionBeforeBox3 = timingZone === 'BEFORE_BOX_3';
     if (timingZone === 'AFTER_BOX_3') {
-      warnings.push('جدول ۸: مثلث پس از باکس سوم (نسبت زمانی > ۷۵٪) تکمیل شده است (غیرایده‌آل — احتمال ضعف پرتاب).');
+      warnings.push('جدول ۸: مثلث پس از باکس سوم (نسبت زمانی > ۸۵٪) تکمیل شده است (غیرایده‌آل — احتمال ضعف پرتاب).');
     }
 
     const lastClose = candles.length > 0 ? candles[candles.length - 1].close : verts[verts.length - 1].price;
@@ -724,7 +791,7 @@ export class PatternEngines {
         ? 'الگوی ادامه‌دهنده صعودی: پس از اتمام E جهش در جهت روند اصلی'
         : 'الگوی ادامه‌دهنده نزولی: پس از اتمام E ادامه فشار نزول';
 
-    notes.push(`فراوانی موقعیت در موج ${posChar}: ${frequencyPct}`);
+    notes.push(`فراوانی موقعیت در موج ${posChar}: ${frequencyPct} | دامنه: ${scopeVariant === 'UNLIMITED' ? 'نامحدود (Unlimited)' : 'محدود (Limited)'} | نام‌گذاری غالباً: ${dominantWaveName}`);
     notes.push(
       idealRetracement50
         ? 'قاعده بازگشت ۵۰٪ در اضلاع مثلث برقرار است (مثلث ایده‌آل).'
@@ -744,12 +811,15 @@ export class PatternEngines {
       detected: triangleType !== 'INVALID',
       triangleType,
       triangleTypeLabelFa,
+      directionalVariant,
+      scopeVariant,
+      dominantWaveName,
       positionValid,
       positionSlotLabelFa: `موج ${posChar} (${positionValid ? 'اصلاحی مجاز' : endingTriangle ? 'پایانی' : 'نامعتبر'})`,
       frequencyPct,
       namingValid,
       continuationLabelFa,
-      isCounterTrendAligned: true,
+      isCounterTrendAligned,
       idealRetracement50,
       idealCompletionBeforeBox3,
       timingZone,
@@ -1092,6 +1162,12 @@ export class PatternEngines {
 
     const isBull = scenario.direction === 'BULLISH';
     const sign = isBull ? 1 : -1;
+
+    if (verts.length >= 2 && verts.length < 5 && verts[0].candleIndex === 0) {
+      extensionUnconfirmedReasonFa =
+        'کشیدگی موج ۱ از کف مطلق بدون مرجع موج ۲ و ۳ قابل تشخیص نیست (جلسه ۱۸ — Edge Case).';
+      warnings.push(extensionUnconfirmedReasonFa);
+    }
 
     if (verts.length >= 5) {
       const len1 = Math.max(0.01, Math.abs(verts[1].price - verts[0].price));
@@ -1686,6 +1762,9 @@ export class PatternEngines {
 
     const w1Len = len(0);
     const w3Len = len(2);
+    const w5Len = len(4);
+    const isBull = scenario.direction === 'BULLISH';
+    let waveASubwaveMatchStandard: boolean | undefined;
 
     for (let i = 0; i < Math.min(verts.length - 1, 8); i++) {
       const v0 = verts[i];
@@ -1713,10 +1792,32 @@ export class PatternEngines {
         traitFa = ideal2
           ? `موج ۲ (${lengthPctOfRef}٪ موج ۱): اصلاح ایده‌آل ۵۰–۶۱.۸٪ (زیگزاگ و نقطه طلایی ورود به موج ۳).`
           : `موج ۲ (${lengthPctOfRef ?? '--'}٪ موج ۱): اغلب زیگزاگ با اصلاح ۵۰ تا ۶۱.۸٪ و نقطه مناسب ورود.`;
-        valid = valid && (lengthPctOfRef === null || lengthPctOfRef < 100);
+        valid = valid && (scenario.patternType === 'ANTI_CYCLE' || lengthPctOfRef === null || lengthPctOfRef < 100);
       } else if (lbl === '3' || i === 2) {
         role = 'MOTIVE';
         lengthPctOfRef = w1Len > 0 ? Math.round((segLen / w1Len) * 100) : null;
+        const w3IsShortest = w5Len > 0 && w1Len > 0 && w3Len < w1Len * 0.999 && w3Len < w5Len * 0.999;
+        const w3Clear3Wave =
+          !scenario.patternType.includes('DIAGONAL') &&
+          candles.length > 0 &&
+          span >= 10 &&
+          PivotDetector.detectPivots(
+            candles.slice(
+              Math.max(0, Math.min(v0.candleIndex, v1.candleIndex)),
+              Math.min(candles.length, Math.max(v0.candleIndex, v1.candleIndex) + 1)
+            ),
+            1,
+            1,
+            0.45
+          ).length === 2;
+        if (w3Clear3Wave || w3IsShortest) {
+          valid = false;
+          warnings.push(
+            w3IsShortest
+              ? 'خطای جلسه ۱۹ (قانون ۲): موج ۳ کوتاه‌ترین موج بین ۱، ۳ و ۵ است.'
+              : 'خطای جلسه ۱۹ (T-19.9): موج ۳ ساختار ۳موجی واضح دارد (امواج اصلی باید ۵موجی یا شتابدار باشند).'
+          );
+        }
         traitFa =
           lengthPctOfRef !== null && lengthPctOfRef >= 161.8
             ? `موج ۳ (${lengthPctOfRef}٪ موج ۱): قوی‌ترین و پرحجم‌ترین موج روند؛ حالت کشیدگی فعال و فرصت ترید اصلی.`
@@ -1728,9 +1829,18 @@ export class PatternEngines {
       } else if (lbl === '5' || i === 4) {
         role = 'MOTIVE';
         lengthPctOfRef = w3Len > 0 ? Math.round((segLen / w3Len) * 100) : null;
+        const w5CoversW4 = verts[3] ? (isBull ? v1.price >= verts[3].price * 0.999 : v1.price <= verts[3].price * 1.001) : true;
+        if (!w5CoversW4) {
+          valid = false;
+          warnings.push('خطای جلسه ۱۹ (CB-Wave): موج ۵ حداقل ۱۰۰٪ موج ۴ را پوشش نداده است.');
+        }
         traitFa = `موج ۵ (${lengthPctOfRef ?? '--'}٪ موج ۳): مستعد واگرایی، کاهش حجم، قطر پایانی یا کوتاه‌شدگی در پایان روند.`;
       } else if (lbl === 'A' || i === 5) {
         role = 'MOTIVE';
+        const w5Item = items[4];
+        if (w5Item && w5Item.estimatedSubwaves === 3 && subwaves === 5) {
+          waveASubwaveMatchStandard = true;
+        }
         traitFa =
           'موج A: سخت‌ترین موج برای تشخیص به دلیل شباهت به موج ۴؛ در صورت موج ۵ سه‌موجی، خود A ساختار ۵موجی می‌گیرد.';
       } else if (lbl === 'B' || i === 6) {
@@ -1742,6 +1852,14 @@ export class PatternEngines {
         role = 'MOTIVE';
         const bLen = len(6);
         lengthPctOfRef = bLen > 0 ? Math.round((segLen / bLen) * 100) : null;
+        const cCoversB100 = bLen <= 0 || segLen >= bLen * 0.999;
+        const cMeets92W5 = w5Len <= 0 || segLen >= w5Len * 0.92;
+        if (!cCoversB100) {
+          valid = false;
+          warnings.push('خطای جلسه ۱۹ (T-19.22): موج C باید ۱۰۰٪ موج B را پوشش دهد.');
+        } else if (!cMeets92W5) {
+          warnings.push('هشدار جلسه ۱۹ (T-19.23): موج C هنوز به حداقل ۹۲٪ موج ۵ نرسیده است.');
+        }
         traitFa = `موج C (${lengthPctOfRef ?? '--'}٪ موج B): تکمیل‌کننده اصلاح؛ الزام پوشش ۱۰۰٪ B و دست‌کم ۹۲٪ موج ۵.`;
       }
 
@@ -1780,6 +1898,7 @@ export class PatternEngines {
     return {
       items,
       waveAIdentificationWarningFa,
+      waveASubwaveMatchStandard,
       capitalManagementChecklistFa,
       overallConfidence,
       warnings

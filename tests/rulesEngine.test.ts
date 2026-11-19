@@ -595,6 +595,105 @@ describe('Category 3 Cardinal Rules & 0.1% Tolerance Layer (RulesEngine)', () =>
       expect(noStop.trailingStopStatus).toBe('INACTIVE_WARNING');
       expect(noStop.trailingStopPrice).toBeNull();
     });
+
+    it('Sessions 6, 13, 14–15, 18 & 19: enforces CB-Wave 5>=W4, Ascending/Descending/Unlimited Triangles, Irregular Flat C bands, chart-bottom extension guard, and Wave 5/C coverage', () => {
+      // Session 6.4 (CB_WAVE5_COVERS_W4): Wave 5 terminating below Wave 3 fails HARD rule in IDEAL_CYCLE
+      const failedCb5 = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 160, 130, 260, 220, 248]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      const cbRuleFail = failedCb5.rules.find(r => r.ruleId === 'CB_WAVE5_COVERS_W4');
+      expect(cbRuleFail).toBeDefined();
+      expect(cbRuleFail?.passed).toBe(false);
+      expect(cbRuleFail?.type).toBe('HARD');
+
+      const passedCb5 = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 160, 130, 260, 220, 275]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(passedCb5.rules.find(r => r.ruleId === 'CB_WAVE5_COVERS_W4')?.passed).toBe(true);
+
+      // Session 13 (analyzeFlat): B > 138.2% classifies C<100 as IRREGULAR, C>=100 as IRREGULAR_EXTENDED, and B>100 & C<61.8 as RUNNING_DEPRECATED
+      const flatIrregular = PatternEngines.analyzeFlat(
+        buildScenario('FLAT_EXPANDED', [100, 200, 50, 190], 'BULLISH', ['0', 'A', 'B', 'C']),
+        candles
+      );
+      expect(flatIrregular.subtype).toBe('IRREGULAR');
+
+      const flatIrregularExt = PatternEngines.analyzeFlat(
+        buildScenario('FLAT_EXPANDED', [100, 200, 50, 215], 'BULLISH', ['0', 'A', 'B', 'C']),
+        candles
+      );
+      expect(flatIrregularExt.subtype).toBe('IRREGULAR_EXTENDED');
+
+      const flatRunningDep = PatternEngines.analyzeFlat(
+        buildScenario('FLAT_RUNNING', [100, 200, 80, 140], 'BULLISH', ['0', 'A', 'B', 'C']),
+        candles
+      );
+      expect(flatRunningDep.subtype).toBe('RUNNING_DEPRECATED');
+
+      // Sessions 14–15 (analyzeTriangle): Ascending, Descending & Wave-A Unlimited variants without false mixed-trendline flag
+      const ascTri = PatternEngines.analyzeTriangle(
+        buildScenario('TRIANGLE_CONVERGING', [100, 200, 140, 201, 168, 196], 'BULLISH', ['0', 'A', 'B', 'C', 'D', 'E']),
+        candles,
+        'CORRECTIVE',
+        '4'
+      );
+      expect(ascTri.detected).toBe(true);
+      expect(ascTri.triangleType).toBe('CONTRACTING');
+      expect(ascTri.directionalVariant).toBe('ASCENDING');
+      expect(ascTri.isMixedTrendlines).toBe(false);
+
+      const descTri = PatternEngines.analyzeTriangle(
+        buildScenario('TRIANGLE_CONVERGING', [200, 100, 160, 99, 132, 103], 'BEARISH', ['0', 'A', 'B', 'C', 'D', 'E']),
+        candles,
+        'CORRECTIVE',
+        '4'
+      );
+      expect(descTri.detected).toBe(true);
+      expect(descTri.triangleType).toBe('CONTRACTING');
+      expect(descTri.directionalVariant).toBe('DESCENDING');
+      expect(descTri.isMixedTrendlines).toBe(false);
+
+      const rareWaveATri = PatternEngines.analyzeTriangle(
+        buildScenario('TRIANGLE_CONVERGING', [100, 200, 140, 190, 155, 175], 'BULLISH', ['0', 'A', 'B', 'C', 'D', 'E']),
+        candles,
+        'CORRECTIVE',
+        'A'
+      );
+      expect(rareWaveATri.scopeVariant).toBe('UNLIMITED');
+
+      // Session 18: chart-bottom early vertices (<5, start at candleIndex 0) cannot confirm Wave 1 extension
+      const chartBottomScen = buildScenario('IDEAL_CYCLE', [100, 180, 140], 'BULLISH', ['0', '1', '2']);
+      chartBottomScen.vertices[0].candleIndex = 0;
+      const chartBottomExt = PatternEngines.analyzeExtensionAndTrailing(chartBottomScen, candles);
+      expect(chartBottomExt.extendedWave).toBeNull();
+      expect(chartBottomExt.extensionUnconfirmedReasonFa).toBeDefined();
+
+      // Session 19 (analyzeWaveCharacteristics): Wave 5 failing Wave 4 coverage & Wave C failing 100% Wave B coverage
+      const charReport = PatternEngines.analyzeWaveCharacteristics(
+        buildScenario(
+          'IDEAL_CYCLE',
+          [100, 160, 130, 260, 220, 248, 190, 235, 195],
+          'BULLISH',
+          ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C']
+        ),
+        candles
+      );
+      const w5Item = charReport.items.find(it => it.label === '5');
+      const wCItem = charReport.items.find(it => it.label === 'C');
+      expect(w5Item?.valid).toBe(false);
+      expect(wCItem?.valid).toBe(false);
+    });
   });
 });
+
 
