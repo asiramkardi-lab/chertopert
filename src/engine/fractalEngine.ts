@@ -19,6 +19,7 @@ import {
   WaveScenario,
   WaveVertex,
   PatternFamily,
+  MultiTfImpulsiveLegCheck,
   MultiTfRefinementStep,
   MultiTfRefinementSummary
 } from '../types/elliott';
@@ -54,9 +55,9 @@ export const DEGREE_CONFIGS: Record<WaveDegree, DegreeConfig> = {
   INTERMEDIATE: {
     id: 'INTERMEDIATE',
     level: 4,
-    nameFa: 'میانی (اعداد ساده)',
+    nameFa: 'میانی (اعداد ساده — قرمز)',
     symbolPrefix: '(1)',
-    color: '#f59e0b',
+    color: '#ef4444',
     defaultTimeframe: '4H'
   }
 };
@@ -87,6 +88,9 @@ export interface LegNatureAnalysis {
   candleSpan: number;
   directionalRatio: number;
   efficiencyRatio: number;
+  slopeAtrPerBar?: number;
+  volumeRatio?: number;
+  restCount?: number;
   summaryFa: string;
 }
 
@@ -182,16 +186,32 @@ export class FractalEngine {
   public static assignDegrees(
     nestingDepth: number,
     timeframe: string,
-    marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO'
+    marketType: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY' = 'CRYPTO',
+    candleCount?: number
   ): DegreeAssignmentResult {
-    const maxAllowed = this.getMaxDegreesForTimeframe(timeframe, marketType);
+    const tfAllowed = this.getMaxDegreesForTimeframe(timeframe, marketType);
+    const candleCappedAllowed =
+      candleCount === undefined
+        ? tfAllowed
+        : candleCount < 10
+        ? 0
+        : candleCount < 30
+        ? Math.min(tfAllowed, 2)
+        : candleCount < 60
+        ? Math.min(tfAllowed, 3)
+        : tfAllowed;
+    const maxAllowed = candleCappedAllowed;
     const clampedCount = Math.max(1, Math.min(nestingDepth, maxAllowed || 1, DEGREE_ORDER.length));
     const degrees = DEGREE_ORDER.slice(0, clampedCount);
     const droppedLevels = Math.max(0, nestingDepth - clampedCount);
 
     const reasonFa =
-      maxAllowed === 0
+      tfAllowed === 0
         ? `تایم‌فریم ${timeframe} در بورس ایران مجاز به شمارش نیست (نقدشوندگی و محدودیت درجه).`
+        : candleCount !== undefined && candleCount < 10
+        ? `تعداد کندل‌ها (${candleCount}) کمتر از ۱۰ است؛ شمارش در این تایم‌فریم معتبر نیست.`
+        : candleCount !== undefined && candleCappedAllowed < tfAllowed
+        ? `به دلیل محدودیت تعداد کندل (${candleCount})، حداکثر ${candleCappedAllowed} درجه قابل تفکیک است و نمی‌توان ۴ درجه شمارش کرد.`
         : droppedLevels > 0
         ? `تایم‌فریم ${timeframe} حداکثر از ${maxAllowed} درجه پشتیبانی می‌کند؛ ${droppedLevels} سطح ریزموج اضافی طبق قانون توقف درجه حذف شد.`
         : `تخصیص ${degrees.length} درجه ساختاری در تایم‌فریم ${timeframe} کاملاً مجاز است (حداکثر مجاز: ${maxAllowed}).`;
@@ -201,6 +221,70 @@ export class FractalEngine {
       droppedLevels,
       maxAllowed,
       reasonFa
+    };
+  }
+
+  /**
+   * Session 8 (2.11 & 2.12): Validate wave degree color coding & 4-degree cap.
+   * Degree 4 (INTERMEDIATE) is marked Red (#ef4444) to prevent accidental deeper sub-counting.
+   * Attempting to count/color Degree 5+ is rejected as invalid.
+   */
+  public static validateDegreeColorScheme(params: {
+    degreeCount: number;
+    timeframe?: string;
+    marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
+    useColors?: boolean;
+  }): {
+    isValid: boolean;
+    maxAllowed: number;
+    degree4Color?: string;
+    isDegree4Red: boolean;
+    assigned: Array<{ level: number; degree: WaveDegree; color?: string; isRed: boolean }>;
+    errors: string[];
+    warnings: string[];
+  } {
+    const {
+      degreeCount,
+      timeframe = '1D',
+      marketType = 'TSE_IRAN',
+      useColors = true
+    } = params;
+    const maxAllowed = Math.min(4, Math.max(1, this.getMaxDegreesForTimeframe(timeframe, marketType) || 4));
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (degreeCount > maxAllowed) {
+      errors.push(
+        `خطای محدودیت درجه (۲-۱۱ / ۲-۱۲): شمارش و رنگ‌بندی درجه ${degreeCount} مجاز نیست (حداکثر ${maxAllowed} درجه در تایم‌فریم ${timeframe} پشتیبانی می‌شود).`
+      );
+    }
+
+    const validCount = Math.max(1, Math.min(degreeCount, maxAllowed, DEGREE_ORDER.length));
+    const assigned = DEGREE_ORDER.slice(0, validCount).map((deg, idx) => {
+      const level = idx + 1;
+      const cfg = DEGREE_CONFIGS[deg];
+      const color = useColors ? cfg.color : undefined;
+      return {
+        level,
+        degree: deg,
+        color,
+        isRed: useColors && level === 4
+      };
+    });
+
+    const deg4 = assigned.find(a => a.level === 4);
+    if (deg4 && !useColors) {
+      warnings.push('درجه ۴ بدون رنگ‌بندی است (ممکن است ولی ریسک شمارش اشتباه و ورود به درجه ۵ بیشتر می‌شود).');
+    }
+
+    return {
+      isValid: errors.length === 0,
+      maxAllowed,
+      degree4Color: deg4?.color,
+      isDegree4Red: Boolean(deg4?.isRed),
+      assigned,
+      errors,
+      warnings
     };
   }
 
@@ -493,7 +577,92 @@ export class FractalEngine {
         legChecks
       });
 
-      if (steps.length >= 3) break;
+      if (steps.length >= 5) break;
+    }
+
+    // ─── Section 2.2 / 2.3 / 2.5 Boundary Rules:
+    // 1) If Daily (1D) does not show a clear 5-wave structure -> go down to 4H / 1H (respecting TSE_IRAN excluding <4H)
+    // 2) If any wave looks Impulsive/Momentum on a higher TF -> check lower TF (4H / 1H) whether it decomposes into 5 subwaves (Fractal) or stays assumed 5 (Motive) / 3 (Corrective)
+    const allowedLowerTfs = marketType === 'TSE_IRAN' ? ['4H'] : ['4H', '1H'];
+    const tf1DCandles = candlesByTf['1D'];
+    const dailyPivots =
+      tf1DCandles && tf1DCandles.length >= 10
+        ? PivotDetector.detectPivots(tf1DCandles, 1, 1, 0.45)
+        : [];
+    const dailyHas5WavePivots = dailyPivots.length >= 5;
+    const scenarioHasFull5Waves =
+      !primary.isPartial &&
+      primary.vertices.length >= 6 &&
+      !['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING'].includes(primary.patternType);
+
+    const dailyNeedsLowerTf =
+      Boolean(tf1DCandles && tf1DCandles.length >= 10) &&
+      (!dailyHas5WavePivots || !scenarioHasFull5Waves);
+
+    const dailyLowerTfReasonFa = dailyNeedsLowerTf
+      ? marketType === 'TSE_IRAN'
+        ? 'در نمودار روزانه (1D) ساختار کامل ۵موجی دیده نشد ← برای تفکیک زیرموج‌ها به تایم‌فریم 4H بروید (زیر ۴ ساعته در بورس ایران مجاز نیست).'
+        : 'در نمودار روزانه (1D) ساختار ۵موجی کامل دیده نشد ← به تایم‌فریم پایین‌تر (4H / 1H) بروید.'
+      : undefined;
+
+    if (dailyNeedsLowerTf && dailyLowerTfReasonFa) {
+      relabelingSuggestions.push(dailyLowerTfReasonFa);
+    }
+
+    // Higher-TF Impulsive-to-5-Wave Check (Sections 2.1, 2.3, 2.4, 2.5)
+    const impulsiveLegsMayBe5Wave: MultiTfImpulsiveLegCheck[] = [];
+    const higherTfSource = primary.timeframe || startTf;
+    const higherTfCandles = candlesByTf[higherTfSource] || candlesByTf['1D'] || candlesByTf['1W'] || candlesByTf['1M'] || [];
+    const legNaturesAtHigher =
+      higherTfCandles.length >= 10 ? this.classifyScenarioWaveNatures(primary, higherTfCandles) : [];
+
+    for (let i = 1; i < primary.vertices.length; i++) {
+      const vStart = primary.vertices[i - 1];
+      const vEnd = primary.vertices[i];
+      const cleanLabel = vEnd.label.replace(/[()VW\s]/g, '').toUpperCase();
+      const role: WaveRole = ['2', '4', 'B', 'X', 'D'].includes(cleanLabel) ? 'CORRECTIVE' : 'MOTIVE';
+      const natureEntry = legNaturesAtHigher[i - 1];
+      const isImpulsiveHigher =
+        natureEntry?.nature === 'IMPULSIVE_MOMENTUM' ||
+        (role === 'MOTIVE' && natureEntry && natureEntry.internalPivotCount === 2);
+
+      if (!isImpulsiveHigher) continue;
+
+      let verifiedLowerTf: string | undefined;
+      let detectedSubwaves: 3 | 5 | null = null;
+      const minTs = Math.min(vStart.timestamp, vEnd.timestamp);
+      const maxTs = Math.max(vStart.timestamp, vEnd.timestamp);
+
+      for (const ltf of allowedLowerTfs) {
+        const ltfCandles = candlesByTf[ltf];
+        if (!ltfCandles || ltfCandles.length < 10) continue;
+        const subSlice = ltfCandles.filter(c => c.timestamp >= minTs && c.timestamp <= maxTs);
+        if (subSlice.length >= 6) {
+          const pivots = PivotDetector.detectPivots(subSlice, 1, 1, 0.45);
+          const subCount: 3 | 5 | null = pivots.length >= 4 ? 5 : pivots.length >= 2 ? 3 : null;
+          verifiedLowerTf = ltf;
+          detectedSubwaves = subCount;
+          if (subCount !== null) break;
+        }
+      }
+
+      const expectedSub = role === 'MOTIVE' ? 5 : 3;
+      const messageFa =
+        verifiedLowerTf && detectedSubwaves === 5
+          ? `موج ${vStart.label}←${vEnd.label} در تایم بالاتر (${higherTfSource}) شتابدار به نظر می‌رسید، اما در تایم ${verifiedLowerTf} ساختار ۵موجی قابل شمارش یافت شد (در واقع فرکتالی است، نه شتابدار).`
+          : verifiedLowerTf && detectedSubwaves === 3
+          ? `موج ${vStart.label}←${vEnd.label} در تایم ${verifiedLowerTf} ساختار ۳موجی دارد${
+              role === 'MOTIVE' ? ' (احتمالاً موج اصلاحی است، نه اصلی — یا الگوی قطر بررسی شود).' : ' (با نقش اصلاحی تایید می‌شود).'
+            }`
+          : `موج ${vStart.label}←${vEnd.label} در تایم ${higherTfSource} شتابدار است؛ در تایم پایین‌تر (${allowedLowerTfs.join('/')}) ممکن است ${expectedSub}موجی باشد (در غیاب ساختار قابل شمارش، فرض ${expectedSub}موجی اعمال می‌شود).`;
+
+      impulsiveLegsMayBe5Wave.push({
+        legLabel: `${vStart.label}←${vEnd.label}`,
+        higherTf: higherTfSource,
+        verifiedLowerTf,
+        detectedSubwaves,
+        messageFa
+      });
     }
 
     const validRemaining = activeList.filter(s => s.validityScore >= 70);
@@ -512,6 +681,10 @@ export class FractalEngine {
         maxAllowedDegree,
         fallbackToHigherTf,
         fallbackReasonFa,
+        dailyNeedsLowerTf,
+        recommendedLowerTimeframes: dailyNeedsLowerTf ? allowedLowerTfs : [],
+        dailyLowerTfReasonFa,
+        impulsiveLegsMayBe5Wave,
         steps,
         relabelingSuggestions: Array.from(new Set(relabelingSuggestions))
       }
@@ -527,6 +700,11 @@ export class FractalEngine {
     candles: Candle[]
   ): LegNatureAnalysis[] {
     if (scenario.vertices.length < 2 || candles.length === 0) return [];
+
+    const atrSeries = PivotDetector.calculateATR(candles, 14);
+    const nonZeroVols = candles.map(c => c.volume).filter(v => v > 0);
+    const baselineAvgVol =
+      nonZeroVols.length > 0 ? nonZeroVols.reduce((a, b) => a + b, 0) / nonZeroVols.length : 0;
 
     const results: LegNatureAnalysis[] = [];
     for (let i = 1; i < scenario.vertices.length; i++) {
@@ -544,38 +722,74 @@ export class FractalEngine {
 
       let sameDirCount = 0;
       let pathSum = 0;
+      let restCount = 0;
+      let inRest = false;
+      let volSum = 0;
+      let volCount = 0;
+      let atrSum = 0;
+
       for (let k = 0; k < slice.length; k++) {
         const c = slice[k];
         const body = Math.abs(c.close - c.open);
         const fullRange = Math.max(0.0001, c.high - c.low);
         const isDoji = body <= fullRange * 0.08;
         if (!isDoji) {
-          if (legUp && c.close > c.open) sameDirCount++;
-          if (!legUp && c.close < c.open) sameDirCount++;
+          const isSameDir = legUp ? c.close > c.open : c.close < c.open;
+          if (isSameDir) {
+            sameDirCount++;
+            inRest = false;
+          } else if (!inRest) {
+            restCount++;
+            inRest = true;
+          }
         }
         if (k > 0) {
           pathSum += Math.abs(c.close - slice[k - 1].close);
         }
+        if (c.volume > 0) {
+          volSum += c.volume;
+          volCount++;
+        }
+        atrSum += atrSeries[sIdx + k] || fullRange;
       }
+
+      const avgLegAtr = Math.max(0.0001, atrSum / Math.max(1, slice.length));
+      const legAvgVol = volCount > 0 ? volSum / volCount : 0;
+      const volumeRatio =
+        baselineAvgVol > 0 && legAvgVol > 0 ? Math.round((legAvgVol / baselineAvgVol) * 100) / 100 : 1;
 
       const directionalRatio = Math.round((sameDirCount / Math.max(1, slice.length)) * 100) / 100;
       const netMove = Math.abs(vEnd.price - vStart.price);
       const efficiencyRatio = Math.round((netMove / Math.max(0.0001, pathSum)) * 100) / 100;
+      const slopeAtrPerBar = Math.round((netMove / (candleSpan * avgLegAtr)) * 100) / 100;
       const internalPivots = slice.length >= 7 ? PivotDetector.detectPivots(slice, 1, 1, 0.45) : [];
       const internalPivotCount = internalPivots.length;
 
-      // Sharp directional leg with few internal swings -> IMPULSIVE_MOMENTUM (assume 5/3)
+      // Section 2.11 Practical Impulsive vs Fractal:
+      // - Steep sharp move (high efficiency, slope >= 0.45*ATR/bar, <=1 small rest, elevated volume) -> IMPULSIVE_MOMENTUM
+      // - Gradual move (gentler slope < 0.35*ATR/bar over >=10 bars) even without visible rests -> FRACTAL_EXTENDED (hidden subwaves)
+      // - >= 2 internal swings / sequential rests -> FRACTAL_EXTENDED
+      const isSharpOneRestOrLess =
+        slopeAtrPerBar >= 0.45 && efficiencyRatio >= 0.56 && restCount <= 1 && directionalRatio >= 0.55;
+      const isGradualHiddenFractal =
+        candleSpan >= 10 && slopeAtrPerBar < 0.35 && volumeRatio <= 1.25;
       const isImpulsive =
-        internalPivotCount < 2 ||
-        (efficiencyRatio >= 0.56 && directionalRatio >= 0.62 && candleSpan <= 18);
+        !isGradualHiddenFractal &&
+        (isSharpOneRestOrLess ||
+          internalPivotCount < 2 ||
+          (efficiencyRatio >= 0.56 && directionalRatio >= 0.62 && candleSpan <= 18));
 
       const nature: WaveNature = isImpulsive ? 'IMPULSIVE_MOMENTUM' : 'FRACTAL_EXTENDED';
 
       const summaryFa = isImpulsive
-        ? `موج شتابدار (کارایی ${(efficiencyRatio * 100).toFixed(0)}٪)؛ فرض ساختار درونی ${assumedSubwaveCount} موجی در نقش ${
+        ? `موج شتابدار (شیب ${slopeAtrPerBar} ATR/کندل · حجم ${volumeRatio}x · کارایی ${(efficiencyRatio * 100).toFixed(0)}٪${
+            restCount === 1 ? ' · تنها ۱ استراحت کوچک ناکافی' : ''
+          })؛ فرض ساختار درونی ${assumedSubwaveCount} موجی در نقش ${
             role === 'MOTIVE' ? 'اصلی' : 'اصلاحی'
           }.`
-        : `موج فرکتالی با ${internalPivotCount} پیوت استراحتی؛ زیرموج‌های ${assumedSubwaveCount}‌گانه در تایم پایین‌تر قابل شمارش هستند.`;
+        : isGradualHiddenFractal && internalPivotCount < 2
+        ? `موج فرکتالی تدریجی (شیب ملایم ${slopeAtrPerBar} ATR/کندل · ساختار درونی پنهان بدون استراحت آشکار)؛ زیرموج‌های ${assumedSubwaveCount}‌گانه در تایم پایین‌تر بررسی شوند.`
+        : `موج فرکتالی (${internalPivotCount} پیوت / ${restCount} استراحت متوالی · شیب ${slopeAtrPerBar} ATR/کندل)؛ زیرموج‌های ${assumedSubwaveCount}‌گانه در تایم پایین‌تر قابل شمارش هستند.`;
 
       results.push({
         legIndex: i - 1,
@@ -587,6 +801,9 @@ export class FractalEngine {
         candleSpan,
         directionalRatio,
         efficiencyRatio,
+        slopeAtrPerBar,
+        volumeRatio,
+        restCount,
         summaryFa
       });
     }
@@ -730,8 +947,7 @@ export class FractalEngine {
       'FLAT_RUNNING',
       'TRIANGLE_CONVERGING',
       'TRIANGLE_EXPANDING',
-      'COMPLEX_COMBINATION',
-      'ANTI_CYCLE'
+      'COMPLEX_COMBINATION'
     ];
 
     if (parentRole === 'MOTIVE' && correctivePatterns.includes(subwavePattern)) {

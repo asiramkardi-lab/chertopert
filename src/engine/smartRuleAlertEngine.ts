@@ -10,7 +10,7 @@
  */
 
 import { Candle, PatternFamily, WaveRole, WaveScenario } from '../types/elliott';
-import { RulesEngine } from './rulesEngine';
+import { RulesEngine, classifyAntiCyclePlacement } from './rulesEngine';
 import { DEGREE_CONFIGS } from './fractalEngine';
 import {
   evaluateWave2Retracement,
@@ -241,28 +241,29 @@ export class SmartRuleAlertEngine {
           suggestedPattern: brokeW1Start ? 'ANTI_CYCLE' : undefined
         });
       } else if (scenario.patternType === 'ANTI_CYCLE') {
-        const covered100 = isBull ? p2 <= p0 : p2 >= p0;
-        const cleanParent = parentWaveLabel.replace(/[()VW\s]/g, '').toUpperCase();
-        const isInWave2Or4 = parentRole === 'MOTIVE' && !['B', 'C'].some(t => cleanParent.includes(t));
-        const invalidExtendedInW2 = covered100 && isInWave2Or4;
+        const covered100 = isBull ? p2 <= p0 + 1e-6 : p2 >= p0 - 1e-6;
+        const placement = classifyAntiCyclePlacement(parentRole, parentWaveLabel);
+        const invalidExtendedInMotive = covered100 && placement.motiveHarmonicOnlySlot;
         const isAtMarketEnd =
           candles.length > 0 ? verts[verts.length - 1].candleIndex >= candles.length - 6 : false;
-        const invalidHarmonicAtEnd = !covered100 && isAtMarketEnd;
+        const invalidHarmonicAtEnd = !covered100 && isAtMarketEnd && !placement.motiveHarmonicOnlySlot;
 
         deviations.push({
           id: 'edge-8-anticycle',
-          edgeRef: invalidExtendedInW2 ? '8.4' : invalidHarmonicAtEnd ? '8.7' : '8.3 / 8.5',
-          ruleNameFa: 'قواعد آنتی‌سیکل هارمونیک / گسترده (دسته ۸)',
+          edgeRef: invalidExtendedInMotive ? '8.4 / 2.12' : invalidHarmonicAtEnd ? '8.7 / 2.10' : '8.3 / 8.5',
+          ruleNameFa: 'قواعد آنتی‌سیکل هارمونیک / گسترده و قانون ۱۰۰٪ انتهای بازار',
           category: 'STRUCTURE',
-          deviationPct: invalidExtendedInW2 ? 25 : invalidHarmonicAtEnd ? 12 : 0,
+          deviationPct: invalidExtendedInMotive ? 25 : invalidHarmonicAtEnd ? 18 : 0,
           actualValueLabel: covered100 ? `گسترده ${(ret2Ratio * 100).toFixed(1)}%` : `هارمونیک ${(ret2Ratio * 100).toFixed(1)}%`,
-          standardThresholdLabel: isInWave2Or4 ? 'فقط هارمونیک (<100%)' : 'در انتهای بازار >=100%',
-          status: invalidExtendedInW2 ? 'VIOLATED' : invalidHarmonicAtEnd ? 'BORDERLINE' : 'PASSED',
-          explanationFa: invalidExtendedInW2
-            ? 'آنتی‌سیکل گسترده (>۱۰۰٪) در موج ۲/۴ نامعتبر و نقض قانون ۱ است (۸.۴).'
+          standardThresholdLabel: placement.motiveHarmonicOnlySlot ? 'فقط هارمونیک (<100%)' : 'در انتهای بازار >=100%',
+          status: invalidExtendedInMotive || invalidHarmonicAtEnd ? 'VIOLATED' : 'PASSED',
+          explanationFa: invalidExtendedInMotive
+            ? placement.forbiddenReasonFa || 'آنتی‌سیکل گسترده (>۱۰۰٪) در موج ۱/۲/۳/۴ نامعتبر است.'
             : invalidHarmonicAtEnd
-            ? 'آنتی‌سیکل در انتهای بازار بدون پوشش ۱۰۰٪ فاز اول برای ستاپ معاملاتی پرریسک است (۸.۷).'
-            : 'ساختار آنتی‌سیکل با جایگاه فعلی سازگار است.'
+            ? 'نقض قانون ۲.۱۰: در انتهای بازار برای ستاپ معاملاتی آنتی‌سیکل باید ۱۰۰٪ آخرین موج فاز اول پوشش داده شود.'
+            : covered100
+            ? `آنتی‌سیکل گسترده در «${placement.slotLabelFa}» معتبر است.`
+            : 'ساختار آنتی‌سیکل هارمونیک با جایگاه فعلی سازگار است.'
         });
       } else if (scenario.patternType === 'ZIGZAG') {
         const zzB = evaluateZigzagWaveB(len1, ret2);
@@ -347,27 +348,70 @@ export class SmartRuleAlertEngine {
         standardThresholdLabel: `>= ${Math.round(w3Eval.minOtherLen).toLocaleString()}`,
         status: w3Eval.isWave3Shortest ? 'VIOLATED' : len3 < len1 * 1.03 ? 'BORDERLINE' : 'PASSED',
         explanationFa: w3Eval.isWave3Shortest
-          ? `نقض قانون ۲: موج ۳ به میزان ${w3Eval.deviationPct}% کوتاه‌تر از کمترین موج مجاور است (در قطر و آنتی‌ترمینال نیز نامعتبر است).`
+          ? `نقض قانون ۲ (${w3Eval.deviationPct}% اختلاف): شمارش اشتباه است؛ ممکن است موج ۳ در واقع موج ۱ باشد.`
           : `موج ۳ کوتاه‌ترین موج نیست (قانون دوم با تلرانس ۰.۱٪ رعایت شده است).`
       });
+
+      if (len3 > 0 && len5 < len3 - 1e-7 && !scenario.patternType.includes('DIAGONAL')) {
+        const w5Ratio = Math.round((len5 / len3) * 1000) / 10;
+        deviations.push({
+          id: 'bahari-w5-trunc-term',
+          edgeRef: '4.4 / 7.1',
+          ruleNameFa: 'نسبت موج ۵ کوتاه‌تر از موج ۳ (کوتاه‌شدگی / ترمینال)',
+          category: 'STRUCTURE',
+          deviationPct: Math.min(25, Math.round((1 - len5 / len3) * 20 * 10) / 10),
+          actualValueLabel: `W5=${w5Ratio}% W3`,
+          standardThresholdLabel: 'W5 vs W3',
+          status: scenario.patternType === 'TERMINAL' ? 'PASSED' : 'BORDERLINE',
+          explanationFa:
+            scenario.patternType === 'TERMINAL'
+              ? `موج ۵ (${w5Ratio}٪ موج ۳) کوتاه‌تر از موج ۳ است و با الگوی ترمینال سازگار است.`
+              : `موج ۵ کوتاه‌تر از موج ۳ (${w5Ratio}٪ موج ۳) شده ← احتمال کوتاه‌شدگی (Truncation) یا الگوی ترمینال.`,
+          suggestedPattern: scenario.patternType === 'IDEAL_CYCLE' ? 'TERMINAL' : undefined
+        });
+      }
     }
 
-    // Rule 3: Wave 4 overlap with Wave 1 & Terminal/Anti-Terminal/Diagonal (0.1% float-safe Tolerance Layer)
+    // Rule 3: Wave 4 overlap with Wave 1 & Wave 4 > 50% complex correction heuristic (0.1% float-safe Tolerance Layer)
     if (verts.length >= 5 && !isCorrectiveFamily && scenario.patternType !== 'ANTI_CYCLE') {
       const p0 = verts[0].price;
       const p1 = verts[1].price;
+      const p2 = verts[2].price;
+      const p3 = verts[3].price;
       const p4 = verts[4].price;
       const len1 = Math.abs(p1 - p0);
+      const len3 = Math.abs(p3 - p2);
+      const ret4 = isBull ? p3 - p4 : p4 - p3;
+      if (len3 > 0 && ret4 / len3 > 0.5 + 1e-7) {
+        const ret4Pct = Math.round((ret4 / len3) * 1000) / 10;
+        deviations.push({
+          id: 'bahari-w4-complex',
+          edgeRef: '4.2 / 10',
+          ruleNameFa: 'اصلاح موج ۴ بیش از ۵۰٪ موج ۳ (احتمال اصلاح پیچیده‌تر)',
+          category: 'STRUCTURE',
+          deviationPct: Math.min(28, Math.round((ret4 / len3 - 0.5) * 40 * 10) / 10),
+          actualValueLabel: `${ret4Pct}% W3`,
+          standardThresholdLabel: '<= 50% W3',
+          status: 'BORDERLINE',
+          explanationFa: `اصلاح موج ۴ (${ret4Pct}٪ موج ۳) بیش از ۵۰٪ شده ← احتمال تشکیل اصلاح پیچیده‌تر (فلت یا مثلث) در موج ۴ بالا است.`
+        });
+      }
+
       const w4Eval = evaluateWave4Overlap(p1, p4, len1, isBull);
 
       if (scenario.patternType === 'IDEAL_CYCLE') {
         const violated = !w4Eval.passedIdealCycle;
         const exactTouch = w4Eval.hasExactTouch;
-        const suggestedAlt: PatternFamily | undefined = violated
-          ? verts.length >= 6 && Math.abs(verts[5].price - p4) > Math.abs(verts[3].price - verts[2].price)
-            ? 'ANTI_TERMINAL'
-            : 'TERMINAL'
-          : undefined;
+        const r1Ok = val.rules.find(r => r.ruleId === 'CARDINAL_RULE_1')?.passed !== false;
+        const r2Ok = val.rules.find(r => r.ruleId === 'CARDINAL_RULE_2')?.passed !== false;
+        const w5Covers = val.rules.find(r => r.ruleId === 'CB_WAVE5_COVERS_W4')?.passed !== false;
+        const overallIdeal = r1Ok && r2Ok && w5Covers;
+        const suggestedAlt: PatternFamily | undefined =
+          violated && overallIdeal
+            ? verts.length >= 6 && Math.abs(verts[5].price - p4) > Math.abs(verts[3].price - verts[2].price)
+              ? 'ANTI_TERMINAL'
+              : 'TERMINAL'
+            : undefined;
 
         deviations.push({
           id: 'bahari-r3',
@@ -379,7 +423,9 @@ export class SmartRuleAlertEngine {
           standardThresholdLabel: '<= 0.1% تماس مرزی',
           status: violated ? 'VIOLATED' : exactTouch ? 'BORDERLINE' : 'PASSED',
           explanationFa: violated
-            ? `نقض قانون ۳ (${w4Eval.penetrationPct}% نفوذ): در سبک بهاری تبدیل به ترمینال (موج ۵ کوتاه) یا آنتی‌ترمینال/قطر بررسی شود.`
+            ? overallIdeal
+              ? `نقض قانون ۳ (${w4Eval.penetrationPct}% نفوذ): ساختار کلی ایده‌آل است ← تبدیل به ${suggestedAlt === 'ANTI_TERMINAL' ? 'آنتی‌ترمینال (موج ۵ کشیده)' : 'سیکل ترمینال (موج ۵ کوتاه)'}.`
+              : `نقض قانون ۳ (${w4Eval.penetrationPct}% نفوذ): ساختار کلی ایده‌آل نیست ← شمارش اشتباه است و نیاز به بازشماری دارد.`
             : exactTouch
             ? 'موج ۴ با سقف موج ۱ تماس مرزی دقیق دارد بدون نفوذ >= ۰.۱٪ — معتبر مرزی (۳.۳.۱).'
             : 'موج ۴ وارد حریم موج ۱ نشده است.',
@@ -387,29 +433,51 @@ export class SmartRuleAlertEngine {
         });
       } else if (scenario.patternType === 'TERMINAL' && verts.length >= 6) {
         // 7.1 & 7.2: Terminal requires Wave 5 < Wave 3 AND Wave 5 covers 100% of Wave 4 (CB-Wave)
-        const p3 = verts[3].price;
         const p5 = verts[5].price;
-        const len3 = Math.abs(p3 - verts[2].price);
         const len5 = Math.abs(p5 - p4);
-        const coversW4 = isBull ? p5 >= p3 : p5 <= p3;
+        const coversW4 = isBull ? p5 >= p3 * 0.999 : p5 <= p3 * 1.001;
         const isShortW5 = len5 < len3;
         const devPct = !coversW4 ? 22 : !isShortW5 ? 12 : 0;
 
         deviations.push({
           id: 'edge-7-terminal',
-          edgeRef: !coversW4 ? '4.5 / 7.2' : '7.1',
-          ruleNameFa: 'الگوی ترمینال: کوتاه‌شدگی موج ۵ و پوشش ۱۰۰٪ موج ۴ (CB-Wave)',
+          edgeRef: !coversW4 ? '4.5 / 7.2' : '7.1 / 2.8',
+          ruleNameFa: 'الگوی ترمینال: کوتاه‌شدگی موج ۵، PRZ و پوشش ۱۰۰٪ موج ۴ (CB-Wave)',
           category: 'STRUCTURE',
           deviationPct: devPct,
-          actualValueLabel: coversW4 ? 'پوشش ۱۰۰٪ W4' : 'عدم پوشش W4',
+          actualValueLabel: coversW4 ? 'پوشش ۱۰۰٪ W4 (PRZ)' : 'عدم پوشش W4',
           standardThresholdLabel: 'W5 < W3 & پوشش ۱۰۰٪ W4',
           status: !coversW4 ? 'VIOLATED' : !isShortW5 ? 'BORDERLINE' : 'PASSED',
           explanationFa: !coversW4
-            ? 'نقض CB-Wave (۴.۵ / ۷.۲): در ترمینال موج ۵ باید ۱۰۰٪ موج ۴ را پوشش دهد.'
+            ? 'نقض CB-Wave (۴.۵ / ۷.۲): در ترمینال نیز موج ۵ باید ۱۰۰٪ موج ۴ را پوشش دهد؛ شمارش اشتباه است.'
             : !isShortW5
             ? 'موج ۵ بلندتر از موج ۳ شده؛ آنتی‌ترمینال مناسب‌تر است (۷.۳).'
-            : 'ساختار ترمینال با کوتاه‌شدگی موج ۵ و پوشش کامل موج ۴ معتبر است.',
-          suggestedPattern: !isShortW5 ? 'ANTI_TERMINAL' : undefined
+            : 'ساختار ترمینال با کوتاه‌شدگی موج ۵ (رسیدن به PRZ بدون TMV) و پوشش کامل موج ۴ معتبر است.',
+          suggestedPattern: coversW4 && !isShortW5 ? 'ANTI_TERMINAL' : undefined
+        });
+      } else if (scenario.patternType === 'ANTI_TERMINAL' && verts.length >= 6) {
+        const p5 = verts[5].price;
+        const len5 = Math.abs(p5 - p4);
+        const coversW4 = isBull ? p5 >= p3 * 0.999 : p5 <= p3 * 1.001;
+        const w3NotShortest = len3 >= Math.min(len1, len5) - Math.max(len1, len5) * 0.001;
+        const isW3TruncatedValid = len3 < len1 && w3NotShortest;
+        const isW5Extended = len5 > len3;
+        deviations.push({
+          id: 'edge-2-7-antiterminal',
+          edgeRef: '2.7',
+          ruleNameFa: 'آنتی‌ترمینال: کوتاه‌شدگی موج ۳ (بدون نقض قانون ۲) و پوشش موج ۴',
+          category: 'STRUCTURE',
+          deviationPct: !coversW4 || !w3NotShortest ? 25 : 0,
+          actualValueLabel: isW3TruncatedValid ? 'W3 < W1 & W3 >= W5' : `W5/W3=${len3 > 0 ? (len5 / len3).toFixed(2) : '1'}`,
+          standardThresholdLabel: 'W3 نه کوتاه‌ترین & پوشش W4',
+          status: !coversW4 || !w3NotShortest ? 'VIOLATED' : isW5Extended || isW3TruncatedValid ? 'PASSED' : 'BORDERLINE',
+          explanationFa: !w3NotShortest
+            ? 'نقض قانون ۲ در آنتی‌ترمینال: موج ۳ کوتاه‌ترین موج است و شمارش نامعتبر می‌باشد.'
+            : !coversW4
+            ? 'نقض CB-Wave: موج ۵ پوشش ۱۰۰٪ موج ۴ را تکمیل نکرده است.'
+            : isW3TruncatedValid
+            ? 'کوتاه‌شدگی موج ۳ نسبت به ۱ با حفظ شرط بزرگ‌تربودن از ۵ در آنتی‌ترمینال معتبر است (۲.۷).'
+            : 'کشیدگی موج ۵ و قیف بازشونده آنتی‌ترمینال معتبر است.'
         });
       }
     }

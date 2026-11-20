@@ -186,6 +186,9 @@ export interface FibImportanceLevel {
   idImportanceFa: string;
   acceleration?: boolean;
   descriptionFa: string;
+  confluenceStrength?: 'STRONG' | 'MODERATE' | 'WEAK';
+  hasClassicSR?: boolean;
+  hasHighVolume?: boolean;
 }
 
 export interface TmvTierSummary {
@@ -194,6 +197,8 @@ export interface TmvTierSummary {
   ideal100: number;
   alternate1618: number;
   wave3ExtendedReductionRatio: number | null;
+  wave5ExtendedExpansionRatio?: number | null;
+  isWave5Extension?: boolean;
   basisPairLabel: string;
   basisFa: string;
 }
@@ -417,13 +422,36 @@ export interface InputDataValidationReport {
   historyWarnings: string[];
 }
 
+export type FibonacciToolKind = 'RETRACEMENT' | 'PROJECTION' | 'EXTENSION' | 'ARC' | 'FAN' | 'TIME';
+
+export interface FibonacciToolCatalogEntry {
+  toolType: FibonacciToolKind;
+  nameFa: string;
+  pointCount: number;
+  usedInBasicWaveCounting: boolean;
+  scope: 'BASIC_WAVE_COUNTING' | 'SESSION_8_PROJECTION' | 'ADVANCED_TIME_PRICE';
+  domain: 'PRICE' | 'TIME' | 'PRICE_AND_TIME';
+  purposeFa: string;
+  sessionRef: string;
+}
+
 export interface FibonacciToolValidationResult {
   isValid: boolean;
   errors: string[];
   warnings: string[];
-  toolType: 'RETRACEMENT' | 'PROJECTION';
+  toolType: FibonacciToolKind;
   pairUsedLabel?: string;
   isWave5RetracementInvalid?: boolean;
+  retracementRatio?: number;
+  retracementPct?: number;
+  matchedFibLevel?: string;
+  isStandardFibLevel?: boolean;
+  isGolden618?: boolean;
+  extensionLevels?: Array<{ ratio: number; ratioLabel: string; price: number }>;
+  projectionLevels?: Array<{ ratio: number; ratioLabel: string; price: number }>;
+  projectionConfidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  usedInBasicWaveCounting?: boolean;
+  toolDomain?: 'PRICE' | 'TIME' | 'PRICE_AND_TIME';
 }
 
 export interface ScenarioProjectionReport {
@@ -499,6 +527,14 @@ export interface MultiTfRefinementStep {
   stoppedReasonFa?: string;
 }
 
+export interface MultiTfImpulsiveLegCheck {
+  legLabel: string;
+  higherTf: string;
+  verifiedLowerTf?: string;
+  detectedSubwaves?: 3 | 5 | null;
+  messageFa: string;
+}
+
 export interface MultiTfRefinementSummary {
   startTf: string;
   finalTf: string;
@@ -507,6 +543,10 @@ export interface MultiTfRefinementSummary {
   maxAllowedDegree: number;
   fallbackToHigherTf: boolean;
   fallbackReasonFa?: string;
+  dailyNeedsLowerTf?: boolean;
+  recommendedLowerTimeframes?: string[];
+  dailyLowerTfReasonFa?: string;
+  impulsiveLegsMayBe5Wave?: MultiTfImpulsiveLegCheck[];
   steps: MultiTfRefinementStep[];
   relabelingSuggestions: string[];
 }
@@ -538,6 +578,10 @@ export interface TopDownPipelineReport {
   trailingStopPrice?: number | null;
   trailingStopStatus?: 'ACTIVE' | 'INACTIVE_WARNING' | 'IMMEDIATE_EXIT';
   multiTfRefinementSummary?: MultiTfRefinementSummary;
+  dailyNeedsLowerTf?: boolean;
+  recommendedLowerTimeframes?: string[];
+  dailyLowerTfReasonFa?: string;
+  impulsiveLegsMayBe5Wave?: MultiTfImpulsiveLegCheck[];
   fibValidationWarnings?: string[];
   relabelingSuggestions?: string[];
   promotionOpportunity?: {

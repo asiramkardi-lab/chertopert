@@ -33,6 +33,7 @@ interface TopDownPipelineAuditProps {
   parentRole?: WaveRole;
   parentWaveLabel?: string;
   onPromoteDegree?: () => void;
+  onSelectTimeframe?: (tf: string) => void;
   compact?: boolean;
 }
 
@@ -46,6 +47,7 @@ export const TopDownPipelineAudit: React.FC<TopDownPipelineAuditProps> = ({
   parentRole = 'ROOT',
   parentWaveLabel = '',
   onPromoteDegree,
+  onSelectTimeframe,
   compact = false
 }) => {
   const [selectedStep, setSelectedStep] = useState<number>(0);
@@ -193,15 +195,53 @@ export const TopDownPipelineAudit: React.FC<TopDownPipelineAuditProps> = ({
               )}
 
               {activeStep.stepNumber === 4 && report.multiTfRefinementSummary && (
-                <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5 text-[10.5px]">
+                <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2 text-[10.5px]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-slate-400">مسیر پالایش چندتایم‌فریمی:</span>
                     <span className="font-mono text-cyan-300 font-bold">
                       {report.multiTfRefinementSummary.traversedTimeframes.join(' ← ') || report.finalTf}
                     </span>
                   </div>
+
+                  {report.dailyNeedsLowerTf && report.dailyLowerTfReasonFa && (
+                    <div className="pt-1.5 border-t border-slate-800/80 space-y-1.5">
+                      <p className="text-amber-200 leading-relaxed">
+                        {report.dailyLowerTfReasonFa}
+                      </p>
+                      {report.recommendedLowerTimeframes &&
+                        report.recommendedLowerTimeframes.length > 0 &&
+                        onSelectTimeframe && (
+                          <div className="flex items-center gap-1.5">
+                            {report.recommendedLowerTimeframes.map(ltf => (
+                              <button
+                                key={ltf}
+                                type="button"
+                                onClick={() => onSelectTimeframe(ltf)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-amber-200 font-mono text-[10px] font-bold whitespace-nowrap transition-colors"
+                              >
+                                رفتن به تایم {ltf}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  {report.impulsiveLegsMayBe5Wave && report.impulsiveLegsMayBe5Wave.length > 0 && (
+                    <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                      <div className="text-[10px] font-bold text-cyan-300">
+                        بررسی امواج شتابدار تایم بالاتر (شتابدار در برابر فرکتالی ۵موجی):
+                      </div>
+                      {report.impulsiveLegsMayBe5Wave.map((item, idx) => (
+                        <div key={idx} className="text-slate-300 leading-relaxed">
+                          • {item.messageFa}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {report.relabelingSuggestions && report.relabelingSuggestions.length > 0 && (
-                    <div className="space-y-1 pt-1 border-t border-slate-800/80">
+                    <div className="space-y-1 pt-1.5 border-t border-slate-800/80">
                       <div className="text-[10px] font-bold text-amber-300">پیشنهاد بازنگری لیبل‌ها:</div>
                       {report.relabelingSuggestions.map((item, idx) => (
                         <div key={idx} className="text-amber-200 leading-relaxed">

@@ -238,6 +238,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onPromoteDegree={
                 onPromoteDegree ? () => onPromoteDegree(activeScenario.id) : undefined
               }
+              onSelectTimeframe={onSelectTimeframe}
               compact
             />
 

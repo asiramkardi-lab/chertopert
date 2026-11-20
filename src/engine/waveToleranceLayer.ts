@@ -68,7 +68,7 @@ export function evaluateWave2Retracement(
   const passed = !isViolated;
   const isBorderline999 = passed && ratio >= 0.985;
   const isExact100Violation = isViolated && Math.abs(ratio - 1.0) <= tolerance;
-  const isW1ExtensionHint = passed && ratio < 0.236 - tolerance;
+  const isW1ExtensionHint = passed && ratio > FLOAT_EPSILON && ratio < 0.236 - 1e-7;
 
   const deviationPct = isViolated
     ? Math.max(0.1, cleanFloat((ratio - 1.0) * 100 + 0.1, 1))

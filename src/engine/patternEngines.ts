@@ -1554,7 +1554,24 @@ export class PatternEngines {
       'T-X-F',
       'T-X-T'
     ]);
-    const STANDARD_MAIN_COMBOS = new Set(['I-X-Z', 'G-X-F', 'I-X-I', 'G-X-G', 'T-X-T']);
+    const STANDARD_MAIN_COMBOS = new Set([
+      'I-X-Z',
+      'I-X-F',
+      'I-X-T',
+      'I-X-I',
+      'G-X-F',
+      'G-X-Z',
+      'G-X-T',
+      'G-X-G',
+      'T-X-T',
+      'T-X-I',
+      'D-X-Z',
+      'D-X-F',
+      'D-X-T',
+      'D-X-D',
+      'Z-X-I',
+      'F-X-I'
+    ]);
 
     const legCount = Math.max(0, verts.length - 1);
     const isComplexType = scenario.patternType === 'COMPLEX_COMBINATION';

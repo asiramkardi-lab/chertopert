@@ -280,6 +280,31 @@ export class TopDownPipelineEngine {
       });
     }
 
+    const dailyBarsCount = (candlesByTf?.['1D'] || (timeframe === '1D' ? workingCandles : [])).length;
+    if (dailyBarsCount > 0 && dailyBarsCount < 15) {
+      pushEdge(step1Edges, {
+        id: 'T2_DAILY_UP_ESC',
+        tableNumber: 2,
+        tableNameFa: 'جدول ۲: دیده‌شدن نوسانات',
+        ruleRef: '2.2',
+        sessionRef: 'جلسه ۱، ۵',
+        conditionFa: 'در تایم‌فریم روزانه همه نوسانات/کف مرجع به وضوح قابل مشاهده نیست',
+        actionFa: 'ارتقاء موقت به هفتگی (1W) و در صورت نیاز ماهانه (1M)',
+        severity: 'INFO'
+      });
+    } else if (timeframe === '1D' && workingCandles.length >= 60 && inputReport.historySpanDays <= 365 * 4) {
+      pushEdge(step1Edges, {
+        id: 'T2_DAILY_SUFFICIENT',
+        tableNumber: 2,
+        tableNameFa: 'جدول ۲: کفایت دید تایم روزانه',
+        ruleRef: '2.6',
+        sessionRef: 'جلسه ۳، ۵',
+        conditionFa: 'کل نمودار و کف مطلق در تایم روزانه (1D) به‌طور کامل قابل مشاهده است',
+        actionFa: 'نیازی به تایم‌فریم بالاتر نیست؛ شمارش از 1D به تایم پایین‌تر ادامه می‌یابد',
+        severity: 'INFO'
+      });
+    }
+
     steps.push({
       stepNumber: 1,
       titleFa: 'گام ۱: انتخاب تایم‌فریم شروع و سقف درجه',
@@ -474,7 +499,31 @@ export class TopDownPipelineEngine {
         ruleRef: '4.2 / 5.3',
         sessionRef: 'جلسه ۳، ۵',
         conditionFa: `${impulsiveLegs.length} موج شتابدار بدون زیرموج واضح شناسایی شد`,
-        actionFa: 'فرض ساختار درونی استاندارد بر اساس نقش (اصلی=۵، اصلاحی=۳)',
+        actionFa: 'فرض ساختار درونی استاندارد بر اساس نقش (اصلی=۵، اصلاحی=۳) و بررسی تایم پایین‌تر',
+        severity: 'INFO'
+      });
+    }
+    if (multiTfSummary.dailyNeedsLowerTf && multiTfSummary.dailyLowerTfReasonFa) {
+      pushEdge(step4Edges, {
+        id: 'T5_DAILY_TO_LOWER_TF',
+        tableNumber: 5,
+        tableNameFa: 'جدول ۵: شکست روزانه به تایم پایین‌تر',
+        ruleRef: '2.2 / 2.3',
+        sessionRef: 'جلسه ۱، ۵',
+        conditionFa: 'ساختار ۵موجی کامل در نمودار روزانه (1D) دیده نشد',
+        actionFa: `بررسی تایم‌فریم‌های ${(multiTfSummary.recommendedLowerTimeframes || ['4H']).join(' / ')}`,
+        severity: 'WARNING'
+      });
+    }
+    if (multiTfSummary.impulsiveLegsMayBe5Wave && multiTfSummary.impulsiveLegsMayBe5Wave.length > 0) {
+      pushEdge(step4Edges, {
+        id: 'T5_IMPULSIVE_5W',
+        tableNumber: 5,
+        tableNameFa: 'جدول ۵: موج شتابدار در تایم بالاتر',
+        ruleRef: '2.3 / 2.5',
+        sessionRef: 'جلسه ۴، ۱۸',
+        conditionFa: `${multiTfSummary.impulsiveLegsMayBe5Wave.length} موج شتابدار نیازمند بررسی ۵موجی در تایم پایین‌تر`,
+        actionFa: multiTfSummary.impulsiveLegsMayBe5Wave[0].messageFa,
         severity: 'INFO'
       });
     }
@@ -498,7 +547,7 @@ export class TopDownPipelineEngine {
     steps.push({
       stepNumber: 4,
       titleFa: 'گام ۴ و ۵: پالایش میان‌تایم و تفکیک شتابدار از فرکتالی',
-      status: multiTfSummary.fallbackToHigherTf
+      status: multiTfSummary.fallbackToHigherTf || multiTfSummary.dailyNeedsLowerTf
         ? 'WARNING'
         : legNatures.length > 0
         ? 'PASSED'
@@ -506,6 +555,8 @@ export class TopDownPipelineEngine {
       summaryFa: `${fractalLegs.length} موج فرکتالی قابل شکست · ${impulsiveLegs.length} موج شتابدار · مسیر: ${multiTfSummary.traversedTimeframes.join(' ← ') || timeframe}`,
       detailsFa: [
         ...legNatures.slice(0, 4).map(l => `${l.legLabel}: ${l.summaryFa}`),
+        ...(multiTfSummary.dailyLowerTfReasonFa ? [multiTfSummary.dailyLowerTfReasonFa] : []),
+        ...(multiTfSummary.impulsiveLegsMayBe5Wave?.slice(0, 3).map(m => m.messageFa) || []),
         ...(multiTfSummary.fallbackReasonFa ? [multiTfSummary.fallbackReasonFa] : []),
         ...multiTfSummary.relabelingSuggestions
       ],
@@ -1055,6 +1106,10 @@ export class TopDownPipelineEngine {
       trailingStopPrice: finalTrailing.trailingStopPrice ?? null,
       trailingStopStatus: finalTrailing.trailingStopStatus,
       multiTfRefinementSummary: multiTfSummary,
+      dailyNeedsLowerTf: multiTfSummary.dailyNeedsLowerTf,
+      recommendedLowerTimeframes: multiTfSummary.recommendedLowerTimeframes,
+      dailyLowerTfReasonFa: multiTfSummary.dailyLowerTfReasonFa,
+      impulsiveLegsMayBe5Wave: multiTfSummary.impulsiveLegsMayBe5Wave,
       fibValidationWarnings: fibWarnings,
       relabelingSuggestions: multiTfSummary.relabelingSuggestions,
       promotionOpportunity: {

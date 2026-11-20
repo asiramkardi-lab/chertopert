@@ -262,6 +262,154 @@ describe('TopDownPipelineEngine & Edge-Case Boundary Tables (Steps 0-11, Tables 
       expect(typeof report.trailingStopPrice).toBe('number');
       expect(['ACTIVE', 'INACTIVE_WARNING', 'IMMEDIATE_EXIT']).toContain(report.trailingStopStatus);
       expect(report.multiTfRefinementSummary?.traversedTimeframes.length).toBeGreaterThan(0);
+      expect(report.dailyNeedsLowerTf).toBe(false);
+    });
+
+    it('detects missing 5-wave count on Daily (1D) -> recommends 4H/1H (4H only for TSE_IRAN) and verifies Impulsive higher-TF legs in lower TF', () => {
+      const baseTs = Date.UTC(2024, 0, 1);
+      // Smooth monotonic 1D series (no internal pivots on Daily!) -> 1D lacks 5-wave structure and leg appears IMPULSIVE
+      const dailySmooth: Candle[] = Array.from({ length: 30 }, (_, i) => {
+        const p = 100 + i * 4;
+        return {
+          time: `d${i}`,
+          timestamp: baseTs + i * 86400_000,
+          open: p - 1,
+          high: p + 1,
+          low: p - 1.5,
+          close: p,
+          volume: 1000
+        };
+      });
+
+      // Lower-TF 4H candles inside the W0->W1 daily window (days 0..10) showing 5 alternating subwaves!
+      const fourHourCandles: Candle[] = [];
+      const zigzagPath = [100, 114, 107, 128, 120, 140, 130, 138, 134, 145];
+      for (let i = 0; i < 60; i++) {
+        const seg = Math.min(zigzagPath.length - 2, Math.floor((i / 60) * (zigzagPath.length - 1)));
+        const localT = ((i / 60) * (zigzagPath.length - 1)) - seg;
+        const p = zigzagPath[seg] + (zigzagPath[seg + 1] - zigzagPath[seg]) * localT;
+        fourHourCandles.push({
+          time: `h4_${i}`,
+          timestamp: baseTs + i * 4 * 3600_000,
+          open: p - 0.4,
+          high: p + 0.8,
+          low: p - 0.8,
+          close: p,
+          volume: 600
+        });
+      }
+
+      const partialScenario = makeScenario(dailySmooth, {
+        isPartial: true,
+        timeframe: '1D',
+        vertices: [
+          { label: '0', candleIndex: 0, price: 100, timestamp: dailySmooth[0].timestamp, isConfirmed: true },
+          { label: '1', candleIndex: 10, price: 140, timestamp: dailySmooth[10].timestamp, isConfirmed: true },
+          { label: '2', candleIndex: 14, price: 122, timestamp: dailySmooth[14].timestamp, isConfirmed: false }
+        ]
+      });
+
+      const cryptoPipe = TopDownPipelineEngine.run({
+        candles: dailySmooth,
+        candlesByTf: { '1D': dailySmooth, '4H': fourHourCandles },
+        scenario: partialScenario,
+        marketType: 'CRYPTO',
+        timeframe: '1D'
+      });
+      expect(cryptoPipe.dailyNeedsLowerTf).toBe(true);
+      expect(cryptoPipe.recommendedLowerTimeframes).toEqual(['4H', '1H']);
+      expect(cryptoPipe.edgeCasesTriggered.some(e => e.id === 'T5_DAILY_TO_LOWER_TF')).toBe(true);
+      expect(cryptoPipe.impulsiveLegsMayBe5Wave?.length).toBeGreaterThan(0);
+      expect(cryptoPipe.impulsiveLegsMayBe5Wave?.[0].verifiedLowerTf).toBe('4H');
+      expect(cryptoPipe.impulsiveLegsMayBe5Wave?.[0].detectedSubwaves).toBe(5);
+
+      const tsePipe = TopDownPipelineEngine.run({
+        candles: dailySmooth,
+        candlesByTf: { '1D': dailySmooth, '4H': fourHourCandles },
+        scenario: partialScenario,
+        marketType: 'TSE_IRAN',
+        timeframe: '1D'
+      });
+      expect(tsePipe.dailyNeedsLowerTf).toBe(true);
+      expect(tsePipe.recommendedLowerTimeframes).toEqual(['4H']);
+
+      // Section 2.6: Insufficient candles prevent 4-degree counting
+      const degLow = FractalEngine.assignDegrees(4, '1D', 'TSE_IRAN', 20);
+      expect(degLow.maxAllowed).toBeLessThan(4);
+      const degUnder10 = FractalEngine.assignDegrees(4, '1D', 'CRYPTO', 8);
+      expect(degUnder10.maxAllowed).toBe(0);
+    });
+
+    it('differentiates Impulsive vs Fractal practically (slope, volume, rests, hidden gradual structure) and TF degree caps', () => {
+      const tsBase = Date.UTC(2025, 0, 1);
+      // 1) Sharp move with 1 tiny counter bar (insufficient rest) -> IMPULSIVE_MOMENTUM
+      // 2) Gradual slow move over 14 bars without clear swings (slope < 0.35*ATR/bar) -> FRACTAL_EXTENDED (hidden subwaves)
+      const bars: Candle[] = Array.from({ length: 40 }, (_, i) => {
+        if (i <= 8) {
+          const p = 100 + i * 12;
+          const isTinyRest = i === 4;
+          return {
+            time: `b${i}`,
+            timestamp: tsBase + i * 86400_000,
+            open: isTinyRest ? p + 1 : p - 8,
+            close: isTinyRest ? p - 1 : p + 8,
+            high: p + 10,
+            low: p - 9,
+            volume: 3200
+          };
+        }
+        // Gradual low-slope climb across i=10..26 (netMove=14 over 16 bars, avgAtr ~ 6 -> slope < 0.2)
+        const gp = 195 + (i - 10) * 0.9;
+        return {
+          time: `b${i}`,
+          timestamp: tsBase + i * 86400_000,
+          open: gp - 0.5,
+          close: gp + 0.6,
+          high: gp + 3.2,
+          low: gp - 3.2,
+          volume: 900
+        };
+      });
+
+      const testScen: WaveScenario = {
+        id: 'nature-test',
+        name: 'Nature Practical Check',
+        color: '#38bdf8',
+        isPrimary: true,
+        isLocked: false,
+        isSelectedForTree: true,
+        patternType: 'IDEAL_CYCLE',
+        degree: 'PRIMARY',
+        direction: 'BULLISH',
+        vertices: [
+          { label: '0', price: 100, candleIndex: 0, timestamp: bars[0].timestamp, isConfirmed: true },
+          { label: '1', price: 204, candleIndex: 8, timestamp: bars[8].timestamp, isConfirmed: true },
+          { label: '2', price: 195, candleIndex: 10, timestamp: bars[10].timestamp, isConfirmed: true },
+          { label: '3', price: 209, candleIndex: 26, timestamp: bars[26].timestamp, isConfirmed: true }
+        ],
+        currentWave: '3',
+        completionPercentage: 65,
+        validityScore: 88,
+        idealnessScore: 85,
+        confidenceScore: 87,
+        invalidationPrice: 100,
+        targets: [],
+        rulesResults: [],
+        source: 'AI',
+        timeframe: '1D'
+      };
+
+      const natures = FractalEngine.classifyScenarioWaveNatures(testScen, bars);
+      expect(natures[0].nature).toBe('IMPULSIVE_MOMENTUM'); // sharp + high vol + 1 tiny rest
+      expect(natures[2].nature).toBe('FRACTAL_EXTENDED'); // gradual hidden internal structure
+
+      // Degree limits: 1D=4, 1W=3, 1M=2 (TSE_IRAN) and 4H>=5 (Forex/Crypto)
+      expect(FractalEngine.getMaxDegreesForTimeframe('1D', 'TSE_IRAN', true)).toBe(4);
+      expect(FractalEngine.getMaxDegreesForTimeframe('1W', 'TSE_IRAN', true)).toBe(3);
+      expect(FractalEngine.getMaxDegreesForTimeframe('1M', 'TSE_IRAN', true)).toBe(2);
+      expect(FractalEngine.getMaxDegreesForTimeframe('4H', 'CRYPTO', true)).toBeGreaterThanOrEqual(5);
     });
   });
 });
+
+

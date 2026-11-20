@@ -15,6 +15,8 @@ import {
   ExtensionLayerTier,
   FibImportanceLevel,
   FibonacciExtensionLayer,
+  FibonacciToolCatalogEntry,
+  FibonacciToolKind,
   FibonacciToolValidationResult,
   PatternFamily,
   ProjectedTargetItem,
@@ -77,19 +79,114 @@ export class TargetProjectionEngine {
   }
 
   /**
+   * Session 7 (2.1): Evaluate Fibonacci level market confluence with Classic S/R and Volume.
+   * Fibonacci is a tool, not a law — confluence with historical Support/Resistance or High Volume makes the level STRONG;
+   * a Fibonacci level without Classic S/R confluence is WEAK.
+   */
+  public static evaluateFibonacciLevelConfluence(params: {
+    levelPrice: number;
+    ratio?: number;
+    candles: Candle[];
+    tolerancePct?: number;
+    hasManualSupportResistance?: boolean;
+  }): {
+    strength: 'STRONG' | 'MODERATE' | 'WEAK';
+    score: number;
+    hasClassicSR: boolean;
+    srTouchCount: number;
+    hasHighVolumeConfluence: boolean;
+    messageFa: string;
+  } {
+    const {
+      levelPrice,
+      ratio,
+      candles,
+      tolerancePct = 1.5,
+      hasManualSupportResistance = false
+    } = params;
+
+    if (!Number.isFinite(levelPrice) || levelPrice <= 0 || candles.length === 0) {
+      return {
+        strength: hasManualSupportResistance ? 'STRONG' : 'WEAK',
+        score: hasManualSupportResistance ? 85 : 45,
+        hasClassicSR: hasManualSupportResistance,
+        srTouchCount: hasManualSupportResistance ? 1 : 0,
+        hasHighVolumeConfluence: false,
+        messageFa: hasManualSupportResistance
+          ? 'تراز فیبوناچی با حمایت/مقاومت کلاسیک هم‌تراز است (تراز قوی).'
+          : 'تراز فیبوناچی بدون حمایت/مقاومت کلاسیک است (تراز ضعیف‌تر — فیبوناچی ابزار است، نه قانون).'
+      };
+    }
+
+    const tolBand = levelPrice * (tolerancePct / 100);
+    const avgVol =
+      candles.reduce((sum, c) => sum + (c.volume || 0), 0) / Math.max(1, candles.length);
+
+    let srTouchCount = 0;
+    let highVolAtSR = false;
+
+    for (let i = 1; i < candles.length - 1; i++) {
+      const prev = candles[i - 1];
+      const cur = candles[i];
+      const next = candles[i + 1];
+      const isSwingHigh = cur.high >= prev.high && cur.high >= next.high;
+      const isSwingLow = cur.low <= prev.low && cur.low <= next.low;
+
+      const hitsHigh = isSwingHigh && Math.abs(cur.high - levelPrice) <= tolBand;
+      const hitsLow = isSwingLow && Math.abs(cur.low - levelPrice) <= tolBand;
+
+      if (hitsHigh || hitsLow) {
+        srTouchCount++;
+        if (avgVol > 0 && cur.volume >= avgVol * 1.3) {
+          highVolAtSR = true;
+        }
+      }
+    }
+
+    const hasClassicSR = hasManualSupportResistance || srTouchCount >= 1;
+    const lastVol = candles[candles.length - 1]?.volume || 0;
+    const hasHighVolumeConfluence = highVolAtSR || (avgVol > 0 && lastVol >= avgVol * 1.35);
+
+    const ratioTxt = ratio !== undefined ? `${(ratio * 100).toFixed(1)}٪` : '';
+    if (hasClassicSR) {
+      const score = hasHighVolumeConfluence ? 96 : Math.min(92, 84 + Math.min(srTouchCount, 3) * 3);
+      return {
+        strength: 'STRONG',
+        score,
+        hasClassicSR: true,
+        srTouchCount: Math.max(srTouchCount, hasManualSupportResistance ? 1 : 0),
+        hasHighVolumeConfluence,
+        messageFa: `تراز فیبوناچی ${ratioTxt} هم‌زمان با حمایت/مقاومت کلاسیک${
+          hasHighVolumeConfluence ? ' و حجم بالا' : ''
+        } است ← تراز قوی و معتبر برای واکنش بازار.`
+      };
+    }
+
+    return {
+      strength: hasHighVolumeConfluence ? 'MODERATE' : 'WEAK',
+      score: hasHighVolumeConfluence ? 68 : 48,
+      hasClassicSR: false,
+      srTouchCount: 0,
+      hasHighVolumeConfluence,
+      messageFa: `تراز فیبوناچی ${ratioTxt} بدون تلاقی حمایت/مقاومت کلاسیک است ← تراز ضعیف‌تر (فیبوناچی ابزار است، نه قانون؛ در انتظار واکنش بازار بمانید).`
+    };
+  }
+
+  /**
    * Session 7 (006-fibonacci-tools-engine):
    * Compute standard Bahari Fibonacci Retracement levels (X -> Y) with per-level S/R & identification importance.
    */
   public static getRetracementImportanceLevels(
     waveStartPrice: number,
     waveEndPrice: number,
-    direction: WaveDirection
+    direction: WaveDirection,
+    candles?: Candle[]
   ): FibImportanceLevel[] {
     const span = Math.abs(waveEndPrice - waveStartPrice);
     if (span <= 0) return [];
     const sign = direction === 'BULLISH' ? -1 : 1; // retracement pulls counter to impulse
 
-    return [
+    const baseLevels: FibImportanceLevel[] = [
       {
         ratio: 0.236,
         ratioLabel: '23.6%',
@@ -137,28 +234,189 @@ export class TargetProjectionEngine {
         descriptionFa: 'نزدیک‌ترین تراز به مبدأ موج پیش از نقض قانون ۱؛ همراه با شتاب چرخش بالا.'
       }
     ];
+
+    if (!candles || candles.length === 0) return baseLevels;
+
+    return baseLevels.map(lvl => {
+      const conf = this.evaluateFibonacciLevelConfluence({
+        levelPrice: lvl.price,
+        ratio: lvl.ratio,
+        candles
+      });
+      return {
+        ...lvl,
+        confluenceStrength: conf.strength,
+        hasClassicSR: conf.hasClassicSR,
+        hasHighVolume: conf.hasHighVolumeConfluence
+      };
+    });
+  }
+
+  public static getExtensionLevels(
+    waveEndX: number,
+    waveStartY: number,
+    direction: WaveDirection
+  ): Array<{ ratio: number; ratioLabel: string; price: number }> {
+    const span = Math.abs(waveEndX - waveStartY);
+    if (span <= 0) return [];
+    const sign = direction === 'BULLISH' ? 1 : -1;
+    const ratios = [0.618, 1.0, 1.27, 1.382, 1.618, 2.0, 2.618, 4.236];
+    return ratios.map(r => ({
+      ratio: r,
+      ratioLabel: `${(r * 100).toFixed(r === 1 || r === 1.27 || r === 2 ? 0 : 1)}%`,
+      price: roundPrice(waveStartY + sign * span * r)
+    }));
   }
 
   /**
-   * Session 7, 8 & Table 10: Validate Fibonacci Retracement (2-point X->Y) & Projection (3-point X->Y->Z)
-   * tool usage: pair selection (1-2->W3, 3-4->W5), orientation check, 0%/100%/>100% retracement checks,
-   * missing Z error, and Wave 5 retracement prohibition.
+   * Session 8 (2.1 & 2.2): 3-Point Fibonacci Projection levels (X = Wave 1 start, Y = Wave 1 end, Z = Wave 2 end).
+   */
+  public static getThreePointProjectionLevels(
+    xStart: number,
+    yEnd: number,
+    zRetraceEnd: number,
+    direction: WaveDirection
+  ): Array<{ ratio: number; ratioLabel: string; price: number }> {
+    const span = Math.abs(yEnd - xStart);
+    if (span <= 0) return [];
+    const sign = direction === 'BULLISH' ? 1 : -1;
+    const ratios = [0.618, 1.0, 1.272, 1.618, 2.0, 2.618];
+    return ratios.map(r => ({
+      ratio: r,
+      ratioLabel: `${Math.round(r * 1000) / 10}%`,
+      price: Math.round((zRetraceEnd + sign * span * r) * 100) / 100
+    }));
+  }
+
+  /**
+   * Session 7 (2.11 & 2.12): Catalog of Fibonacci tools distinguishing core basic wave-counting
+   * tools (Retracement, Extension, Session 8 3-point Projection) from advanced time/price tools
+   * (Arc, Fan, Time).
+   */
+  public static getFibonacciToolCatalog(): FibonacciToolCatalogEntry[] {
+    return [
+      {
+        toolType: 'RETRACEMENT',
+        nameFa: 'فیبوناچی رتریسمنت (Retracement)',
+        pointCount: 2,
+        usedInBasicWaveCounting: true,
+        scope: 'BASIC_WAVE_COUNTING',
+        domain: 'PRICE',
+        purposeFa: 'اندازه‌گیری میزان اصلاح موج اصلاحی نسبت به موج اصلی (X=ابتدا → Y=انتها) و محاسبه PRZ.',
+        sessionRef: '7.2.2 / 7.2.8'
+      },
+      {
+        toolType: 'EXTENSION',
+        nameFa: 'فیبوناچی اکستنشن (Extension)',
+        pointCount: 2,
+        usedInBasicWaveCounting: true,
+        scope: 'BASIC_WAVE_COUNTING',
+        domain: 'PRICE',
+        purposeFa: 'اندازه‌گیری حرکت موج جدید نسبت به سقف/کف موج قبلی (X=انتها → Y=ابتدا، برعکس رتریسمنت) برای ترازهای افزایشی.',
+        sessionRef: '7.2.3 / 7.2.9'
+      },
+      {
+        toolType: 'PROJECTION',
+        nameFa: 'فیبوناچی پروجکشن سه‌نقطه‌ای (Projection)',
+        pointCount: 3,
+        usedInBasicWaveCounting: true,
+        scope: 'SESSION_8_PROJECTION',
+        domain: 'PRICE',
+        purposeFa: 'اندازه‌گیری نسبت موج جدید به موج اصلی ماقبل بر اساس سه نقطه X (ابتدای موج ۱)، Y (انتهای موج ۱)، Z (انتهای موج ۲) — آموزش کامل در جلسه ۸.',
+        sessionRef: '7.2.4 / 7.2.12'
+      },
+      {
+        toolType: 'ARC',
+        nameFa: 'فیبوناچی آرک (Arc)',
+        pointCount: 2,
+        usedInBasicWaveCounting: false,
+        scope: 'ADVANCED_TIME_PRICE',
+        domain: 'PRICE_AND_TIME',
+        purposeFa: 'کمان‌های فیبوناچی برای تحلیل هم‌زمان زمان و قیمت (در موج‌شماری پایه استفاده نمی‌شود؛ کاربرد در تحلیل پیشرفته).',
+        sessionRef: '7.2.11'
+      },
+      {
+        toolType: 'FAN',
+        nameFa: 'فیبوناچی فن (Fan)',
+        pointCount: 2,
+        usedInBasicWaveCounting: false,
+        scope: 'ADVANCED_TIME_PRICE',
+        domain: 'PRICE_AND_TIME',
+        purposeFa: 'خطوط فن برای پیش‌بینی حمایت/مقاومت داینامیک و تحلیل زمانی-قیمتی (در موج‌شماری پایه استفاده نمی‌شود).',
+        sessionRef: '7.2.11'
+      },
+      {
+        toolType: 'TIME',
+        nameFa: 'فیبوناچی تایم (Time Zones)',
+        pointCount: 2,
+        usedInBasicWaveCounting: false,
+        scope: 'ADVANCED_TIME_PRICE',
+        domain: 'TIME',
+        purposeFa: 'ترازهای زمانی فیبوناچی برای پیش‌بینی زمان چرخش در موج‌شماری پیشرفته و تحلیل زمانی.',
+        sessionRef: '7.2.11'
+      }
+    ];
+  }
+
+  /**
+   * Session 7, 8 & Table 10: Validate Fibonacci Retracement (2-point X->Y), Extension (2-point X=end->Y=start),
+   * Projection (3-point X->Y->Z), and classify advanced Arc/Fan/Time tools (2.11).
    */
   public static validateFibonacciToolUsage(params: {
-    toolType: 'RETRACEMENT' | 'PROJECTION';
+    toolType: FibonacciToolKind;
     points: Array<{ price: number; candleIndex?: number }>;
     direction: WaveDirection;
     targetWave?: '1' | '2' | '3' | '4' | '5' | 'A' | 'B' | 'C';
     pairLabel?: string;
     overlappingLevels?: boolean;
+    isAcceleratedWave5?: boolean;
   }): FibonacciToolValidationResult {
-    const { toolType, points, direction, targetWave, pairLabel, overlappingLevels } = params;
+    const { toolType, points, direction, targetWave, pairLabel, overlappingLevels, isAcceleratedWave5 } = params;
     const errors: string[] = [];
     const warnings: string[] = [];
     const isBull = direction === 'BULLISH';
     let isWave5RetracementInvalid = false;
+    let retracementRatio: number | undefined;
+    let retracementPct: number | undefined;
+    let matchedFibLevel: string | undefined;
+    let isGolden618 = false;
+    let extensionLevels: Array<{ ratio: number; ratioLabel: string; price: number }> | undefined;
+    let projectionLevels: Array<{ ratio: number; ratioLabel: string; price: number }> | undefined;
+    let projectionConfidence: 'HIGH' | 'MEDIUM' | 'LOW' | undefined = toolType === 'PROJECTION' ? 'HIGH' : undefined;
+    const usedInBasicWaveCounting = toolType === 'RETRACEMENT' || toolType === 'EXTENSION' || toolType === 'PROJECTION';
+    const toolDomain: 'PRICE' | 'TIME' | 'PRICE_AND_TIME' =
+      toolType === 'TIME' ? 'TIME' : toolType === 'ARC' || toolType === 'FAN' ? 'PRICE_AND_TIME' : 'PRICE';
 
-    if (toolType === 'RETRACEMENT') {
+    if (toolType === 'ARC' || toolType === 'FAN' || toolType === 'TIME') {
+      const msgByTool: Record<'ARC' | 'FAN' | 'TIME', string> = {
+        ARC: 'فیبوناچی آرک (Arc) ابزار پیش‌بینی زمانی-قیمتی است و در موج‌شماری پایه استفاده نمی‌شود (کاربرد در تحلیل پیشرفته).',
+        FAN: 'فیبوناچی فن (Fan) برای حمایت/مقاومت داینامیک و تحلیل زمانی-قیمتی در سطح پیشرفته استفاده می‌شود و جزئی از موج‌شماری پایه نیست.',
+        TIME: 'فیبوناچی تایم (Time) برای پیش‌بینی زمان چرخش در تحلیل زمانی پیشرفته کاربرد دارد و در موج‌شماری پایه استفاده نمی‌شود.'
+      };
+      warnings.push(msgByTool[toolType]);
+    } else if (toolType === 'EXTENSION') {
+      if (points.length < 2) {
+        errors.push('برای رسم فیبوناچی اکستنشن حداقل ۲ نقطه (X=پایان موج، Y=ابتدای موج) مورد نیاز است.');
+      } else {
+        const xEnd = points[0].price;
+        const yStart = points[1].price;
+        const span = Math.abs(xEnd - yStart);
+        if (span <= 1e-9) {
+          errors.push('طول موج مبنای اکستنشن صفر است.');
+        } else {
+          const orientedOk = isBull ? xEnd > yStart : xEnd < yStart;
+          if (!orientedOk) {
+            errors.push(
+              isBull
+                ? 'جهت ابزار اکستنشن معکوس است: در روند صعودی باید از X (پایان/بالا) به Y (ابتدا/پایین) رسم شود (برعکس رتریسمنت).'
+                : 'جهت ابزار اکستنشن معکوس است: در روند نزولی باید از X (پایان/پایین) به Y (ابتدا/بالا) رسم شود (برعکس رتریسمنت).'
+            );
+          } else {
+            extensionLevels = this.getExtensionLevels(xEnd, yStart, direction);
+          }
+        }
+      }
+    } else if (toolType === 'RETRACEMENT') {
       if (targetWave === '5') {
         isWave5RetracementInvalid = true;
         errors.push(
@@ -188,13 +446,51 @@ export class TargetProjectionEngine {
             const z = points[2].price;
             const retAmt = isBull ? y - z : z - y;
             const ratio = retAmt / span;
+            retracementRatio = Math.round(ratio * 10000) / 10000;
+            retracementPct = Math.round(ratio * 1000) / 10;
+
+            const standardRatios: Array<{ r: number; label: string }> = [
+              { r: 0.236, label: '23.6%' },
+              { r: 0.382, label: '38.2%' },
+              { r: 0.5, label: '50.0%' },
+              { r: 0.618, label: '61.8%' },
+              { r: 0.786, label: '78.6%' }
+            ];
+            let bestMatch: { r: number; label: string; diff: number } | null = null;
+            for (const sr of standardRatios) {
+              const d = Math.abs(ratio - sr.r);
+              if (d <= 0.008 && (!bestMatch || d < bestMatch.diff)) {
+                bestMatch = { ...sr, diff: d };
+              }
+            }
+            if (bestMatch) {
+              matchedFibLevel = bestMatch.label;
+              isGolden618 = bestMatch.label === '61.8%';
+            } else if (ratio > 0.01 && ratio < 0.999) {
+              warnings.push(
+                `نسبت ${(ratio * 100).toFixed(1)}٪ جزو درصدهای استاندارد فیبوناچی (۲۳.۶، ۳۸.۲، ۵۰، ۶۱.۸، ۷۸.۶) نیست؛ تنها با تأیید اضافی معتبر است.`
+              );
+            }
+
             if (Math.abs(ratio) <= 0.002) {
-              warnings.push('رتریسمنت ۰٪: قیمت هنوز هیچ اصلاحی از انتهای موج قبلی آغاز نکرده است (جدول ۱۰).');
+              warnings.push('رتریسمنت ۰٪: موج اصلاحی هنوز از انتهای موج قبلی آغاز نشده است (جدول ۱۰).');
             } else if (ratio >= 1.0 - 1e-7) {
-              errors.push(
-                ratio > 1.001
-                  ? `رتریسمنت > ۱۰۰٪ (${(ratio * 100).toFixed(1)}٪): مبدأ موج نقض شده است (جدول ۱۰ / قانون ۱).`
-                  : 'رتریسمنت دقیقاً ۱۰۰٪: مبدأ موج کاملاً پوشش داده شده است (حالت مرزی/نقض قانون ۱).'
+              if (targetWave === '4') {
+                errors.push(
+                  ratio > 1.001
+                    ? `رتریسمنت > ۱۰۰٪ در موج ۴ (${(ratio * 100).toFixed(1)}٪): وارد محدوده موج قبلی/قانون ۳ شده است.`
+                    : 'رتریسمنت دقیقاً ۱۰۰٪ در موج ۴: احتمال نقض قانون ۳ یا نیاز به بازبینی شمارش.'
+                );
+              } else {
+                errors.push(
+                  ratio > 1.001
+                    ? `رتریسمنت > ۱۰۰٪ (${(ratio * 100).toFixed(1)}٪): نقض قانون ۱ — مبدأ موج شکسته شده است (آنتی‌سیکل یا شمارش اشتباه).`
+                    : 'رتریسمنت دقیقاً ۱۰۰٪: نقض قانون ۱ — مبدأ موج کاملاً پوشش داده شده است.'
+                );
+              }
+            } else if (targetWave === '5') {
+              warnings.push(
+                `هشدار شمارش اشتباه (۲-۵): رتریسمنت ${(ratio * 100).toFixed(1)}٪ روی موج ۵ رسم شده است؛ موج ۵ اصلاح هم‌درجه ندارد و احتمالاً این موج در واقع موج ۳ است.`
               );
             }
           }
@@ -208,21 +504,41 @@ export class TargetProjectionEngine {
         const x = points[0].price;
         const y = points[1].price;
         const z = points[2].price;
+        const idxY = points[1].candleIndex;
+        const idxZ = points[2].candleIndex;
         const yAligned = isBull ? y > x : y < x;
         const zRetraced = isBull ? z < y : z > y;
-        if (!yAligned || !zRetraced) {
+        const zOnWave1Time = idxY !== undefined && idxZ !== undefined && idxZ <= idxY;
+        if (!yAligned) {
           errors.push(
-            'جهت ابزار پروجکشن سه‌نقطه‌ای معکوس یا نامعتبر است (X→Y باید هم‌جهت روند و Y→Z اصلاحی باشد — جدول ۱۰).'
+            'جهت ابزار پروجکشن سه‌نقطه‌ای معکوس یا نامعتبر است (X→Y باید هم‌جهت روند باشد — این رسم اکستنشن است).'
           );
+        } else if (zOnWave1Time || !zRetraced) {
+          errors.push(
+            'نقطه Z نامعتبر است: Z باید روی انتهای موج اصلاحی (موج ۲ یا ۴) قرار بگیرد، نه روی موج ۱ (جدول ۱۰).'
+          );
+        } else {
+          projectionLevels = this.getThreePointProjectionLevels(x, y, z, direction);
         }
       }
 
-      const normPair = (pairLabel || '').replace(/\s+/g, '');
-      if (targetWave === '5' && normPair.includes('1-2')) {
-        errors.push('خطای قانون جفت‌ها (جدول ۱۰): برای هدف موج ۵ نباید از جفت ۱-۲ استفاده کرد؛ حتماً جفت ۳-۴ را مبنا قرار دهید.');
+      const normPair = (pairLabel || '')
+        .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .replace(/\s+/g, '')
+        .toUpperCase();
+      if (targetWave === '5' && (normPair.includes('1-2') || normPair.includes('A-B'))) {
+        errors.push('خطای قانون جفت‌ها (۲-۶ / جدول ۱۰): برای هدف موج ۵ نباید از جفت ۱-۲ استفاده کرد؛ حتماً جفت موج اصلی ماقبل (۳-۴) را مبنا قرار دهید.');
       }
-      if (targetWave === '3' && normPair.includes('3-4')) {
-        errors.push('خطای قانون جفت‌ها (جدول ۱۰): برای هدف موج ۳ باید از جفت ۱-۲ استفاده کرد، نه ۳-۴.');
+      if (targetWave === '3' && (normPair.includes('3-4') || normPair.includes('A-B'))) {
+        errors.push('خطای قانون جفت‌ها (۲-۶ / جدول ۱۰): برای هدف موج ۳ باید از جفت ۱-۲ استفاده کرد، نه ۳-۴.');
+      }
+      if (targetWave === 'C' && normPair.length > 0 && !normPair.includes('A-B')) {
+        errors.push('خطای قانون جفت‌ها (۲-۶): برای محاسبه پایان موج C باید از جفت اصلاحی A-B استفاده کرد.');
+      }
+      if (targetWave === '5' && isAcceleratedWave5) {
+        projectionConfidence = 'LOW';
+        warnings.push('در موج ۵ شتابدار، پروجکشن سه‌نقطه‌ای اعتبار کمتری دارد (نیاز به احتیاط و کنترل مومنتوم).');
       }
     }
 
@@ -236,7 +552,279 @@ export class TargetProjectionEngine {
       warnings,
       toolType,
       pairUsedLabel: pairLabel,
-      isWave5RetracementInvalid
+      isWave5RetracementInvalid,
+      retracementRatio,
+      retracementPct,
+      matchedFibLevel,
+      isStandardFibLevel: Boolean(matchedFibLevel),
+      isGolden618,
+      extensionLevels,
+      projectionLevels,
+      projectionConfidence,
+      usedInBasicWaveCounting,
+      toolDomain
+    };
+  }
+
+  /**
+   * Session 8 (2.3 & 2.4): Direct TMV vs PRZ Overlap Evaluator.
+   * - FULL: exact convergence (TMV === PRZ or within tight <=1% band).
+   * - PARTIAL: TMV falls inside wider PRZ band (e.g. 240-260) or within 10% proximity.
+   * - NONE: separated (>10% gap) -> TMV takes priority as the wave's movement target.
+   */
+  public static evaluateTmvPrzOverlap(params: {
+    tmvPrice: number;
+    przLow: number;
+    przHigh?: number;
+    hasHighVolume?: boolean;
+  }): {
+    hasOverlap: boolean;
+    overlapType: 'FULL' | 'PARTIAL' | 'NONE';
+    confidenceTier: 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'TMV_PRIORITY';
+    confidenceScore: number;
+    gapPct: number;
+    priority: 'BOTH_CONFLUENT' | 'TMV_PRIORITY';
+    noteFa: string;
+  } {
+    const { tmvPrice, przLow, przHigh = przLow, hasHighVolume = false } = params;
+    const low = Math.min(przLow, przHigh);
+    const high = Math.max(przLow, przHigh);
+    const denom = Math.max(1e-9, Math.abs(tmvPrice));
+
+    if (tmvPrice >= low && tmvPrice <= high) {
+      const bandRatio = (high - low) / denom;
+      if (bandRatio <= 0.01) {
+        return {
+          hasOverlap: true,
+          overlapType: 'FULL',
+          confidenceTier: hasHighVolume ? 'VERY_HIGH' : 'HIGH',
+          confidenceScore: hasHighVolume ? 98 : 90,
+          gapPct: 0,
+          priority: 'BOTH_CONFLUENT',
+          noteFa: hasHighVolume
+            ? 'همپوشانی کامل TMV و PRZ همراه با حجم بالا ← اعتبار بسیار بالا.'
+            : 'همپوشانی کامل: TMV و PRZ دقیقاً بر هم منطبق هستند (اعتبار بالا).'
+        };
+      }
+      return {
+        hasOverlap: true,
+        overlapType: 'PARTIAL',
+        confidenceTier: hasHighVolume ? 'HIGH' : 'MEDIUM',
+        confidenceScore: hasHighVolume ? 82 : 74,
+        gapPct: 0,
+        priority: 'BOTH_CONFLUENT',
+        noteFa: 'همپوشانی جزئی: هدف TMV درون محدوده گسترده‌تر PRZ قرار گرفته است (اعتبار متوسط/خوب).'
+      };
+    }
+
+    const dist = tmvPrice < low ? low - tmvPrice : tmvPrice - high;
+    const gapPct = Math.round((dist / denom) * 1000) / 10;
+    if (gapPct <= 10.0) {
+      return {
+        hasOverlap: true,
+        overlapType: 'PARTIAL',
+        confidenceTier: 'MEDIUM',
+        confidenceScore: 70,
+        gapPct,
+        priority: 'BOTH_CONFLUENT',
+        noteFa: `همپوشانی جزئی: TMV و PRZ در فاصله ${gapPct}٪ (درون محدوده ۱۰٪) قرار دارند (اعتبار متوسط).`
+      };
+    }
+
+    return {
+      hasOverlap: false,
+      overlapType: 'NONE',
+      confidenceTier: 'TMV_PRIORITY',
+      confidenceScore: 60,
+      gapPct,
+      priority: 'TMV_PRIORITY',
+      noteFa: `بدون همپوشانی (فاصله ${gapPct}٪): TMV و PRZ جدا هستند و TMV اولویت دارد (هدف حرکت موج).`
+    };
+  }
+
+  /**
+   * Session 8 (2.8): Validate Extension confluence with 3-Point Projection.
+   * - Exact/tight overlap (<= 1.5%): HIGH confidence.
+   * - Partial proximity (<= 6%): MEDIUM confidence.
+   * - Projection without Extension: MEDIUM confidence (3 points).
+   * - Extension without Projection: LOW confidence (lacks corrective wave anchor Z).
+   */
+  public static evaluateProjectionExtensionConfluence(params: {
+    projectionPrice?: number;
+    extensionPrice?: number;
+  }): {
+    hasOverlap: boolean;
+    overlapType: 'FULL' | 'PARTIAL' | 'NONE';
+    confidenceTier: 'HIGH' | 'MEDIUM' | 'LOW';
+    confidenceScore: number;
+    gapPct?: number;
+    noteFa: string;
+  } {
+    const { projectionPrice, extensionPrice } = params;
+    const hasProj = typeof projectionPrice === 'number' && Number.isFinite(projectionPrice);
+    const hasExt = typeof extensionPrice === 'number' && Number.isFinite(extensionPrice);
+
+    if (hasExt && !hasProj) {
+      return {
+        hasOverlap: false,
+        overlapType: 'NONE',
+        confidenceTier: 'LOW',
+        confidenceScore: 42,
+        noteFa: 'اکستنشن بدون پروجکشن سه‌نقطه‌ای اعتبار کمتری دارد (موج اصلاحی در نظر گرفته نشده است).'
+      };
+    }
+
+    if (hasProj && !hasExt) {
+      return {
+        hasOverlap: false,
+        overlapType: 'NONE',
+        confidenceTier: 'MEDIUM',
+        confidenceScore: 70,
+        noteFa: 'پروجکشن سه‌نقطه‌ای بدون تأیید اکستنشن دارای اعتبار متوسط است.'
+      };
+    }
+
+    if (!hasProj && !hasExt) {
+      return {
+        hasOverlap: false,
+        overlapType: 'NONE',
+        confidenceTier: 'LOW',
+        confidenceScore: 0,
+        noteFa: 'نه پروجکشن و نه اکستنشن برای ارزیابی تلاقی ارائه نشده است.'
+      };
+    }
+
+    const p = projectionPrice as number;
+    const e = extensionPrice as number;
+    const denom = Math.max(1e-9, Math.abs(p));
+    const gapPct = Math.round((Math.abs(p - e) / denom) * 1000) / 10;
+
+    if (gapPct <= 1.5) {
+      return {
+        hasOverlap: true,
+        overlapType: 'FULL',
+        confidenceTier: 'HIGH',
+        confidenceScore: 95,
+        gapPct,
+        noteFa: 'همپوشانی کامل پروجکشن و اکستنشن ← اعتبار بالا (تأیید محدوده هدف موج).'
+      };
+    }
+
+    if (gapPct <= 6.0) {
+      return {
+        hasOverlap: true,
+        overlapType: 'PARTIAL',
+        confidenceTier: 'MEDIUM',
+        confidenceScore: 76,
+        gapPct,
+        noteFa: `همپوشانی جزئی پروجکشن و اکستنشن (فاصله ${gapPct}٪) ← اعتبار متوسط.`
+      };
+    }
+
+    return {
+      hasOverlap: false,
+      overlapType: 'NONE',
+      confidenceTier: 'MEDIUM',
+      confidenceScore: 62,
+      gapPct,
+      noteFa: `عدم تلاقی نزدیک پروجکشن و اکستنشن (فاصله ${gapPct}٪) ← پروجکشن سه‌نقطه‌ای مرجع اصلی است.`
+    };
+  }
+
+  /**
+   * Session 7 (2.3 & 2.5): Evaluate 2-point Fibonacci Extension drawn from X (end of wave) -> Y (start of wave).
+   * - Total extension % from Y: 100% = wave end X, 161.8% = golden extension, 200% = +100% above X, 261.8% = strong extension.
+   * - Wave reaching < 200% (e.g. 250 vs 300 expected 2x, or < 100%) flags truncation (کوتاه‌شدگی).
+   */
+  public static evaluateTwoPointExtension(params: {
+    waveStartY: number;
+    waveEndX: number;
+    targetPriceZ: number;
+    direction: WaveDirection;
+  }): {
+    totalExtensionRatio: number;
+    totalExtensionPct: number;
+    beyondExtremePct: number;
+    matchedExtensionLevel?: string;
+    isStandardExtension: boolean;
+    isTruncated: boolean;
+    extensionTier:
+      | 'TRUNCATED_OR_TERMINAL'
+      | 'EQUALITY'
+      | 'NORMAL_EXTENSION'
+      | 'COMMON_EXTENSION'
+      | 'STRONG_EXTENSION'
+      | 'EXTREME_EXTENSION'
+      | 'PARTIAL_TRUNCATION';
+    classificationFa: string;
+  } {
+    const { waveStartY, waveEndX, targetPriceZ, direction } = params;
+    const isBull = direction === 'BULLISH';
+    const span = Math.max(1e-9, Math.abs(waveEndX - waveStartY));
+    const totalFromY = isBull ? targetPriceZ - waveStartY : waveStartY - targetPriceZ;
+    const totalExtensionRatio = Math.round((totalFromY / span) * 10000) / 10000;
+    const totalExtensionPct = Math.round(totalExtensionRatio * 1000) / 10;
+    const beyondExtremePct = Math.round((totalExtensionRatio - 1) * 1000) / 10;
+
+    const standardExt = [
+      { r: 0.618, label: '61.8%' },
+      { r: 1.0, label: '100.0%' },
+      { r: 1.27, label: '127.0%' },
+      { r: 1.382, label: '138.2%' },
+      { r: 1.618, label: '161.8%' },
+      { r: 2.0, label: '200.0%' },
+      { r: 2.618, label: '261.8%' },
+      { r: 4.236, label: '423.6%' }
+    ];
+    let best: { label: string; diff: number } | null = null;
+    for (const s of standardExt) {
+      const d = Math.abs(totalExtensionRatio - s.r);
+      if (d <= 0.015 && (!best || d < best.diff)) best = { label: s.label, diff: d };
+    }
+
+    const isTruncated = totalExtensionRatio < 1.999 && totalExtensionRatio > 0;
+    let extensionTier:
+      | 'TRUNCATED_OR_TERMINAL'
+      | 'EQUALITY'
+      | 'NORMAL_EXTENSION'
+      | 'COMMON_EXTENSION'
+      | 'STRONG_EXTENSION'
+      | 'EXTREME_EXTENSION'
+      | 'PARTIAL_TRUNCATION' = 'PARTIAL_TRUNCATION';
+    let classificationFa = '';
+
+    if (totalExtensionRatio >= 4.236 - 0.015) {
+      extensionTier = 'EXTREME_EXTENSION';
+      classificationFa = `اکستنشن بسیار شدید و نادر ${totalExtensionPct}٪ (۴۲۳.۶٪+)`;
+    } else if (totalExtensionRatio >= 2.618 - 0.015) {
+      extensionTier = 'STRONG_EXTENSION';
+      classificationFa = `کشیدگی شدید / اکستنشن شدید ${totalExtensionPct}٪ (۲۶۱.۸٪)`;
+    } else if (totalExtensionRatio >= 1.99) {
+      extensionTier = 'COMMON_EXTENSION';
+      classificationFa = `اکستنشن ${totalExtensionPct}٪ (۱۰۰٪ موج قبلی + ${beyondExtremePct}٪ عبور از سقف/کف)`;
+    } else if (totalExtensionRatio >= 1.618 - 0.015) {
+      extensionTier = 'COMMON_EXTENSION';
+      classificationFa = `کشیدگی معمول / اکستنشن قوی ${totalExtensionPct}٪ (۱۶۱.۸٪)`;
+    } else if (totalExtensionRatio >= 1.27 - 0.015) {
+      extensionTier = 'NORMAL_EXTENSION';
+      classificationFa = `اکستنشن معمول (${totalExtensionPct}٪)`;
+    } else if (totalExtensionRatio >= 1.0 - 0.015) {
+      extensionTier = 'EQUALITY';
+      classificationFa = `هم‌اندازه موج قبلی (۱۰۰٪)`;
+    } else {
+      extensionTier = 'TRUNCATED_OR_TERMINAL';
+      classificationFa = `اکستنشن ضعیف / کوتاه‌شدگی ترمینال (${totalExtensionPct}٪)`;
+    }
+
+    return {
+      totalExtensionRatio,
+      totalExtensionPct,
+      beyondExtremePct,
+      matchedExtensionLevel: best?.label,
+      isStandardExtension: Boolean(best),
+      isTruncated,
+      extensionTier,
+      classificationFa
     };
   }
 
@@ -286,6 +874,8 @@ export class TargetProjectionEngine {
       ? 'جفت استاندارد A-B از انتهای موج B برای محاسبه TMV موج C'
       : 'جفت ۱-۲ از انتهای موج ۲ برای محاسبه TMV موج ۳';
     let wave3ExtendedReductionRatio: number | null = null;
+    let wave5ExtendedExpansionRatio: number | null = null;
+    let isWave5Extension = false;
     let wave3ExtensionEffectFa: string | undefined;
 
     if (!isCorrective && !isTriangle && verts.length >= 5) {
@@ -305,11 +895,21 @@ export class TargetProjectionEngine {
       } else if (w3Ratio >= 1.618) {
         wave3ExtendedReductionRatio = 0.618;
         wave3ExtensionEffectFa = `موج ۳ کشیده (${(w3Ratio * 100).toFixed(0)}٪ > ۱۶۱.۸٪ موج ۱)؛ هدف TMV موج ۵ به محدوده ۰.۶۱۸ تعدیل می‌شود.`;
+      } else if (verts.length >= 6) {
+        const len5 = Math.max(0, Math.abs(verts[5].price - p4));
+        const w5Ratio = len5 / len3;
+        if (w5Ratio >= 1.618) {
+          isWave5Extension = true;
+          wave5ExtendedExpansionRatio = w5Ratio >= 2.618 ? 2.618 : 1.618;
+          wave3ExtensionEffectFa = `موج ۵ کشیده (${(w5Ratio * 100).toFixed(0)}٪ موج ۳): هدف TMV به ${
+            wave5ExtendedExpansionRatio === 2.618 ? '۲۶۱.۸٪' : '۱۶۱.۸٪'
+          } افزایش یافته است (این حالت کشیدگی است، نه استاندارد).`;
+        }
       }
     }
 
     let tmvSummary: TmvTierSummary | undefined;
-    const effectiveIdealFactor = wave3ExtendedReductionRatio ?? 1.0;
+    const effectiveIdealFactor = wave3ExtendedReductionRatio ?? wave5ExtendedExpansionRatio ?? 1.0;
     const short0618 = roundPrice(anchorPrice + sign * baseSpan * 0.618);
     const ideal100 = roundPrice(anchorPrice + sign * baseSpan * effectiveIdealFactor);
     const alternate1618 = roundPrice(anchorPrice + sign * baseSpan * 1.618);
@@ -320,6 +920,8 @@ export class TargetProjectionEngine {
       ideal100,
       alternate1618,
       wave3ExtendedReductionRatio,
+      wave5ExtendedExpansionRatio,
+      isWave5Extension,
       basisPairLabel,
       basisFa
     };
@@ -343,19 +945,19 @@ export class TargetProjectionEngine {
       } else {
         const dist = ideal100 < primaryPrz.lowPrice ? primaryPrz.lowPrice - ideal100 : ideal100 - primaryPrz.highPrice;
         const gapPct = Math.round((dist / span) * 1000) / 10;
-        if (gapPct <= 5.0) {
+        if (gapPct <= 10.0) {
           overlapReport = {
             type: 'PARTIAL',
             confidence: 0.72,
             gapPct,
-            noteFa: `همپوشانی جزئی: تراز TMV Ideal در فاصله ${gapPct}٪ از حاشیه PRZ قرار دارد (اعتبار ۷۲٪).`
+            noteFa: `همپوشانی جزئی: تراز TMV Ideal در فاصله ${gapPct}٪ از حاشیه PRZ قرار دارد (درون محدوده ۱۰٪، اعتبار متوسط).`
           };
         } else {
           overlapReport = {
             type: 'NONE',
             confidence: 0.45,
             gapPct,
-            noteFa: `عدم همپوشانی مستقیم (جدول ۱۰.۱۷): فاصله ${gapPct}٪ بین ناحیه چرخش PRZ و هدف حرکت TMV Ideal — PRZ محل چرخش اصلاحی و TMV مقصد حرکت بعدی است.`
+            noteFa: `عدم همپوشانی مستقیم (جدول ۱۰.۱۷): فاصله ${gapPct}٪ بین ناحیه چرخش PRZ و هدف حرکت TMV Ideal — TMV اولویت دارد (هدف حرکت موج است).`
           };
         }
       }

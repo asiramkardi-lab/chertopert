@@ -427,6 +427,31 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
         </div>
       )}
 
+      {(summary.wave1ExtensionProbable ||
+        summary.wave4ComplexCorrectionProbable ||
+        summary.wave5TruncationOrTerminalHint) && (
+        <div className="px-3.5 py-2 border-t border-slate-800/80 bg-amber-950/15 space-y-1 text-[10.5px] text-amber-200">
+          {summary.wave1ExtensionProbable && (
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
+              <span>اصلاح موج ۲ &lt; ۲۳.۶٪ موج ۱ ← احتمال کشیدگی موج ۱</span>
+            </div>
+          )}
+          {summary.wave4ComplexCorrectionProbable && (
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
+              <span>اصلاح موج ۴ &gt; ۵۰٪ موج ۳ ← احتمال اصلاح پیچیده‌تر (فلت / مثلث)</span>
+            </div>
+          )}
+          {summary.wave5TruncationOrTerminalHint && (
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
+              <span>موج ۵ کوتاه‌تر از موج ۳ ← احتمال کوتاه‌شدگی (Truncation) یا ترمینال</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Clean Footer Metadata Strip (No Static Pills) */}
       <div className="px-3.5 py-2 bg-slate-950/65 border-t border-slate-800 flex items-center justify-between gap-2 text-[10.5px] text-slate-400 font-mono tabular-nums">
         <span>

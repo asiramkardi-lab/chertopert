@@ -3,6 +3,7 @@ import { RulesEngine } from '../src/engine/rulesEngine';
 import { SmartRuleAlertEngine } from '../src/engine/smartRuleAlertEngine';
 import { TargetProjectionEngine } from '../src/engine/targetProjectionEngine';
 import { PatternEngines } from '../src/engine/patternEngines';
+import { FractalEngine, DEGREE_CONFIGS } from '../src/engine/fractalEngine';
 import {
   WAVE_NUMERIC_TOLERANCE,
   cleanFloat,
@@ -914,5 +915,975 @@ describe('Category 3 Cardinal Rules & 0.1% Tolerance Layer (RulesEngine)', () =>
       }
     });
   });
+
+  describe('Bahari Heuristics, Conditional Consequences, Shadow Exception & Corrective Boundaries', () => {
+    it('flags Wave 2 < 23.6% -> probable Wave 1 extension, Wave 4 > 50% -> complex correction, Wave 5 < Wave 3 -> truncation/terminal', () => {
+      // W2 = 23.5% of W1 (100->200->176.5), W4 = 55% of W3 without W1 overlap (W3: 176.5->276.5=100, W4: 276.5->221.5=55% > 200), W5 = 60 < W3=100
+      const verts = buildVertices([100, 200, 176.5, 276.5, 221.5, 281.5]);
+      const val = RulesEngine.validateStructure('IDEAL_CYCLE', verts, 'BULLISH', 'ROOT', '', candles);
+
+      expect(val.wave1ExtensionProbable).toBe(true);
+      expect(val.wave4ComplexCorrectionProbable).toBe(true);
+      expect(val.wave5TruncationOrTerminalHint).toBe(true);
+
+      const fib2 = val.rules.find(r => r.ruleId === 'FIB_WAVE_2');
+      const fib4 = val.rules.find(r => r.ruleId === 'FIB_WAVE_4');
+      const w5Hint = val.rules.find(r => r.ruleId === 'WAVE_5_TRUNCATION_OR_TERMINAL');
+      expect(fib2?.messageFa).toContain('کشیدگی موج ۱');
+      expect(fib4?.messageFa).toContain('فلت / مثلث');
+      expect(w5Hint?.passed).toBe(true);
+
+      const alerts = SmartRuleAlertEngine.evaluateScenario(
+        buildScenario('IDEAL_CYCLE', [100, 200, 176.5, 276.5, 221.5, 281.5]),
+        candles
+      );
+      expect(alerts.deviations.some(d => d.id === 'bahari-w4-complex')).toBe(true);
+      expect(alerts.deviations.some(d => d.id === 'bahari-w5-trunc-term')).toBe(true);
+    });
+
+    it('Rule 3 conditional consequence: suggests Terminal/Anti-Terminal ONLY when overall structure is ideal; flags wrong count otherwise', () => {
+      // 1) Overall ideal structure + W4 overlaps W1 (p4=185 < p1=200) -> suggests TERMINAL (since len5 < len3)
+      const idealWithOverlap = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 200, 140, 320, 185, 340]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(idealWithOverlap.suggestedAlternative).toBe('TERMINAL');
+      expect(idealWithOverlap.mislabelingStatus).toBe('VALID_ALTERNATIVE');
+
+      // 2) Broken overall structure (W5 fails 100% coverage of W4 AND W4 overlaps W1) -> MISLABELING, no Terminal suggestion
+      const brokenWithOverlap = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 200, 140, 320, 185, 300]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(brokenWithOverlap.isValid).toBe(false);
+      expect(brokenWithOverlap.suggestedAlternative).toBeUndefined();
+      expect(brokenWithOverlap.mislabelingStatus).toBe('MISLABELING');
+    });
+
+    it('Rule 2 violation explicitly notes Wave 3 may be Wave 1; Triangle enforces corrective slot placement', () => {
+      const r2Fail = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 200, 150, 210, 180, 270]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      const r2Rule = r2Fail.rules.find(r => r.ruleId === 'CARDINAL_RULE_2');
+      expect(r2Rule?.passed).toBe(false);
+      expect(r2Rule?.messageFa).toContain('موج ۳ در واقع موج ۱');
+      expect(r2Fail.mislabelingStatus).toBe('MISLABELING');
+
+      // Triangle rejected inside Motive Wave 3, permitted inside Corrective Wave 4
+      const triVerts = buildVertices([100, 200, 130, 185, 145, 170], ['0', 'A', 'B', 'C', 'D', 'E']);
+      const triInW3 = RulesEngine.validateStructure('TRIANGLE_CONVERGING', triVerts, 'BULLISH', 'MOTIVE', 'موج 3', candles);
+      expect(triInW3.rules.find(r => r.ruleId === 'TRIANGLE_POSITION')?.passed).toBe(false);
+      expect(triInW3.isValid).toBe(false);
+
+      const triInW4 = RulesEngine.validateStructure('TRIANGLE_CONVERGING', triVerts, 'BULLISH', 'CORRECTIVE', 'موج 4', candles);
+      expect(triInW4.rules.find(r => r.ruleId === 'TRIANGLE_POSITION')?.passed).toBe(true);
+    });
+
+    it('Shadow Exception requires visible trend strength BOTH before and after shadow; Degree Consistency rejects 1 vs 100 candle disparity', () => {
+      // Build custom 120 candles with strong trend before & after a single-candle extreme-wick leg at idx 30..31
+      const tsBase = Date.UTC(2024, 0, 1);
+      const trendBars: Candle[] = Array.from({ length: 120 }, (_, i) => {
+        const flat = i >= 25 && i <= 29;
+        const base = 100 + i * 2;
+        if (i === 30) {
+          return { time: `d${i}`, timestamp: tsBase + i * 86400_000, open: 160, high: 210, low: 158, close: 164, volume: 1200 };
+        }
+        return {
+          time: `d${i}`,
+          timestamp: tsBase + i * 86400_000,
+          open: flat ? 150 : base - 4,
+          high: flat ? 150.2 : base + 4,
+          low: flat ? 149.8 : base - 4.5,
+          close: flat ? 150.1 : base + 3.8,
+          volume: 1200
+        };
+      });
+
+      const shadowVerts: WaveVertex[] = [
+        { label: '0', price: 110, candleIndex: 5, timestamp: trendBars[5].timestamp, isConfirmed: true },
+        { label: '1', price: 145, candleIndex: 20, timestamp: trendBars[20].timestamp, isConfirmed: true },
+        { label: '2', price: 130, candleIndex: 25, timestamp: trendBars[25].timestamp, isConfirmed: true },
+        { label: '3', price: 210, candleIndex: 30, timestamp: trendBars[30].timestamp, isConfirmed: true },
+        { label: '4', price: 195, candleIndex: 42, timestamp: trendBars[42].timestamp, isConfirmed: true },
+        { label: '5', price: 290, candleIndex: 55, timestamp: trendBars[55].timestamp, isConfirmed: true }
+      ];
+      // Make leg 2->3 only 1 candle wide (span=1 from idx 29 to 30) so MIN_3_CANDLES checks shadow exception!
+      shadowVerts[2].candleIndex = 29;
+      shadowVerts[2].price = 150;
+      const withBeforeFlat = RulesEngine.validateStructure('IDEAL_CYCLE', shadowVerts, 'BULLISH', 'ROOT', '', trendBars);
+      // Before segment 25..28 was flat/weak -> Shadow exception rejected -> MIN_3_CANDLES is SOFT fail
+      const min3Weak = withBeforeFlat.rules.find(r => r.ruleId === 'MIN_3_CANDLES');
+      expect(min3Weak?.type).toBe('SOFT');
+      expect(min3Weak?.passed).toBe(false);
+
+      // Now make before bars strongly directional (restore indices 25..29 to strong trend)
+      const strongBothSides = trendBars.map((c, i) =>
+        i >= 25 && i <= 29
+          ? { ...c, open: 140 + (i - 25) * 4, close: 146 + (i - 25) * 4, high: 147 + (i - 25) * 4, low: 139 + (i - 25) * 4 }
+          : c
+      );
+      const withStrongBoth = RulesEngine.validateStructure('IDEAL_CYCLE', shadowVerts, 'BULLISH', 'ROOT', '', strongBothSides);
+      expect(withStrongBoth.rules.find(r => r.ruleId === 'MIN_3_CANDLES')?.passed).toBe(true);
+
+      // Anti-Cycle + Rule 3 simultaneous overlap remains valid
+      const antiWithR3 = RulesEngine.validateStructure(
+        'ANTI_CYCLE',
+        buildVertices([100, 160, 95, 220, 140, 260]),
+        'BULLISH',
+        'CORRECTIVE',
+        'موج B',
+        candles
+      );
+      expect(antiWithR3.isValid).toBe(true);
+      expect(antiWithR3.rules.find(r => r.ruleId === 'ANTI_CYCLE_R3_PERMITTED')?.passed).toBe(true);
+
+      // Degree consistency: Wave 2 = 1 candle vs Wave 4 = 100 candles -> FAILS DEGREE_CONSISTENCY
+      const disparityVerts: WaveVertex[] = [
+        { label: '0', price: 100, candleIndex: 0, timestamp: trendBars[0].timestamp, isConfirmed: true },
+        { label: '1', price: 150, candleIndex: 6, timestamp: trendBars[6].timestamp, isConfirmed: true },
+        { label: '2', price: 125, candleIndex: 7, timestamp: trendBars[7].timestamp, isConfirmed: true },
+        { label: '3', price: 240, candleIndex: 16, timestamp: trendBars[16].timestamp, isConfirmed: true },
+        { label: '4', price: 190, candleIndex: 116, timestamp: trendBars[116].timestamp, isConfirmed: true },
+        { label: '5', price: 290, candleIndex: 119, timestamp: trendBars[119].timestamp, isConfirmed: true }
+      ];
+      const dispVal = RulesEngine.validateStructure('IDEAL_CYCLE', disparityVerts, 'BULLISH', 'ROOT', '', strongBothSides);
+      expect(dispVal.rules.find(r => r.ruleId === 'DEGREE_CONSISTENCY')?.passed).toBe(false);
+    });
+
+    it('validates Complex Combinations (Z-X-T, I-X-T, D-X-Z), Diagonal Location & 8-Wave Valid Low boundaries', () => {
+      const complexScen = buildScenario('COMPLEX_COMBINATION', [100, 160, 130, 190, 150, 210, 175], 'BULLISH', ['0', 'W', 'X', 'Y', 'X2', 'Z', 'E']);
+      const compRep = PatternEngines.analyzeComplexPattern(complexScen, candles);
+      expect(compRep.detected).toBe(true);
+      expect(compRep.standard).toBe(true);
+
+      const endingInW1 = RulesEngine.validateStructure(
+        'ENDING_DIAGONAL',
+        buildVertices([100, 200, 140, 260, 180, 290]),
+        'BULLISH',
+        'MOTIVE',
+        'موج 1',
+        candles
+      );
+      expect(endingInW1.rules.find(r => r.ruleId === 'DIAGONAL_LOCATION')?.passed).toBe(false);
+      expect(endingInW1.rules.find(r => r.ruleId === 'DIAGONAL_LOCATION')?.canBeSolvedByAlternate).toBe('LEADING_DIAGONAL');
+
+      // 8-wave cycle (9 vertices 0..5..C) where Valid Low is formed at Wave C
+      const eightWaveVerts = buildVertices(
+        [100, 160, 130, 240, 190, 280, 220, 250, 185],
+        ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C']
+      );
+      const bottomCheck = RulesEngine.evaluateAbsoluteBottomAndValidLows(candles, eightWaveVerts, 'BULLISH');
+      expect(bottomCheck.validLowIdx).toBe(eightWaveVerts[8].candleIndex);
+    });
+
+    it('enforces Wave 1 extension consequences, double-extension warning, and T-4.31 / T-4.32 Wave 3 extension rules (2.6 & 2.12)', () => {
+      // 1) Wave 1 extension (len1 = 200, len3 = 90, len5 = 70) -> notes Wave 3 shorter, Wave 4 may overlap Wave 1, Wave 5 shorter
+      const w1Ext = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 300, 210, 300, 270, 340]), 'BULLISH', 'ROOT', '', candles);
+      const extRule1 = w1Ext.rules.find(r => r.ruleId === 'WAVE_EXTENSION_CHECK');
+      expect(extRule1?.passed).toBe(true);
+      expect(extRule1?.messageFa).toContain('کشیدگی موج ۱');
+      expect(extRule1?.messageFa).toContain('موج ۳ کوتاه‌تر');
+
+      // 2) Simultaneous double extension (len1=40, len3=140, len5=140) -> warns max 1 extended wave
+      const doubleExt = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 140, 120, 260, 210, 350]), 'BULLISH', 'ROOT', '', candles);
+      const extDouble = doubleExt.rules.find(r => r.ruleId === 'WAVE_EXTENSION_CHECK');
+      expect(extDouble?.passed).toBe(false);
+      expect(extDouble?.messageFa).toContain('کشیدگی هم‌زمان دو موج');
+
+      // 3) T-4.32: Extended Wave 3 (200% of W1) + Wave 4 = 50% of W3 -> VALID and above Wave 1 peak
+      const t432 = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 200, 150, 350, 250, 370]), 'BULLISH', 'ROOT', '', candles);
+      expect(t432.isValid).toBe(true);
+      expect(t432.rules.find(r => r.ruleId === 'CARDINAL_RULE_2')?.passed).toBe(true);
+      expect(t432.rules.find(r => r.ruleId === 'CARDINAL_RULE_3')?.passed).toBe(true);
+      expect(t432.rules.find(r => r.ruleId === 'WAVE_EXTENSION_CHECK')?.messageFa).toContain('موج ۴ بالاتر از حریم ۱');
+
+      // 4) T-4.31: Rule 3 violation proposes upgrading Wave 3 to Extended Wave 3 (with updatedVertices when candles have higher peak)
+      const extCandles: Candle[] = Array.from({ length: 100 }, (_, i) => {
+        let p = 100 + i * 2;
+        if (i >= 28 && i <= 38) p = 320 + (i - 28) * 6; // tall peak at i=38 (~380)
+        if (i >= 44 && i <= 52) p = 270; // W4 higher than v1=200!
+        return { time: `t${i}`, timestamp: 1700000000000 + i * 86400000, open: p - 2, high: p + 4, low: p - 4, close: p, volume: 1000 };
+      });
+      const shortW3Verts: WaveVertex[] = [
+        { label: '0', price: 100, candleIndex: 5, timestamp: extCandles[5].timestamp, isConfirmed: true },
+        { label: '1', price: 200, candleIndex: 14, timestamp: extCandles[14].timestamp, isConfirmed: true },
+        { label: '2', price: 150, candleIndex: 20, timestamp: extCandles[20].timestamp, isConfirmed: true },
+        { label: '3', price: 260, candleIndex: 26, timestamp: extCandles[26].timestamp, isConfirmed: true },
+        { label: '4', price: 185, candleIndex: 48, timestamp: extCandles[48].timestamp, isConfirmed: true }, // overlaps v1=200!
+        { label: '5', price: 420, candleIndex: 65, timestamp: extCandles[65].timestamp, isConfirmed: true }
+      ];
+      const fixes = RulesEngine.generateFixSuggestions('IDEAL_CYCLE', shortW3Verts, 'BULLISH', extCandles);
+      const extendW3Fix = fixes.find(f => f.id === 'fix_r3_extend_w3');
+      expect(extendW3Fix).toBeDefined();
+      expect(extendW3Fix?.updatedVertices).toBeDefined();
+      if (extendW3Fix?.updatedVertices) {
+        const reval = RulesEngine.validateStructure('IDEAL_CYCLE', extendW3Fix.updatedVertices, 'BULLISH', 'ROOT', '', extCandles);
+        expect(reval.isValid).toBe(true);
+      }
+    });
+
+    it('distinguishes Ideal Coverage & W4 Complexity features from Hard Rules, preserves W/V during Relabeling, and validates Wave Behavior & <10 bar Bottom (2.9–2.11)', () => {
+      // 1) Section 2.9: Deficient Flat (Wave C does NOT cover 100% of Wave B) -> Non-ideal (SOFT fail) yet structurally VALID
+      const deficientFlat = RulesEngine.validateStructure(
+        'FLAT_REGULAR',
+        buildVertices([100, 200, 110, 190], ['0', 'A', 'B', 'C']),
+        'BULLISH',
+        'CORRECTIVE',
+        'موج 4',
+        candles
+      );
+      expect(deficientFlat.isValid).toBe(true);
+      const covRule = deficientFlat.rules.find(r => r.ruleId === 'IDEAL_CORRECTIVE_COVERAGE');
+      expect(covRule?.type).toBe('SOFT');
+      expect(covRule?.passed).toBe(false);
+      expect(covRule?.messageFa).toContain('فلت ناقص C');
+
+      // 2) Section 2.10: W2=10 candles vs W4=30 candles -> accepted in DEGREE_CONSISTENCY and passes WAVE_4_COMPLEXITY_ALT
+      const candles90 = buildCandles(90, 100);
+      const w4LongerVerts = [
+        { label: '0', price: 100, candleIndex: 0, timestamp: candles90[0].timestamp, isConfirmed: true },
+        { label: '1', price: 180, candleIndex: 10, timestamp: candles90[10].timestamp, isConfirmed: true },
+        { label: '2', price: 135, candleIndex: 20, timestamp: candles90[20].timestamp, isConfirmed: true },
+        { label: '3', price: 290, candleIndex: 35, timestamp: candles90[35].timestamp, isConfirmed: true },
+        { label: '4', price: 240, candleIndex: 65, timestamp: candles90[65].timestamp, isConfirmed: true },
+        { label: '5', price: 360, candleIndex: 80, timestamp: candles90[80].timestamp, isConfirmed: true }
+      ];
+      const compVal = RulesEngine.validateStructure('IDEAL_CYCLE', w4LongerVerts, 'BULLISH', 'ROOT', '', candles90);
+      expect(compVal.rules.find(r => r.ruleId === 'WAVE_4_COMPLEXITY_ALT')?.passed).toBe(true);
+      expect(compVal.rules.find(r => r.ruleId === 'DEGREE_CONSISTENCY')?.passed).toBe(true);
+
+      // 3) Section 2.11: Relabeling after Rule 1 violation preserves parent W/V degrees and proposes A/B relabel
+      const r1Violation = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 180, 95, 250, 210, 310]), 'BULLISH', 'MOTIVE', 'W3', candles);
+      expect(r1Violation.relabelingScopeFa).toContain('درجات بالاتر (W و V) بدون تغییر');
+      const r1Fixes = RulesEngine.generateFixSuggestions('IDEAL_CYCLE', buildVertices([100, 180, 95, 250, 210, 310]), 'BULLISH', candles, 'MOTIVE', 'W3');
+      expect(r1Fixes.some(f => f.id === 'fix_r1_relabel_ab')).toBe(true);
+
+      // 4) Wave Behavior Recognition: 20-candle leg with 5 counter candles is 1 unified move; < 10 candles has no formed Absolute Bottom
+      const mixed20Candles: Candle[] = Array.from({ length: 60 }, (_, i) => {
+        const isCounter = i >= 12 && i <= 16; // 5 counter candles inside leg 1 (idx 5..25)
+        const base = 100 + i * 2;
+        return {
+          time: `m${i}`,
+          timestamp: 1700000000000 + i * 86400000,
+          open: isCounter ? base + 2 : base - 2,
+          close: isCounter ? base - 1 : base + 3,
+          high: base + 4,
+          low: base - 3,
+          volume: 1000
+        };
+      });
+      const unifiedMoveVal = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        [
+          { label: '0', price: 110, candleIndex: 5, timestamp: mixed20Candles[5].timestamp, isConfirmed: true },
+          { label: '1', price: 155, candleIndex: 25, timestamp: mixed20Candles[25].timestamp, isConfirmed: true },
+          { label: '2', price: 135, candleIndex: 31, timestamp: mixed20Candles[31].timestamp, isConfirmed: true },
+          { label: '3', price: 210, candleIndex: 44, timestamp: mixed20Candles[44].timestamp, isConfirmed: true },
+          { label: '4', price: 185, candleIndex: 51, timestamp: mixed20Candles[51].timestamp, isConfirmed: true },
+          { label: '5', price: 245, candleIndex: 58, timestamp: mixed20Candles[58].timestamp, isConfirmed: true }
+        ],
+        'BULLISH',
+        'ROOT',
+        '',
+        mixed20Candles
+      );
+      expect(unifiedMoveVal.rules.find(r => r.ruleId === 'WAVE_BEHAVIOR_SINGLE_MOVE')?.passed).toBe(true);
+      expect(RulesEngine.evaluateAbsoluteBottomAndValidLows(mixed20Candles.slice(0, 7), [], 'BULLISH').formed).toBe(false);
+    });
+
+    it('Session 6 (2.7–2.12): Terminal CB-Wave 100% W4 coverage, Anti-Cycle 3-3 & placement/market-end 100%, Anti-Terminal W3 truncation, PRZ vs TMV, Wave 5 Terminal sell signal, and Wedge Terminal boundaries', () => {
+      // 1) CB_WAVE5_COVERS_W4 in TERMINAL: Wave 5 < Wave 3 without 100% Wave 4 coverage MUST fail HARD rule
+      const termIncompleteW5 = RulesEngine.validateStructure(
+        'TERMINAL',
+        buildVertices([100, 220, 150, 255, 195, 240]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(termIncompleteW5.isValid).toBe(false);
+      expect(termIncompleteW5.rules.find(r => r.ruleId === 'CB_WAVE5_COVERS_W4')?.passed).toBe(false);
+      expect(termIncompleteW5.mislabelingStatus).toBe('MISLABELING');
+
+      // 2) T-6.18 & T-6.19 (2.7 Anti-Terminal W3 truncation): valid when W3 < W1 && W3 > W5; invalid when W3 is shortest
+      const t618 = RulesEngine.validateStructure(
+        'ANTI_TERMINAL',
+        buildVertices([100, 240, 180, 280, 220, 280]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(t618.isValid).toBe(true);
+      expect(t618.rules.find(r => r.ruleId === 'ANTI_TERMINAL_W5_EXT')?.passed).toBe(true);
+
+      const t619 = RulesEngine.validateStructure(
+        'ANTI_TERMINAL',
+        buildVertices([100, 220, 150, 220, 180, 310]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(t619.isValid).toBe(false);
+      expect(t619.rules.find(r => r.ruleId === 'CARDINAL_RULE_2')?.passed).toBe(false);
+
+      // 3) T-6.20 & T-6.21 (2.8 PRZ vs TMV): Ideal Cycle reaches TMV; Terminal stops in PRZ short of TMV
+      const t620 = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 160, 130, 250, 205, 290]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(t620.isValid).toBe(true);
+      expect(t620.rules.find(r => r.ruleId === 'IDEAL_WAVE5_TMV_REACHED')?.passed).toBe(true);
+
+      const t621 = RulesEngine.validateStructure(
+        'TERMINAL',
+        buildVertices([100, 220, 150, 255, 195, 270]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(t621.isValid).toBe(true);
+      expect(t621.rules.find(r => r.ruleId === 'TERMINAL_W5_TRUNCATION')?.passed).toBe(true);
+
+      // 4) T-6.22 & T-6.23 (2.9 Terminal in Wave 5 + Wave A 100% retrace = strong sell signal)
+      const w5TermCandles: Candle[] = Array.from({ length: 70 }, (_, i) => {
+        let p = 100 + i * 2;
+        if (i >= 32 && i <= 50) {
+          const t = i - 32;
+          // Crisp 19-bar 5-subwave Terminal wedge inside Wave 5 (no flat duplicate neighbors):
+          // sub1 peak=240 (t=4), sub2 trough=222 (t=7), sub3 peak=258 (t=11), sub4 trough=236 (t=15, overlaps sub1!), sub5=262 (t=18)
+          const curve = [
+            210, 218, 226, 233, 240,
+            232, 226, 222,
+            231, 241, 250, 258,
+            251, 245, 240, 236,
+            245, 254, 262
+          ];
+          p = curve[Math.min(curve.length - 1, t)];
+        }
+        return {
+          time: `w5_${i}`,
+          timestamp: 1700000000000 + i * 86400000,
+          open: p - 1,
+          close: p,
+          high: p + 1.5,
+          low: p - 1.5,
+          volume: 1000
+        };
+      });
+      const w5TermVerts: WaveVertex[] = [
+        { label: '0', price: 100, candleIndex: 0, timestamp: w5TermCandles[0].timestamp, isConfirmed: true },
+        { label: '1', price: 150, candleIndex: 8, timestamp: w5TermCandles[8].timestamp, isConfirmed: true },
+        { label: '2', price: 125, candleIndex: 14, timestamp: w5TermCandles[14].timestamp, isConfirmed: true },
+        { label: '3', price: 230, candleIndex: 26, timestamp: w5TermCandles[26].timestamp, isConfirmed: true },
+        { label: '4', price: 210, candleIndex: 32, timestamp: w5TermCandles[32].timestamp, isConfirmed: true },
+        { label: '5', price: 262, candleIndex: 50, timestamp: w5TermCandles[50].timestamp, isConfirmed: true },
+        { label: 'A', price: 205, candleIndex: 62, timestamp: w5TermCandles[62].timestamp, isConfirmed: true }
+      ];
+      const t622 = RulesEngine.validateStructure('IDEAL_CYCLE', w5TermVerts.slice(0, 6), 'BULLISH', 'ROOT', '', w5TermCandles);
+      expect(t622.wave5TerminalDetected).toBe(true);
+      expect(t622.rules.some(r => r.ruleId === 'IDEAL_WAVE5_TERMINAL_DETECTED')).toBe(true);
+
+      const t623 = RulesEngine.evaluateWave5TerminalSignal(w5TermVerts, 'BULLISH', w5TermCandles, 'موج 5');
+      expect(t623.terminalInWave5).toBe(true);
+      expect(t623.waveACovers100Pct).toBe(true);
+      expect(t623.signalStrength).toBe('STRONG_SELL');
+
+      // 5) T-6.24, T-6.25, T-6.26 (2.10 Anti-Cycle 100% market-end law) + T-6.30..T-6.32 (2.12 placement) + 3-3 mismatch
+      const acMarketEndCandles = buildCandles(15, 100);
+      const t624 = RulesEngine.validateStructure(
+        'ANTI_CYCLE',
+        buildVertices([100, 200, 110]),
+        'BULLISH',
+        'ROOT',
+        '',
+        acMarketEndCandles
+      );
+      expect(t624.isValid).toBe(false);
+
+      const t625 = RulesEngine.validateStructure(
+        'ANTI_CYCLE',
+        buildVertices([100, 200, 100]),
+        'BULLISH',
+        'ROOT',
+        '',
+        acMarketEndCandles
+      );
+      expect(t625.isValid).toBe(true);
+
+      const t626 = RulesEngine.validateStructure(
+        'ANTI_CYCLE',
+        buildVertices([100, 200, 110]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(t626.isValid).toBe(true);
+
+      // T-6.30..T-6.32: Extended in B (valid), Wave 2 (invalid even with parentRole='CORRECTIVE'), subwave 4 of Wave 3 (valid)
+      const t630 = RulesEngine.validateStructure('ANTI_CYCLE', buildVertices([100, 200, 90, 280]), 'BULLISH', 'CORRECTIVE', 'موج B', candles);
+      expect(t630.isValid).toBe(true);
+
+      const t631 = RulesEngine.validateStructure('ANTI_CYCLE', buildVertices([100, 200, 90, 280]), 'BULLISH', 'CORRECTIVE', 'موج 2', candles);
+      expect(t631.isValid).toBe(false);
+
+      const t632 = RulesEngine.validateStructure('ANTI_CYCLE', buildVertices([100, 200, 90, 280]), 'BULLISH', 'CORRECTIVE', 'ریزموج 4 از موج 3', candles);
+      expect(t632.isValid).toBe(true);
+
+      // Anti-Cycle 3-3 internal subwave structure rejects as FLAT_REGULAR
+      const threeThreeCandles: Candle[] = Array.from({ length: 40 }, (_, i) => {
+        // Genuine 3-wave (2 internal pivots: A peak, B trough) per phase
+        const seg1 = [100, 125, 145, 165, 150, 138, 125, 145, 165, 182, 196, 205];
+        const seg2 = [205, 180, 155, 130, 145, 160, 175, 155, 135, 118, 102, 90];
+        const p = i < 12 ? seg1[i] : i < 24 ? seg2[i - 12] : 100 + i;
+        return {
+          time: `tt_${i}`,
+          timestamp: 1700000000000 + i * 86400000,
+          open: p - 1,
+          close: p,
+          high: p + 2,
+          low: p - 2,
+          volume: 1000
+        };
+      });
+      const threeThreeVerts: WaveVertex[] = [
+        { label: '0', price: 100, candleIndex: 0, timestamp: threeThreeCandles[0].timestamp, isConfirmed: true },
+        { label: '1', price: 205, candleIndex: 11, timestamp: threeThreeCandles[11].timestamp, isConfirmed: true },
+        { label: '2', price: 90, candleIndex: 23, timestamp: threeThreeCandles[23].timestamp, isConfirmed: true }
+      ];
+      const threeThreeVal = RulesEngine.validateStructure('ANTI_CYCLE', threeThreeVerts, 'BULLISH', 'CORRECTIVE', 'موج B', threeThreeCandles);
+      expect(threeThreeVal.isValid).toBe(false);
+      expect(threeThreeVal.rules.find(r => r.ruleId === 'ANTI_CYCLE_COVERAGE')?.canBeSolvedByAlternate).toBe('FLAT_REGULAR');
+
+      // 6) T-6.27, T-6.28, T-6.29 (2.11 Wedge Terminal vs Anti-Terminal vs Ideal Cycle w/ decreasing amplitude)
+      const t627 = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 220, 150, 255, 195, 270]), 'BULLISH', 'ROOT', '', candles);
+      expect(t627.suggestedAlternative).toBe('TERMINAL');
+
+      const t628 = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 160, 130, 220, 145, 320]), 'BULLISH', 'ROOT', '', candles);
+      expect(t628.suggestedAlternative).toBe('ANTI_TERMINAL');
+
+      const t629Term = RulesEngine.validateStructure('TERMINAL', buildVertices([100, 300, 180, 350, 310, 400]), 'BULLISH', 'ROOT', '', candles);
+      expect(t629Term.rules.find(r => r.ruleId === 'OVERLAP_FEATURE')?.canBeSolvedByAlternate).toBe('IDEAL_CYCLE');
+      const t629Ideal = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 300, 180, 350, 310, 400]), 'BULLISH', 'ROOT', '', candles);
+      expect(t629Ideal.isValid).toBe(true);
+    });
+
+    it('Session 7 (2.1–2.5 / T-7.1..T-7.10): Fibonacci S/R & volume confluence, Retracement ratios (61.8%, 38.2%, 100%, 40% non-standard), and 2-point Extension (261.8%, 200%, <200% truncation)', () => {
+      // T-7.1: 61.8% retracement at 138.2 with classic swing S/R touch & elevated volume -> STRONG
+      const srCandles: Candle[] = Array.from({ length: 25 }, (_, i) => {
+        const isSwingAt138 = i === 6 || i === 12;
+        const base = isSwingAt138 ? 138.2 : 155 + (i % 3) * 4;
+        return {
+          time: `sr_${i}`,
+          timestamp: 1700000000000 + i * 86400000,
+          open: base + 1,
+          close: base + 2,
+          high: base + 5,
+          low: isSwingAt138 ? 138.2 : base - 1,
+          volume: isSwingAt138 ? 3000 : 1000
+        };
+      });
+      const t71 = TargetProjectionEngine.evaluateFibonacciLevelConfluence({
+        levelPrice: 138.2,
+        ratio: 0.618,
+        candles: srCandles
+      });
+      expect(t71.hasClassicSR).toBe(true);
+      expect(t71.strength).toBe('STRONG');
+
+      // T-7.2: 61.8% retracement at 138.2 with NO nearby classic S/R -> WEAK
+      const noSrCandles: Candle[] = Array.from({ length: 25 }, (_, i) => ({
+        time: `nsr_${i}`,
+        timestamp: 1700000000000 + i * 86400000,
+        open: 180 + i,
+        close: 181 + i,
+        high: 183 + i,
+        low: 178 + i,
+        volume: 1000
+      }));
+      const t72 = TargetProjectionEngine.evaluateFibonacciLevelConfluence({
+        levelPrice: 138.2,
+        ratio: 0.618,
+        candles: noSrCandles
+      });
+      expect(t72.hasClassicSR).toBe(false);
+      expect(t72.strength).toBe('WEAK');
+
+      // T-7.3: Bullish 100 -> 200 -> 138.2 = 61.8%
+      const t73 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 100 }, { price: 200 }, { price: 138.2 }],
+        direction: 'BULLISH',
+        targetWave: '2'
+      });
+      expect(t73.isValid).toBe(true);
+      expect(t73.retracementPct).toBe(61.8);
+      expect(t73.matchedFibLevel).toBe('61.8%');
+      expect(t73.isGolden618).toBe(true);
+
+      // T-7.4 & T-7.9: 38.2% standard retracement in Bearish (200 -> 100 -> 138.2) & Bullish (100 -> 200 -> 161.8)
+      const t74 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 200 }, { price: 100 }, { price: 138.2 }],
+        direction: 'BEARISH',
+        targetWave: '4'
+      });
+      expect(t74.isValid).toBe(true);
+      expect(t74.retracementPct).toBe(38.2);
+      expect(t74.matchedFibLevel).toBe('38.2%');
+      expect(t74.isStandardFibLevel).toBe(true);
+
+      // T-7.5: 100% Wave 2 retracement -> Rule 1 error
+      const t75 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 100 }, { price: 200 }, { price: 100 }],
+        direction: 'BULLISH',
+        targetWave: '2'
+      });
+      expect(t75.isValid).toBe(false);
+      expect(t75.errors.some(e => e.includes('قانون ۱'))).toBe(true);
+
+      // T-7.10: 40% retracement is NOT a standard Fibonacci ratio
+      const t710 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 100 }, { price: 200 }, { price: 160 }],
+        direction: 'BULLISH',
+        targetWave: '2'
+      });
+      expect(t710.retracementPct).toBe(40);
+      expect(t710.isStandardFibLevel).toBe(false);
+      expect(t710.matchedFibLevel).toBeUndefined();
+
+      // T-7.6, T-7.7, T-7.8: 2-Point Extension X (end) -> Y (start)
+      const t76 = TargetProjectionEngine.evaluateTwoPointExtension({
+        waveStartY: 100,
+        waveEndX: 200,
+        targetPriceZ: 361.8,
+        direction: 'BULLISH'
+      });
+      expect(t76.totalExtensionPct).toBe(261.8);
+      expect(t76.matchedExtensionLevel).toBe('261.8%');
+      expect(t76.isTruncated).toBe(false);
+
+      const t77 = TargetProjectionEngine.evaluateTwoPointExtension({
+        waveStartY: 100,
+        waveEndX: 200,
+        targetPriceZ: 300,
+        direction: 'BULLISH'
+      });
+      expect(t77.totalExtensionPct).toBe(200);
+      expect(t77.beyondExtremePct).toBe(100);
+      expect(t77.isTruncated).toBe(false);
+
+      const t78 = TargetProjectionEngine.evaluateTwoPointExtension({
+        waveStartY: 100,
+        waveEndX: 200,
+        targetPriceZ: 250,
+        direction: 'BULLISH'
+      });
+      expect(t78.isTruncated).toBe(true);
+
+      // T-7.11, T-7.12, T-7.13 (2.6 Extension Levels): 161.8% common extension, 61.8% terminal truncation, 261.8% strong extension
+      const t711 = TargetProjectionEngine.evaluateTwoPointExtension({
+        waveStartY: 100,
+        waveEndX: 200,
+        targetPriceZ: 261.8,
+        direction: 'BULLISH'
+      });
+      expect(t711.extensionTier).toBe('COMMON_EXTENSION');
+
+      const t712 = TargetProjectionEngine.evaluateTwoPointExtension({
+        waveStartY: 100,
+        waveEndX: 200,
+        targetPriceZ: 161.8,
+        direction: 'BULLISH'
+      });
+      expect(t712.extensionTier).toBe('TRUNCATED_OR_TERMINAL');
+
+      const t713 = TargetProjectionEngine.evaluateTwoPointExtension({
+        waveStartY: 100,
+        waveEndX: 200,
+        targetPriceZ: 361.8,
+        direction: 'BULLISH'
+      });
+      expect(t713.extensionTier).toBe('STRONG_EXTENSION');
+
+      // T-7.14, T-7.15, T-7.16 (2.7 Expansion Levels): W2 23.6% -> probable W1 extension, W4 38.2% -> valid W4 turn, W2 78.6% -> acceleration zone
+      const t714 = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 200, 176.4, 280, 240, 320]), 'BULLISH', 'ROOT', '', candles);
+      expect(t714.wave1ExtensionProbable).toBe(true);
+
+      const t715 = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 200, 150, 350, 273.6, 400]), 'BULLISH', 'ROOT', '', candles);
+      expect(t715.rules.find(r => r.ruleId === 'FIB_WAVE_4')?.passed).toBe(true);
+
+      const t716 = RulesEngine.validateStructure('IDEAL_CYCLE', buildVertices([100, 200, 121.4, 320, 250, 380]), 'BULLISH', 'ROOT', '', candles);
+      expect(t716.rules.find(r => r.ruleId === 'FIB_WAVE_2')?.messageFa).toContain('شتاب‌گیری');
+      const retLevels = TargetProjectionEngine.getRetracementImportanceLevels(100, 200, 'BULLISH');
+      expect(retLevels.find(l => l.ratio === 0.786)?.acceleration).toBe(true);
+
+      // T-7.17, T-7.18, T-7.19 (2.8 Retracement X->Y Orientation)
+      const t717 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 100 }, { price: 200 }],
+        direction: 'BULLISH'
+      });
+      expect(t717.isValid).toBe(true);
+
+      const t718 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 200 }, { price: 100 }],
+        direction: 'BEARISH'
+      });
+      expect(t718.isValid).toBe(true);
+
+      const t719 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 200 }, { price: 100 }],
+        direction: 'BULLISH'
+      });
+      expect(t719.isValid).toBe(false);
+
+      // T-7.20, T-7.21, T-7.22 (2.9 Extension X=end->Y=start Orientation & 161.8% levels)
+      const t720 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'EXTENSION',
+        points: [{ price: 200 }, { price: 100 }],
+        direction: 'BULLISH'
+      });
+      expect(t720.isValid).toBe(true);
+      expect(t720.extensionLevels?.find(l => l.ratio === 1.618)?.price).toBe(261.8);
+
+      const t721 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'EXTENSION',
+        points: [{ price: 100 }, { price: 200 }],
+        direction: 'BEARISH'
+      });
+      expect(t721.isValid).toBe(true);
+      expect(t721.extensionLevels?.find(l => l.ratio === 1.618)?.price).toBe(38.2);
+
+      const t722 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'EXTENSION',
+        points: [{ price: 100 }, { price: 200 }],
+        direction: 'BULLISH'
+      });
+      expect(t722.isValid).toBe(false);
+
+      // T-7.23, T-7.24, T-7.25 (2.10 S/R & Acceleration importance table)
+      expect(retLevels.find(l => l.ratio === 0.618)?.srImportance).toBe('very_strong');
+      expect(retLevels.find(l => l.ratio === 0.786)?.srImportance).toBe('strong');
+      expect(retLevels.find(l => l.ratio === 0.786)?.acceleration).toBe(true);
+      expect(retLevels.find(l => l.ratio === 0.236)?.srImportance).toBe('none');
+
+      // 2.11 Fibonacci Arc, Fan, Time (advanced time/price tools, excluded from basic wave counting) & 2.12 3-point Projection intro
+      const catalog = TargetProjectionEngine.getFibonacciToolCatalog();
+      const arcEntry = catalog.find(c => c.toolType === 'ARC');
+      const fanEntry = catalog.find(c => c.toolType === 'FAN');
+      const timeEntry = catalog.find(c => c.toolType === 'TIME');
+      const projEntry = catalog.find(c => c.toolType === 'PROJECTION');
+      expect(arcEntry?.usedInBasicWaveCounting).toBe(false);
+      expect(arcEntry?.domain).toBe('PRICE_AND_TIME');
+      expect(fanEntry?.usedInBasicWaveCounting).toBe(false);
+      expect(fanEntry?.domain).toBe('PRICE_AND_TIME');
+      expect(timeEntry?.usedInBasicWaveCounting).toBe(false);
+      expect(timeEntry?.domain).toBe('TIME');
+      expect(projEntry?.pointCount).toBe(3);
+
+      const arcVal = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'ARC',
+        points: [{ price: 100 }, { price: 200 }],
+        direction: 'BULLISH'
+      });
+      expect(arcVal.isValid).toBe(true);
+      expect(arcVal.usedInBasicWaveCounting).toBe(false);
+      expect(arcVal.toolDomain).toBe('PRICE_AND_TIME');
+      expect(arcVal.warnings.some(w => w.includes('موج‌شماری پایه استفاده نمی‌شود'))).toBe(true);
+
+      const timeVal = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'TIME',
+        points: [{ price: 100 }, { price: 200 }],
+        direction: 'BULLISH'
+      });
+      expect(timeVal.usedInBasicWaveCounting).toBe(false);
+      expect(timeVal.toolDomain).toBe('TIME');
+    });
+
+    it('Session 8 (2.1–2.5 / T-8.1..T-8.15): 3-Point Projection X->Y->Z, Z/orientation errors, TMV vs PRZ overlap & priority, and Wave 5 retracement ban', () => {
+      // T-8.1, T-8.2, T-8.4: X=100, Y=200, Z=150 -> 100% at 250, 161.8% at 311.8
+      const proj = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [
+          { price: 100, candleIndex: 0 },
+          { price: 200, candleIndex: 5 },
+          { price: 150, candleIndex: 9 }
+        ],
+        direction: 'BULLISH',
+        targetWave: '3',
+        pairLabel: '1-2'
+      });
+      expect(proj.isValid).toBe(true);
+      expect(proj.projectionLevels?.find(l => l.ratio === 1.0)?.price).toBe(250);
+      expect(proj.projectionLevels?.find(l => l.ratio === 1.618)?.price).toBe(311.8);
+
+      // T-8.3: Missing Wave 2 (Z) -> error
+      const t83 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [{ price: 100 }, { price: 200 }],
+        direction: 'BULLISH'
+      });
+      expect(t83.isValid).toBe(false);
+
+      // T-8.5: Reversed (X=200, Y=100, Z=150 for BULLISH) -> error
+      const t85 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [{ price: 200 }, { price: 100 }, { price: 150 }],
+        direction: 'BULLISH'
+      });
+      expect(t85.isValid).toBe(false);
+
+      // T-8.6: Z placed on Wave 1 (candleIndex <= Y) -> error
+      const t86 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [
+          { price: 100, candleIndex: 0 },
+          { price: 200, candleIndex: 5 },
+          { price: 150, candleIndex: 3 }
+        ],
+        direction: 'BULLISH'
+      });
+      expect(t86.isValid).toBe(false);
+
+      // T-8.7..T-8.12: TMV vs PRZ Overlap & Priority
+      const t87 = TargetProjectionEngine.evaluateTmvPrzOverlap({ tmvPrice: 250, przLow: 250, hasHighVolume: true });
+      expect(t87.hasOverlap).toBe(true);
+      expect(t87.overlapType).toBe('FULL');
+      expect(t87.confidenceTier).toBe('VERY_HIGH');
+
+      const t88 = TargetProjectionEngine.evaluateTmvPrzOverlap({ tmvPrice: 250, przLow: 240, przHigh: 260 });
+      expect(t88.hasOverlap).toBe(true);
+      expect(t88.overlapType).toBe('PARTIAL');
+
+      const t89 = TargetProjectionEngine.evaluateTmvPrzOverlap({ tmvPrice: 250, przLow: 300 });
+      expect(t89.hasOverlap).toBe(false);
+      expect(t89.overlapType).toBe('NONE');
+      expect(t89.priority).toBe('TMV_PRIORITY');
+
+      // T-8.13, T-8.14, T-8.15: Wave 5 retracement forbidden, <100% warns possible Wave 3, >100% Rule 1 error
+      const t813 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 100 }, { price: 200 }],
+        direction: 'BULLISH',
+        targetWave: '5'
+      });
+      expect(t813.isValid).toBe(false);
+      expect(t813.isWave5RetracementInvalid).toBe(true);
+
+      const t814 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 100 }, { price: 200 }, { price: 150 }],
+        direction: 'BULLISH',
+        targetWave: '5'
+      });
+      expect(t814.isValid).toBe(false);
+      expect(t814.warnings.some(w => w.includes('موج ۳'))).toBe(true);
+
+      const t815 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'RETRACEMENT',
+        points: [{ price: 100 }, { price: 200 }, { price: 80 }],
+        direction: 'BULLISH',
+        targetWave: '5'
+      });
+      expect(t815.isValid).toBe(false);
+      expect(t815.errors.some(e => e.includes('قانون ۱'))).toBe(true);
+
+      // T-8.16, T-8.17, T-8.18 (2.6): Projection pair rules (1-2->W3 valid, 1-2->W5 error, 3-4->W5 valid, A-B->C valid)
+      const t816 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [{ price: 100 }, { price: 200 }, { price: 150 }],
+        direction: 'BULLISH',
+        targetWave: '3',
+        pairLabel: '۱-۲'
+      });
+      expect(t816.isValid).toBe(true);
+
+      const t817 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [{ price: 100 }, { price: 200 }, { price: 150 }],
+        direction: 'BULLISH',
+        targetWave: '5',
+        pairLabel: '۱-۲'
+      });
+      expect(t817.isValid).toBe(false);
+
+      const t818 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [{ price: 150 }, { price: 320 }, { price: 260 }],
+        direction: 'BULLISH',
+        targetWave: '5',
+        pairLabel: '۳-۴'
+      });
+      expect(t818.isValid).toBe(true);
+
+      // T-8.19, T-8.20, T-8.21 (2.7): Wave 5 projection from W3 (200->400) & W4 (400->350) -> 100%=550, 161.8%=673.6; accelerated W5 -> LOW confidence
+      const t819 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [{ price: 200 }, { price: 400 }, { price: 350 }],
+        direction: 'BULLISH',
+        targetWave: '5',
+        pairLabel: '۳-۴'
+      });
+      expect(t819.isValid).toBe(true);
+      expect(t819.projectionLevels?.find(l => l.ratio === 1.0)?.price).toBe(550);
+      expect(t819.projectionLevels?.find(l => l.ratio === 1.618)?.price).toBe(673.6);
+
+      const t821 = TargetProjectionEngine.validateFibonacciToolUsage({
+        toolType: 'PROJECTION',
+        points: [{ price: 200 }, { price: 400 }, { price: 350 }],
+        direction: 'BULLISH',
+        targetWave: '5',
+        pairLabel: '۳-۴',
+        isAcceleratedWave5: true
+      });
+      expect(t821.projectionConfidence).toBe('LOW');
+      expect(t821.warnings.some(w => w.includes('اعتبار کمتری'))).toBe(true);
+
+      // T-8.22, T-8.23, T-8.24 (2.8): Projection & Extension confluence
+      const t822 = TargetProjectionEngine.evaluateProjectionExtensionConfluence({
+        projectionPrice: 311.8,
+        extensionPrice: 311.8
+      });
+      expect(t822.hasOverlap).toBe(true);
+      expect(t822.confidenceTier).toBe('HIGH');
+
+      const t823 = TargetProjectionEngine.evaluateProjectionExtensionConfluence({
+        projectionPrice: 311.8,
+        extensionPrice: 300
+      });
+      expect(t823.hasOverlap).toBe(true);
+      expect(t823.overlapType).toBe('PARTIAL');
+      expect(t823.confidenceTier).toBe('MEDIUM');
+
+      const t824 = TargetProjectionEngine.evaluateProjectionExtensionConfluence({
+        extensionPrice: 311.8
+      });
+      expect(t824.confidenceTier).toBe('LOW');
+
+      // T-8.25, T-8.26, T-8.27 (2.9): TMV Prime=200, TMV Ideal=250, TMV Alternate=311.8
+      const mkScenario = (verts: WaveVertex[]): WaveScenario => ({
+        id: 's8_test',
+        titleFa: 'تست ۸',
+        patternType: 'IDEAL_CYCLE',
+        direction: 'BULLISH',
+        confidence: 90,
+        probability: 80,
+        vertices: verts,
+        validationSummary: {} as any,
+        targets: [],
+        invalidations: [],
+        invalidationPrice: 100,
+        descriptionFa: ''
+      });
+      const t825 = TargetProjectionEngine.computeTmvTiersAndOverlap(
+        mkScenario(buildVertices([100, 200, 150])),
+        []
+      );
+      expect(t825.tmvSummary?.prime).toBe(200);
+      expect(t825.tmvSummary?.ideal100).toBe(250);
+      expect(t825.tmvSummary?.alternate1618).toBe(311.8);
+
+      // T-8.28, T-8.29, T-8.30 (2.10): W3=250% reduces W5 TMV (0.618), W3=150% keeps standard (null), W5=200% expands TMV (isWave5Extension)
+      const t828 = TargetProjectionEngine.computeTmvTiersAndOverlap(
+        mkScenario(buildVertices([100, 200, 150, 400, 350])),
+        []
+      );
+      expect(t828.tmvSummary?.wave3ExtendedReductionRatio).toBe(0.618);
+      expect(t828.tmvSummary?.ideal100).toBeLessThan(350 + 250);
+
+      const t829 = TargetProjectionEngine.computeTmvTiersAndOverlap(
+        mkScenario(buildVertices([100, 200, 150, 300, 250])),
+        []
+      );
+      expect(t829.tmvSummary?.wave3ExtendedReductionRatio).toBeNull();
+      expect(t829.tmvSummary?.ideal100).toBe(400);
+
+      const t830 = TargetProjectionEngine.computeTmvTiersAndOverlap(
+        mkScenario(buildVertices([100, 200, 150, 300, 250, 550])),
+        []
+      );
+      expect(t830.tmvSummary?.isWave5Extension).toBe(true);
+      expect(t830.tmvSummary?.wave5ExtendedExpansionRatio).toBe(1.618);
+
+      // T-8.31, T-8.32, T-8.33 (2.11): Max 4 degrees in Daily, 3 in Weekly, and Degree 4 promotion on breakout
+      const t831 = FractalEngine.assignDegrees(5, '1D', 'TSE_IRAN', 120);
+      expect(t831.degrees).toHaveLength(4);
+      expect(t831.droppedLevels).toBe(1);
+
+      const t832 = FractalEngine.assignDegrees(4, '1W', 'TSE_IRAN', 120);
+      expect(t832.degrees).toHaveLength(3);
+      expect(t832.droppedLevels).toBe(1);
+
+      const deg4Candles: Candle[] = Array.from({ length: 40 }, (_, i) => {
+        const p = i <= 30 ? 100 + i * 3 : 190 + (i - 30) * 5; // breaks past wave 5 (190) -> 235
+        return {
+          time: `d4_${i}`,
+          timestamp: 1700000000000 + i * 86400000,
+          open: p - 1,
+          close: p,
+          high: p + 1,
+          low: p - 1,
+          volume: 1000
+        };
+      });
+      const deg4Scenario: WaveScenario = {
+        ...mkScenario([
+          { label: '0', price: 100, candleIndex: 0, timestamp: deg4Candles[0].timestamp, isConfirmed: true },
+          { label: '(1)', price: 130, candleIndex: 6, timestamp: deg4Candles[6].timestamp, isConfirmed: true },
+          { label: '(2)', price: 115, candleIndex: 11, timestamp: deg4Candles[11].timestamp, isConfirmed: true },
+          { label: '(3)', price: 170, candleIndex: 20, timestamp: deg4Candles[20].timestamp, isConfirmed: true },
+          { label: '(4)', price: 150, candleIndex: 25, timestamp: deg4Candles[25].timestamp, isConfirmed: true },
+          { label: '(5)', price: 190, candleIndex: 30, timestamp: deg4Candles[30].timestamp, isConfirmed: true }
+        ]),
+        degree: 'INTERMEDIATE',
+        timeframe: '1D'
+      };
+      const promoOpp = FractalEngine.detectDegreePromotionOpportunity(deg4Scenario, deg4Candles);
+      expect(promoOpp.shouldPromote).toBe(true);
+      const t833 = FractalEngine.promoteScenarioDegrees(deg4Scenario, 'TSE_IRAN', '1D');
+      expect(t833.promoted).toBe(true);
+      expect(t833.droppedSmallestLevel).toBe(true);
+      expect(t833.scenario.degree).toBe('PRIMARY');
+      expect(t833.scenario.vertices[5].label).toBe('5');
+
+      // T-8.34 & T-8.35 (2.12): Degree 4 colored red (#ef4444), Degree 5 rejected
+      expect(DEGREE_CONFIGS.INTERMEDIATE.color).toBe('#ef4444');
+      const t834 = FractalEngine.validateDegreeColorScheme({ degreeCount: 4, timeframe: '1D', marketType: 'TSE_IRAN', useColors: true });
+      expect(t834.isValid).toBe(true);
+      expect(t834.isDegree4Red).toBe(true);
+      expect(t834.degree4Color).toBe('#ef4444');
+
+      const t835 = FractalEngine.validateDegreeColorScheme({ degreeCount: 5, timeframe: '1D', marketType: 'TSE_IRAN', useColors: true });
+      expect(t835.isValid).toBe(false);
+    });
+  });
 });
+
+
+
 
