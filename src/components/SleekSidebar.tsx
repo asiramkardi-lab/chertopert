@@ -28,6 +28,7 @@ import { ConfluenceZonesWidget } from './ConfluenceZonesWidget';
 import { SmartRuleAlertWidget } from './SmartRuleAlertWidget';
 import { TargetProjectionPanel } from './TargetProjectionPanel';
 import { TopDownPipelineAudit } from './TopDownPipelineAudit';
+import { RulesEngineComplianceCard } from './RulesEngineComplianceCard';
 import { 
   Cpu, 
   GitBranch, 
@@ -173,19 +174,13 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
         {activeTab === 'COPILOT' && (
           <div className="space-y-4">
-            {/* Real-time Status Card */}
-            <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <Cpu className="w-4 h-4 text-cyan-400 shrink-0" />
-                <div>
-                  <h4 className="text-xs font-bold text-white">موتور دستیار تحلیل زنده (FEI Engine)</h4>
-                  <p className="text-[11px] text-slate-400">بررسی بی‌درنگ حرکت آخر و قوانین سه‌گانه</p>
-                </div>
-              </div>
-              <span className="text-xs font-mono font-bold text-emerald-400">
-                فعال
-              </span>
-            </div>
+            {/* Live Visual RulesEngine Radar & Progress Bar Compliance Card */}
+            <RulesEngineComplianceCard
+              scenario={activeScenario}
+              candles={candles}
+              parentRole={drillContext?.role || 'ROOT'}
+              parentWaveLabel={drillContext?.waveLabel || ''}
+            />
 
             {/* Quick Shortcuts to Angle Radar & Fibonacci Confluence Zones */}
             <div className="grid grid-cols-1 gap-2">

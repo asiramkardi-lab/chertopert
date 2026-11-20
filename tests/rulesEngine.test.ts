@@ -751,4 +751,168 @@ describe('Category 3 Cardinal Rules & 0.1% Tolerance Layer (RulesEngine)', () =>
       ).toBe(false);
     });
   });
+
+  describe('Category 3 Comprehensive Cross-Pattern Matrix & 0.1% Tolerance Verification', () => {
+    const ALL_IMPULSE_AND_DIAG: PatternFamily[] = [
+      'IDEAL_CYCLE',
+      'TERMINAL',
+      'ANTI_TERMINAL',
+      'LEADING_DIAGONAL',
+      'ANTI_LEADING_DIAGONAL',
+      'ENDING_DIAGONAL',
+      'ANTI_DIAGONAL'
+    ];
+
+    it('Rule 1 + 0.1% Tolerance across Ideal, Diagonals & Terminals (Bullish & Bearish): passes 99.9%, fails 100.0% & 100.1%', () => {
+      for (const pattern of ALL_IMPULSE_AND_DIAG) {
+        // 99.9% retracement (Bullish: 100->200->100.1) passes CARDINAL_RULE_1 cleanly
+        const bull999 = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([100, 200, 100.1, 290, 210, 340]),
+          'BULLISH',
+          'ROOT',
+          '',
+          candles
+        );
+        expect(bull999.rules.find(r => r.ruleId === 'CARDINAL_RULE_1')?.passed).toBe(true);
+
+        // Exact 100.0% retracement (100->200->100) violates CARDINAL_RULE_1 & suggests ANTI_CYCLE
+        const bull100 = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([100, 200, 100, 290, 210, 340]),
+          'BULLISH',
+          'ROOT',
+          '',
+          candles
+        );
+        const r1Bull100 = bull100.rules.find(r => r.ruleId === 'CARDINAL_RULE_1');
+        expect(r1Bull100?.passed).toBe(false);
+        expect(r1Bull100?.canBeSolvedByAlternate).toBe('ANTI_CYCLE');
+        expect(bull100.isValid).toBe(false);
+
+        // 100.1% retracement in Bearish symmetry (200->100->200.1) violates CARDINAL_RULE_1
+        const bear1001 = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([200, 100, 200.1, 30, 90, 5]),
+          'BEARISH',
+          'ROOT',
+          '',
+          candles
+        );
+        expect(bear1001.rules.find(r => r.ruleId === 'CARDINAL_RULE_1')?.passed).toBe(false);
+        expect(bear1001.isValid).toBe(false);
+      }
+    });
+
+    it('Rule 2 + 0.1% Tolerance across Ideal, Diagonals & Terminals: passes within 0.1% float cushion (99.95%), fails when shortest >0.1%', () => {
+      for (const pattern of ALL_IMPULSE_AND_DIAG) {
+        // W1=100, W3=99.95 (within 0.1% tolerance of W1 & W5=100) -> PASSES Rule 2
+        const floatCushion = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([100, 200, 150, 249.95, 205, 305]),
+          'BULLISH',
+          'ROOT',
+          '',
+          candles
+        );
+        expect(floatCushion.rules.find(r => r.ruleId === 'CARDINAL_RULE_2')?.passed).toBe(true);
+
+        // W1=100, W3=60, W5=90 (Bullish) -> Wave 3 is shortest -> FAILS Rule 2 & isValid=false
+        const shortestBull = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([100, 200, 150, 210, 180, 270]),
+          'BULLISH',
+          'ROOT',
+          '',
+          candles
+        );
+        expect(shortestBull.rules.find(r => r.ruleId === 'CARDINAL_RULE_2')?.passed).toBe(false);
+        expect(shortestBull.isValid).toBe(false);
+
+        // Bearish symmetry: W1=100, W3=70, W5=95 -> FAILS Rule 2
+        const shortestBear = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([300, 200, 250, 180, 210, 115]),
+          'BEARISH',
+          'ROOT',
+          '',
+          candles
+        );
+        expect(shortestBear.rules.find(r => r.ruleId === 'CARDINAL_RULE_2')?.passed).toBe(false);
+        expect(shortestBear.isValid).toBe(false);
+      }
+    });
+
+    it('Rule 3 + 0.1% Tolerance across Ideal, Diagonals & Terminals: IDEAL_CYCLE enforces <0.1% overlap while Diagonals & Terminals accept overlap', () => {
+      // 1) IDEAL_CYCLE accepts 0.05% tiny IEEE-754 drift below Wave 1 peak (Bullish: W1=100, p1=200, p4=199.95 -> 0.05% < 0.1%)
+      const idealDrift = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 200, 140, 320, 199.95, 380]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(idealDrift.rules.find(r => r.ruleId === 'CARDINAL_RULE_3')?.passed).toBe(true);
+      expect(idealDrift.isValid).toBe(true);
+
+      // 2) IDEAL_CYCLE rejects >=0.1% penetration in both Bullish (p4=199.85 -> 0.15%) and Bearish (p4=100.15 -> 0.15%)
+      const idealBullPen = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([100, 200, 140, 320, 199.85, 380]),
+        'BULLISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(idealBullPen.rules.find(r => r.ruleId === 'CARDINAL_RULE_3')?.passed).toBe(false);
+      expect(idealBullPen.isValid).toBe(false);
+
+      const idealBearPen = RulesEngine.validateStructure(
+        'IDEAL_CYCLE',
+        buildVertices([200, 100, 150, 20, 100.15, -20]),
+        'BEARISH',
+        'ROOT',
+        '',
+        candles
+      );
+      expect(idealBearPen.rules.find(r => r.ruleId === 'CARDINAL_RULE_3')?.passed).toBe(false);
+      expect(idealBearPen.isValid).toBe(false);
+
+      // 3) Diagonals & Terminals permit deep Wave 4-1 overlap (p4=175 < p1=200 in Bullish; p4=125 > p1=100 in Bearish)
+      const overlapPermittedPatterns: PatternFamily[] = [
+        'TERMINAL',
+        'ANTI_TERMINAL',
+        'LEADING_DIAGONAL',
+        'ANTI_LEADING_DIAGONAL',
+        'ENDING_DIAGONAL',
+        'ANTI_DIAGONAL'
+      ];
+      for (const pattern of overlapPermittedPatterns) {
+        const bullOverlap = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([100, 200, 140, 300, 175, 350]),
+          'BULLISH',
+          'ROOT',
+          '',
+          candles
+        );
+        expect(bullOverlap.rules.find(r => r.ruleId === 'CARDINAL_RULE_3')).toBeUndefined();
+        expect(bullOverlap.rules.find(r => r.ruleId === 'OVERLAP_FEATURE')?.passed).toBe(true);
+        expect(bullOverlap.isValid).toBe(true);
+
+        const bearOverlap = RulesEngine.validateStructure(
+          pattern,
+          buildVertices([200, 100, 150, 20, 125, -25]),
+          'BEARISH',
+          'ROOT',
+          '',
+          candles
+        );
+        expect(bearOverlap.rules.find(r => r.ruleId === 'OVERLAP_FEATURE')?.passed).toBe(true);
+        expect(bearOverlap.isValid).toBe(true);
+      }
+    });
+  });
 });
+
