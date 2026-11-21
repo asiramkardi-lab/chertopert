@@ -144,6 +144,60 @@ export function getNextLowerTimeframe(currentTf: string): string | null {
   return idx >= 0 && idx + 1 < order.length ? order[idx + 1] : null;
 }
 
+/**
+ * 3-Point Fibonacci Projection utility (X-Y-Z -> TMV).
+ * Accepts `level` as either decimal ratio (e.g. 1.0, 1.618) or percentage (e.g. 100, 161.8).
+ * Handles both Bullish (y > x) and Bearish (y < x) legs via signed displacement (y - x).
+ */
+export function calculateProjection(
+  x: number,
+  y: number,
+  z: number,
+  level: number = 1.0
+): number {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(level)) {
+    return 0;
+  }
+  const ratio = Math.abs(level) >= 10 ? level / 100 : level;
+  const projected = z + (y - x) * ratio;
+  return Math.round(projected * 10000) / 10000;
+}
+
+export interface ThreePointProjectionResult {
+  x: number;
+  y: number;
+  z: number;
+  direction: 'BULLISH' | 'BEARISH';
+  baseAmplitude: number;
+  prime: number;
+  short0618: number;
+  ideal100: number;
+  alternate1618: number;
+  levels: Array<{ ratio: number; ratioLabel: string; price: number }>;
+  isValid: boolean;
+  reasonFa: string;
+}
+
+export interface ActiveWaveLegOverlayData {
+  legIndex: number;
+  legLabelFa: string;
+  xVertex?: WaveVertex;
+  yVertex?: WaveVertex;
+  zVertex?: WaveVertex;
+  tmv100Price: number | null;
+  tmv1618Price: number | null;
+  tmv618Price: number | null;
+  przLow: number | null;
+  przHigh: number | null;
+  przMid: number | null;
+  overlapType: 'FULL' | 'PARTIAL' | 'NONE';
+  overlapLow: number | null;
+  overlapHigh: number | null;
+  gapPct: number | null;
+  highlightMode: 'OVERLAP_CONFLUENCE' | 'TMV_PRIMARY_TARGET' | 'PRZ_ONLY' | 'NONE';
+  statusLabelFa: string;
+}
+
 export class FractalEngine {
   /**
    * Step 1.2 & Sessions 3.8 / 5.12: Maximum wave degrees allowed per timeframe & market profile.
@@ -965,5 +1019,227 @@ export class FractalEngine {
     }
 
     return { isConsistent: true };
+  }
+
+  /**
+   * 3-Point Fibonacci Projection utility (X-Y-Z) for Target Movement Values (TMV).
+   */
+  public static calculateProjection(x: number, y: number, z: number, level: number = 1.0): number {
+    return calculateProjection(x, y, z, level);
+  }
+
+  /**
+   * Full 3-point Fibonacci Projection TMV calculation engine (X -> Y -> Z)
+   * returning 100% Ideal and 161.8% Alternate standard targets plus 61.8% Short TMV.
+   */
+  public static calculateThreePointTmvProjection(params: {
+    x: number;
+    y: number;
+    z: number;
+  }): ThreePointProjectionResult {
+    const { x, y, z } = params;
+    const baseAmplitude = Math.abs(y - x);
+    const direction: 'BULLISH' | 'BEARISH' = y >= x ? 'BULLISH' : 'BEARISH';
+    const isZRetraced = direction === 'BULLISH' ? z < y : z > y;
+    const isValid = baseAmplitude > 1e-9 && isZRetraced;
+
+    const short0618 = calculateProjection(x, y, z, 0.618);
+    const ideal100 = calculateProjection(x, y, z, 1.0);
+    const alternate1618 = calculateProjection(x, y, z, 1.618);
+
+    const levels = [
+      { ratio: 0.618, ratioLabel: '61.8%', price: short0618 },
+      { ratio: 1.0, ratioLabel: '100%', price: ideal100 },
+      { ratio: 1.618, ratioLabel: '161.8%', price: alternate1618 }
+    ];
+
+    return {
+      x,
+      y,
+      z,
+      direction,
+      baseAmplitude,
+      prime: y,
+      short0618,
+      ideal100,
+      alternate1618,
+      levels,
+      isValid,
+      reasonFa: !baseAmplitude
+        ? 'طول موج مبنا (X→Y) صفر است.'
+        : !isZRetraced
+        ? 'نقطه Z باید انتهای موج اصلاحی (برخلاف جهت X→Y) باشد.'
+        : `پروجکشن سه‌نقطه‌ای معتبر: TMV 100% = ${ideal100.toLocaleString()} و TMV 161.8% = ${alternate1618.toLocaleString()}`
+    };
+  }
+
+  /**
+   * Computes active wave leg TMV (via X-Y-Z 3-point projection), PRZ band,
+   * and overlap / TMV-primary priority state for ChartStudio visualization.
+   */
+  public static calculateActiveWaveLegZones(
+    vertices: WaveVertex[],
+    legIndex: number,
+    direction: 'BULLISH' | 'BEARISH',
+    patternType: PatternFamily
+  ): ActiveWaveLegOverlayData {
+    const clampedLeg = Math.max(0, Math.min(Math.max(0, vertices.length - 2), legIndex));
+    const vStart = vertices[clampedLeg];
+    const vEnd = vertices[clampedLeg + 1];
+    const legLabelFa = vStart && vEnd ? `موج ${vStart.label}←${vEnd.label}` : 'گام فعال';
+
+    if (!vStart || !vEnd || vertices.length < 2) {
+      return {
+        legIndex: clampedLeg,
+        legLabelFa,
+        tmv100Price: null,
+        tmv1618Price: null,
+        tmv618Price: null,
+        przLow: null,
+        przHigh: null,
+        przMid: null,
+        overlapType: 'NONE',
+        overlapLow: null,
+        overlapHigh: null,
+        gapPct: null,
+        highlightMode: 'NONE',
+        statusLabelFa: 'داده کافی برای موج فعال وجود ندارد.'
+      };
+    }
+
+    // Identify 3-point X-Y-Z triple for the active wave leg:
+    // - Leg >= 2 (e.g. Wave 3 from 2->3 or Wave 5 from 4->5): X=v[leg-2], Y=v[leg-1], Z=v[leg]
+    // - Leg 1 (corrective 1->2): use upcoming Wave 3 pair X=v0, Y=v1, Z=v2 when vertices >= 3
+    let xVertex: WaveVertex | undefined;
+    let yVertex: WaveVertex | undefined;
+    let zVertex: WaveVertex | undefined;
+
+    if (clampedLeg >= 2) {
+      xVertex = vertices[clampedLeg - 2];
+      yVertex = vertices[clampedLeg - 1];
+      zVertex = vertices[clampedLeg];
+    } else if (clampedLeg === 1 && vertices.length >= 3) {
+      xVertex = vertices[0];
+      yVertex = vertices[1];
+      zVertex = vertices[2];
+    }
+
+    let tmv100Price: number | null = null;
+    let tmv1618Price: number | null = null;
+    let tmv618Price: number | null = null;
+    if (xVertex && yVertex && zVertex) {
+      const proj = this.calculateThreePointTmvProjection({
+        x: xVertex.price,
+        y: yVertex.price,
+        z: zVertex.price
+      });
+      if (proj.isValid) {
+        tmv100Price = proj.ideal100;
+        tmv1618Price = proj.alternate1618;
+        tmv618Price = proj.short0618;
+      }
+    }
+
+    // Compute leg PRZ band from preceding impulse retracement
+    const isBull = direction === 'BULLISH';
+    const sign = isBull ? 1 : -1;
+    let przLow: number | null = null;
+    let przHigh: number | null = null;
+    let przMid: number | null = null;
+
+    if (clampedLeg === 1 || (clampedLeg === 2 && vertices.length >= 3)) {
+      const span1 = Math.abs(vertices[1].price - vertices[0].price);
+      if (span1 > 0) {
+        const isFlat = patternType.startsWith('FLAT_');
+        const rA = vertices[1].price - sign * span1 * (isFlat ? 0.786 : 0.618);
+        const rB = vertices[1].price - sign * span1 * (isFlat ? 1.0 : 0.786);
+        przLow = Math.round(Math.min(rA, rB) * 100) / 100;
+        przHigh = Math.round(Math.max(rA, rB) * 100) / 100;
+      }
+    } else if (clampedLeg >= 3 && vertices.length >= 4) {
+      const spanPrev = Math.abs(vertices[clampedLeg - 1].price - vertices[clampedLeg - 2].price);
+      const anchor = vertices[clampedLeg - 1].price;
+      if (spanPrev > 0) {
+        const rA = anchor - sign * spanPrev * 0.382;
+        const rB = anchor - sign * spanPrev * 0.5;
+        przLow = Math.round(Math.min(rA, rB) * 100) / 100;
+        przHigh = Math.round(Math.max(rA, rB) * 100) / 100;
+      }
+    } else {
+      const span0 = Math.abs(vEnd.price - vStart.price);
+      if (span0 > 0) {
+        const rA = vEnd.price - sign * span0 * 0.5;
+        const rB = vEnd.price - sign * span0 * 0.618;
+        przLow = Math.round(Math.min(rA, rB) * 100) / 100;
+        przHigh = Math.round(Math.max(rA, rB) * 100) / 100;
+      }
+    }
+
+    if (przLow !== null && przHigh !== null) {
+      przMid = Math.round(((przLow + przHigh) / 2) * 100) / 100;
+    }
+
+    let overlapType: 'FULL' | 'PARTIAL' | 'NONE' = 'NONE';
+    let overlapLow: number | null = null;
+    let overlapHigh: number | null = null;
+    let gapPct: number | null = null;
+    let highlightMode: ActiveWaveLegOverlayData['highlightMode'] = 'NONE';
+    let statusLabelFa = '';
+
+    if (tmv100Price !== null && przLow !== null && przHigh !== null) {
+      const denom = Math.max(1e-9, Math.abs(tmv100Price));
+      if (tmv100Price >= przLow && tmv100Price <= przHigh) {
+        overlapType = (przHigh - przLow) / denom <= 0.015 ? 'FULL' : 'PARTIAL';
+        overlapLow = przLow;
+        overlapHigh = przHigh;
+        gapPct = 0;
+        highlightMode = 'OVERLAP_CONFLUENCE';
+        statusLabelFa =
+          overlapType === 'FULL'
+            ? 'همپوشانی کامل TMV و PRZ (اعتبار بسیار بالا)'
+            : 'همپوشانی جزئی: هدف TMV درون ناحیه PRZ قرار دارد';
+      } else {
+        const dist = tmv100Price < przLow ? przLow - tmv100Price : tmv100Price - przHigh;
+        gapPct = Math.round((dist / denom) * 1000) / 10;
+        if (gapPct <= 10.0) {
+          overlapType = 'PARTIAL';
+          const bandPad = Math.max(0.1, denom * 0.01);
+          overlapLow = Math.round(Math.min(tmv100Price - bandPad, przHigh) * 100) / 100;
+          overlapHigh = Math.round(Math.max(tmv100Price + bandPad, przLow) * 100) / 100;
+          highlightMode = 'OVERLAP_CONFLUENCE';
+          statusLabelFa = `همپوشانی جزئی TMV و PRZ (فاصله ${gapPct}٪ ≤ ۱۰٪)`;
+        } else {
+          overlapType = 'NONE';
+          highlightMode = 'TMV_PRIMARY_TARGET';
+          statusLabelFa = 'عدم همپوشانی: سطح TMV به‌عنوان هدف اصلی حرکت اولویت دارد';
+        }
+      }
+    } else if (tmv100Price !== null) {
+      highlightMode = 'TMV_PRIMARY_TARGET';
+      statusLabelFa = 'هدف اصلی حرکت (TMV 100% / 161.8%) از پروجکشن سه‌نقطه‌ای';
+    } else if (przLow !== null) {
+      highlightMode = 'PRZ_ONLY';
+      statusLabelFa = 'محدوده پتانسیل بازگشت (PRZ) گام فعال';
+    }
+
+    return {
+      legIndex: clampedLeg,
+      legLabelFa,
+      xVertex,
+      yVertex,
+      zVertex,
+      tmv100Price,
+      tmv1618Price,
+      tmv618Price,
+      przLow,
+      przHigh,
+      przMid,
+      overlapType,
+      overlapLow,
+      overlapHigh,
+      gapPct,
+      highlightMode,
+      statusLabelFa
+    };
   }
 }

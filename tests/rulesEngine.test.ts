@@ -3,7 +3,7 @@ import { RulesEngine } from '../src/engine/rulesEngine';
 import { SmartRuleAlertEngine } from '../src/engine/smartRuleAlertEngine';
 import { TargetProjectionEngine } from '../src/engine/targetProjectionEngine';
 import { PatternEngines } from '../src/engine/patternEngines';
-import { FractalEngine, DEGREE_CONFIGS } from '../src/engine/fractalEngine';
+import { FractalEngine, DEGREE_CONFIGS, calculateProjection } from '../src/engine/fractalEngine';
 import {
   WAVE_NUMERIC_TOLERANCE,
   cleanFloat,
@@ -1880,6 +1880,28 @@ describe('Category 3 Cardinal Rules & 0.1% Tolerance Layer (RulesEngine)', () =>
 
       const t835 = FractalEngine.validateDegreeColorScheme({ degreeCount: 5, timeframe: '1D', marketType: 'TSE_IRAN', useColors: true });
       expect(t835.isValid).toBe(false);
+
+      // FractalEngine calculateProjection(x, y, z, level) & active wave leg TMV/PRZ overlap engine
+      expect(calculateProjection(100, 200, 150, 1.0)).toBe(250);
+      expect(calculateProjection(100, 200, 150, 100)).toBe(250);
+      expect(calculateProjection(100, 200, 150, 1.618)).toBe(311.8);
+      expect(calculateProjection(100, 200, 150, 161.8)).toBe(311.8);
+      expect(calculateProjection(200, 100, 150, 100)).toBe(50);
+
+      const threePt = FractalEngine.calculateThreePointTmvProjection({ x: 200, y: 400, z: 350 });
+      expect(threePt.isValid).toBe(true);
+      expect(threePt.ideal100).toBe(550);
+      expect(threePt.alternate1618).toBe(673.6);
+
+      const legOverlay = FractalEngine.calculateActiveWaveLegZones(
+        buildVertices([100, 200, 150, 250]),
+        2,
+        'BULLISH',
+        'IDEAL_CYCLE'
+      );
+      expect(legOverlay.tmv100Price).toBe(250);
+      expect(legOverlay.tmv1618Price).toBe(311.8);
+      expect(legOverlay.highlightMode).toBe('TMV_PRIMARY_TARGET');
     });
   });
 });

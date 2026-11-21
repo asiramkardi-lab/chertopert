@@ -8,7 +8,7 @@
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Candle, WaveScenario, WaveVertex, PatternFamily, WaveRole, FibonacciExtensionLayer, RuleValidationItem } from '../types/elliott';
-import { DEGREE_CONFIGS } from '../engine/fractalEngine';
+import { DEGREE_CONFIGS, FractalEngine, calculateProjection } from '../engine/fractalEngine';
 import { PATTERN_LABELS_FA, RulesEngine, ValidationSummary } from '../engine/rulesEngine';
 import { TargetProjectionEngine } from '../engine/targetProjectionEngine';
 import { TrendStrengthIndicator, TrendSignalLevel } from '../engine/trendStrengthIndicator';
@@ -1121,6 +1121,106 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     tmvCustomRatio
   ]);
 
+  // Active Wave Leg X-Y-Z 3-Point Projection TMV + PRZ + Overlap / Primary-Target Highlighting
+  const activeLegProjectionState = useMemo(() => {
+    if (hideZoneControls || activeScenario.vertices.length < 2 || candles.length === 0) {
+      return null;
+    }
+    const targetLegIdx =
+      hoveredLeg ??
+      highlightedLegIndex ??
+      validatorHighlightLeg ??
+      Math.max(0, activeScenario.vertices.length - 2);
+
+    const legZones = FractalEngine.calculateActiveWaveLegZones(
+      activeScenario.vertices,
+      targetLegIdx,
+      activeScenario.direction,
+      activeScenario.patternType
+    );
+
+    const primaryPrz = projectionReport?.przZones.find(z => z.isPrimary) || projectionReport?.przZones[0];
+    const primaryTmv = projectionReport?.tmvZones.find(z => z.isPrimary) || projectionReport?.tmvZones[0];
+
+    // Prefer leg-specific X-Y-Z projection if valid, or fall back to scenario primary TMV/PRZ
+    const tmv100 =
+      legZones.tmv100Price ??
+      (legZones.xVertex && legZones.yVertex && legZones.zVertex
+        ? calculateProjection(legZones.xVertex.price, legZones.yVertex.price, legZones.zVertex.price, 100)
+        : primaryTmv?.ideal100Price ?? null);
+    const tmv1618 =
+      legZones.tmv1618Price ??
+      (legZones.xVertex && legZones.yVertex && legZones.zVertex
+        ? calculateProjection(legZones.xVertex.price, legZones.yVertex.price, legZones.zVertex.price, 161.8)
+        : primaryTmv?.alternate1618Price ?? null);
+
+    const przLow = legZones.przLow ?? primaryPrz?.lowPrice ?? null;
+    const przHigh = legZones.przHigh ?? primaryPrz?.highPrice ?? null;
+    const przMid = legZones.przMid ?? primaryPrz?.midPrice ?? null;
+
+    let overlapType = legZones.overlapType;
+    let overlapLow = legZones.overlapLow;
+    let overlapHigh = legZones.overlapHigh;
+    let highlightMode = legZones.highlightMode;
+    let statusLabelFa = legZones.statusLabelFa;
+
+    if (tmv100 !== null && przLow !== null && przHigh !== null) {
+      const denom = Math.max(1e-9, Math.abs(tmv100));
+      if (tmv100 >= przLow && tmv100 <= przHigh) {
+        overlapType = (przHigh - przLow) / denom <= 0.015 ? 'FULL' : 'PARTIAL';
+        overlapLow = przLow;
+        overlapHigh = przHigh;
+        highlightMode = 'OVERLAP_CONFLUENCE';
+        statusLabelFa =
+          overlapType === 'FULL'
+            ? `تلاقی کامل TMV (${tmv100.toLocaleString()}) و PRZ · اعتبار بالا`
+            : `همپوشانی TMV (${tmv100.toLocaleString()}) درون PRZ`;
+      } else {
+        const dist = tmv100 < przLow ? przLow - tmv100 : tmv100 - przHigh;
+        const gPct = Math.round((dist / denom) * 1000) / 10;
+        if (gPct <= 10.0) {
+          overlapType = 'PARTIAL';
+          const pad = Math.max(0.1, denom * 0.008);
+          overlapLow = Math.min(tmv100 - pad, przHigh);
+          overlapHigh = Math.max(tmv100 + pad, przLow);
+          highlightMode = 'OVERLAP_CONFLUENCE';
+          statusLabelFa = `همپوشانی جزئی TMV/PRZ (فاصله ${gPct}٪ ≤ ۱۰٪)`;
+        } else {
+          overlapType = 'NONE';
+          overlapLow = null;
+          overlapHigh = null;
+          highlightMode = 'TMV_PRIMARY_TARGET';
+          statusLabelFa = `هدف اصلی قیمت (TMV 100%: ${tmv100.toLocaleString()}) · اولویت بالاتر از PRZ`;
+        }
+      }
+    }
+
+    return {
+      ...legZones,
+      isExplicitLegFocus: hoveredLeg !== null || highlightedLegIndex !== null || validatorHighlightLeg !== null,
+      tmv100Price: tmv100,
+      tmv1618Price: tmv1618,
+      przLow,
+      przHigh,
+      przMid,
+      overlapType,
+      overlapLow,
+      overlapHigh,
+      highlightMode,
+      statusLabelFa
+    };
+  }, [
+    hideZoneControls,
+    activeScenario.vertices,
+    activeScenario.direction,
+    activeScenario.patternType,
+    candles.length,
+    hoveredLeg,
+    highlightedLegIndex,
+    validatorHighlightLeg,
+    projectionReport
+  ]);
+
   // Curved Fractal Expected Path (Flow-Path Bezier curve with confidence-proportional opacity)
   const expectedPathData = useMemo(() => {
     if (!showExpectedPath || hideZoneControls || activeScenario.vertices.length < 2 || candles.length === 0) {
@@ -1780,6 +1880,11 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.24" />
               <stop offset="55%" stopColor="#eab308" stopOpacity="0.11" />
               <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.20" />
+            </linearGradient>
+            <linearGradient id="tmvPrzOverlapGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.32" />
+              <stop offset="50%" stopColor="#06b6d4" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#fbbf24" stopOpacity="0.30" />
             </linearGradient>
             <filter id="elliott-wave-glow" x="-30%" y="-30%" width="160%" height="160%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blurInner" />
@@ -2491,6 +2596,254 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                       </g>
                     );
                   })}
+
+                {/* 2b. Active Wave Leg X-Y-Z Projection TMV (100% / 161.8%), PRZ, & Overlap / TMV-Primary Highlight Layer */}
+                {activeLegProjectionState &&
+                  (effectiveShowTMV || effectiveShowPRZ) &&
+                  (() => {
+                    const st = activeLegProjectionState;
+                    const legVStart = activeScenario.vertices[st.legIndex];
+                    const legAnchorX = legVStart
+                      ? Math.max(padding.left + 8, Math.min(endX - 120, getX(legVStart.candleIndex)))
+                      : padding.left + 8;
+                    const bandW = Math.max(110, endX - legAnchorX);
+
+                    const tmv100Y = st.tmv100Price !== null ? getY(st.tmv100Price) : null;
+                    const tmv1618Y = st.tmv1618Price !== null ? getY(st.tmv1618Price) : null;
+                    const tmv100Visible = tmv100Y !== null && tmv100Y >= plotTop + 4 && tmv100Y <= plotBottom - 4;
+                    const tmv1618Visible = tmv1618Y !== null && tmv1618Y >= plotTop + 4 && tmv1618Y <= plotBottom - 4;
+
+                    const hasOverlapBand =
+                      effectiveShowTMV &&
+                      effectiveShowPRZ &&
+                      st.highlightMode === 'OVERLAP_CONFLUENCE' &&
+                      st.overlapLow !== null &&
+                      st.overlapHigh !== null;
+
+                    const overlapYTop = hasOverlapBand ? Math.max(plotTop, getY(st.overlapHigh!)) : 0;
+                    const overlapYBot = hasOverlapBand ? Math.min(plotBottom, getY(st.overlapLow!)) : 0;
+                    const overlapH = hasOverlapBand ? Math.max(10, overlapYBot - overlapYTop) : 0;
+
+                    const statusBadgeW = Math.min(bandW - 12, Math.max(190, st.statusLabelFa.length * 5.2 + 34));
+                    const statusBadgeX = Math.max(padding.left + 8, endX - statusBadgeW - 10);
+                    const statusAnchorY =
+                      hasOverlapBand && overlapYTop >= plotTop + 26
+                        ? overlapYTop - 22
+                        : tmv100Visible && tmv100Y! >= plotTop + 28
+                        ? tmv100Y! - 24
+                        : plotTop + 8;
+                    const statusTagY = resolveTagY(statusAnchorY, statusBadgeX, statusBadgeW, 19);
+
+                    return (
+                      <g pointerEvents="none">
+                        {/* X -> Y -> Z Anchor Trace when inspecting an active wave leg */}
+                        {st.isExplicitLegFocus && st.xVertex && st.yVertex && st.zVertex && (
+                          <polyline
+                            points={`${getX(st.xVertex.candleIndex)},${getY(st.xVertex.price)} ${getX(st.yVertex.candleIndex)},${getY(st.yVertex.price)} ${getX(st.zVertex.candleIndex)},${getY(st.zVertex.price)}`}
+                            fill="none"
+                            stroke="#22d3ee"
+                            strokeWidth="1.4"
+                            strokeDasharray="2 3"
+                            strokeOpacity="0.62"
+                          />
+                        )}
+
+                        {/* Active Leg PRZ Band when explicit leg focus has no overlapping global PRZ */}
+                        {effectiveShowPRZ &&
+                          st.isExplicitLegFocus &&
+                          st.przLow !== null &&
+                          st.przHigh !== null &&
+                          (() => {
+                            const pyTop = Math.max(plotTop, getY(st.przHigh));
+                            const pyBot = Math.min(plotBottom, getY(st.przLow));
+                            if (pyBot <= pyTop) return null;
+                            return (
+                              <rect
+                                x={legAnchorX}
+                                y={pyTop}
+                                width={bandW}
+                                height={Math.max(8, pyBot - pyTop)}
+                                rx="3"
+                                fill="rgba(251, 191, 36, 0.14)"
+                                stroke="#fbbf24"
+                                strokeWidth="1"
+                                strokeDasharray="4 3"
+                                strokeOpacity={st.highlightMode === 'TMV_PRIMARY_TARGET' ? 0.52 : 0.85}
+                              />
+                            );
+                          })()}
+
+                        {/* TMV & PRZ Overlap Confluence Band */}
+                        {hasOverlapBand && overlapYBot > plotTop && overlapYTop < plotBottom && (
+                          <g>
+                            <rect
+                              x={legAnchorX}
+                              y={overlapYTop}
+                              width={bandW}
+                              height={overlapH}
+                              rx="3"
+                              fill="url(#tmvPrzOverlapGrad)"
+                              stroke="#34d399"
+                              strokeWidth="1.6"
+                              strokeDasharray="6 2"
+                              filter="url(#zone-hover-glow)"
+                            />
+                            <line
+                              x1={legAnchorX}
+                              y1={overlapYTop}
+                              x2={endX}
+                              y2={overlapYTop}
+                              stroke="#34d399"
+                              strokeWidth="1.4"
+                              strokeOpacity="0.95"
+                            />
+                            <line
+                              x1={legAnchorX}
+                              y1={overlapYBot}
+                              x2={endX}
+                              y2={overlapYBot}
+                              stroke="#fbbf24"
+                              strokeWidth="1.4"
+                              strokeOpacity="0.95"
+                            />
+                          </g>
+                        )}
+
+                        {/* TMV 100% Standard Target Line (Primary Target Highlight when separated from PRZ or overlapping) */}
+                        {effectiveShowTMV && tmv100Visible && tmv100Y !== null && st.tmv100Price !== null && (
+                          <g>
+                            {st.highlightMode === 'TMV_PRIMARY_TARGET' && (
+                              <line
+                                x1={legAnchorX}
+                                y1={tmv100Y}
+                                x2={endX}
+                                y2={tmv100Y}
+                                stroke="#22d3ee"
+                                strokeWidth="6"
+                                strokeOpacity="0.22"
+                                filter="url(#elliott-wave-glow)"
+                              />
+                            )}
+                            <line
+                              x1={legAnchorX}
+                              y1={tmv100Y}
+                              x2={endX}
+                              y2={tmv100Y}
+                              stroke={st.highlightMode === 'OVERLAP_CONFLUENCE' ? '#34d399' : '#22d3ee'}
+                              strokeWidth={st.highlightMode === 'TMV_PRIMARY_TARGET' ? '2.2' : '1.7'}
+                              strokeDasharray={st.highlightMode === 'TMV_PRIMARY_TARGET' ? undefined : '7 3'}
+                            />
+                            <polygon
+                              points={`${legAnchorX + 6},${tmv100Y} ${legAnchorX + 11},${tmv100Y - 4.5} ${legAnchorX + 16},${tmv100Y} ${legAnchorX + 11},${tmv100Y + 4.5}`}
+                              fill={st.highlightMode === 'OVERLAP_CONFLUENCE' ? '#34d399' : '#22d3ee'}
+                              stroke="#020617"
+                              strokeWidth="1"
+                            />
+                            {(() => {
+                              const axY = resolveAxisY(tmv100Y, 19);
+                              if (axY === null) return null;
+                              const isOverlap = st.highlightMode === 'OVERLAP_CONFLUENCE';
+                              return (
+                                <g>
+                                  <rect
+                                    x={endX + 2}
+                                    y={axY - 9.5}
+                                    width="82"
+                                    height="19"
+                                    rx="4"
+                                    fill={isOverlap ? '#064e3b' : '#083344'}
+                                    stroke={isOverlap ? '#34d399' : '#22d3ee'}
+                                    strokeWidth="1.2"
+                                  />
+                                  <text
+                                    x={endX + 6}
+                                    y={axY + 3.5}
+                                    fill={isOverlap ? '#a7f3d0' : '#a5f3fc'}
+                                    fontSize="8.6"
+                                    fontWeight="bold"
+                                    fontFamily="JetBrains Mono, monospace"
+                                  >
+                                    100% {st.tmv100Price.toLocaleString()}
+                                  </text>
+                                </g>
+                              );
+                            })()}
+                          </g>
+                        )}
+
+                        {/* TMV 161.8% Standard Alternate Projection Line */}
+                        {effectiveShowTMV && tmv1618Visible && tmv1618Y !== null && st.tmv1618Price !== null && (
+                          <g>
+                            <line
+                              x1={legAnchorX}
+                              y1={tmv1618Y}
+                              x2={endX}
+                              y2={tmv1618Y}
+                              stroke="#a855f7"
+                              strokeWidth="1.25"
+                              strokeDasharray="4 4"
+                              strokeOpacity="0.88"
+                            />
+                            {(() => {
+                              const axY = resolveAxisY(tmv1618Y, 19);
+                              if (axY === null) return null;
+                              return (
+                                <g>
+                                  <rect
+                                    x={endX + 2}
+                                    y={axY - 9.5}
+                                    width="82"
+                                    height="19"
+                                    rx="4"
+                                    fill="#2e1065"
+                                    stroke="#a855f7"
+                                    strokeWidth="0.95"
+                                  />
+                                  <text
+                                    x={endX + 6}
+                                    y={axY + 3.5}
+                                    fill="#e9d5ff"
+                                    fontSize="8.3"
+                                    fontWeight="bold"
+                                    fontFamily="JetBrains Mono, monospace"
+                                  >
+                                    161.8 {st.tmv1618Price.toLocaleString()}
+                                  </text>
+                                </g>
+                              );
+                            })()}
+                          </g>
+                        )}
+
+                        {/* Overlap vs TMV-Primary Indicator Pill */}
+                        {(st.highlightMode === 'OVERLAP_CONFLUENCE' || st.highlightMode === 'TMV_PRIMARY_TARGET') && (
+                          <g>
+                            <rect
+                              x={statusBadgeX}
+                              y={statusTagY}
+                              width={statusBadgeW}
+                              height="19"
+                              rx="5"
+                              fill={st.highlightMode === 'OVERLAP_CONFLUENCE' ? '#042f2e' : '#082f49'}
+                              fillOpacity="0.94"
+                              stroke={st.highlightMode === 'OVERLAP_CONFLUENCE' ? '#34d399' : '#22d3ee'}
+                              strokeWidth="1.05"
+                            />
+                            <text
+                              x={statusBadgeX + statusBadgeW - 8}
+                              y={statusTagY + 12.5}
+                              textAnchor="end"
+                              fill={st.highlightMode === 'OVERLAP_CONFLUENCE' ? '#a7f3d0' : '#bae6fd'}
+                              fontSize="8.8"
+                              fontWeight="700"
+                            >
+                              {st.statusLabelFa}
+                            </text>
+                          </g>
+                        )}
+                      </g>
+                    );
+                  })()}
 
                 {/* 3. Dynamic Horizontal Fibonacci Extension Layers (TargetProjectionEngine) */}
                 {effectiveShowFibLayers &&
