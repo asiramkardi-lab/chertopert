@@ -1270,4 +1270,401 @@ export class FractalEngine {
       statusLabelFa
     };
   }
+
+  /**
+   * Session 10 Zigzag identification wrapper on FractalEngine.
+   */
+  public static identifyZigzag(
+    a: ZigzagLegInput,
+    b: ZigzagLegInput,
+    c: ZigzagLegInput
+  ): ZigzagIdentificationResult {
+    return identifyZigzag(a, b, c);
+  }
+
+  /**
+   * Session 10 post-zigzag Fibonacci target calculator wrapper on FractalEngine.
+   */
+  public static calculateZigzagTargets(
+    zigZagPattern: ZigzagPatternTargetInput
+  ): ZigzagTargetsResult {
+    return calculateZigzagTargets(zigZagPattern);
+  }
 }
+
+export interface ZigzagLegObjectInput {
+  startPrice?: number;
+  endPrice?: number;
+  length?: number;
+  subwaveCount?: number;
+  subwaves?: unknown[] | number;
+}
+
+export type ZigzagLegInput = number | ZigzagLegObjectInput;
+
+export type ZigzagVariant = 'IDEAL' | 'SIMPLE' | 'ANTI' | 'INVALID';
+export type ZigzagLengthClass = 'TRUNCATED' | 'NORMAL' | 'EXTENDED' | 'INVALID_SHORT';
+
+export interface ZigzagIdentificationResult {
+  isValid: boolean;
+  variant: ZigzagVariant;
+  variantLabelFa: string;
+  signature: string;
+  direction: 'BULLISH' | 'BEARISH';
+  cCoversB100: boolean;
+  isBorderlineC100B: boolean;
+  cCoversB100Pct: number;
+  bOverAPct: number;
+  cOverAPct: number;
+  lengthClass: ZigzagLengthClass;
+  isAbCd: boolean;
+  startPrice: number;
+  waveAEndPrice: number;
+  waveBEndPrice: number;
+  endPrice: number;
+  totalHeight: number;
+  waveCLength: number;
+  reasonFa: string;
+}
+
+export type ZigzagPatternTargetInput =
+  | ZigzagIdentificationResult
+  | {
+      startPrice?: number;
+      endPrice?: number;
+      waveBEndPrice?: number;
+      totalHeight?: number;
+      waveCLength?: number;
+      direction?: 'BULLISH' | 'BEARISH';
+      lengthClass?: ZigzagLengthClass;
+      zigzagType?: 'TRUNCATED' | 'NORMAL' | 'EXTENDED';
+      bOverAPct?: number;
+      cOverAPct?: number;
+      vertices?: WaveVertex[];
+    };
+
+export interface ZigzagTargetsResult {
+  totalHeight: number;
+  startPrice: number;
+  endPrice: number;
+  postMoveDirection: 'BULLISH' | 'BEARISH';
+  target382: number;
+  target618: number;
+  target236: number;
+  waveC618: number | null;
+  waveC810: number | null;
+  primaryTargetPct: number;
+  primaryTargetPrice: number;
+  secondaryTargetPct: number;
+  secondaryTargetPrice: number;
+  referenceBase: 'FULL_PATTERN' | 'WAVE_C';
+  lengthClass: ZigzagLengthClass;
+  summaryFa: string;
+}
+
+function parseZigzagLeg(
+  leg: ZigzagLegInput,
+  defaultSubwaves: number
+): {
+  length: number;
+  startPrice?: number;
+  endPrice?: number;
+  subwaveCount: number;
+} {
+  if (typeof leg === 'number') {
+    return {
+      length: Math.abs(leg),
+      subwaveCount: defaultSubwaves
+    };
+  }
+  const hasEndpoints = typeof leg.startPrice === 'number' && typeof leg.endPrice === 'number';
+  const length =
+    typeof leg.length === 'number'
+      ? Math.abs(leg.length)
+      : hasEndpoints
+      ? Math.abs((leg.endPrice as number) - (leg.startPrice as number))
+      : 0;
+  const subwaveCount =
+    typeof leg.subwaveCount === 'number'
+      ? leg.subwaveCount
+      : typeof leg.subwaves === 'number'
+      ? leg.subwaves
+      : Array.isArray(leg.subwaves)
+      ? leg.subwaves.length
+      : defaultSubwaves;
+  return {
+    length,
+    startPrice: leg.startPrice,
+    endPrice: leg.endPrice,
+    subwaveCount
+  };
+}
+
+/**
+ * Session 10 Zigzag identifier:
+ * Validates 3-leg A-B-C structure where Wave C covers >= 100% of Wave B,
+ * and categorizes Ideal (5-3-5), Simple (3-3-3), and Anti (3-5-5) variants.
+ */
+export function identifyZigzag(
+  a: ZigzagLegInput,
+  b: ZigzagLegInput,
+  c: ZigzagLegInput
+): ZigzagIdentificationResult {
+  const legA = parseZigzagLeg(a, 5);
+  const legB = parseZigzagLeg(b, 3);
+  const legC = parseZigzagLeg(c, 5);
+
+  const lenA = legA.length;
+  const lenB = legB.length;
+  const lenC = legC.length;
+
+  let direction: 'BULLISH' | 'BEARISH' = 'BULLISH';
+  if (legA.startPrice !== undefined && legA.endPrice !== undefined) {
+    direction = legA.endPrice >= legA.startPrice ? 'BULLISH' : 'BEARISH';
+  }
+  const sign = direction === 'BULLISH' ? 1 : -1;
+
+  const startPrice = legA.startPrice ?? 0;
+  const waveAEndPrice = legA.endPrice ?? startPrice + sign * lenA;
+  const waveBEndPrice = legB.endPrice ?? waveAEndPrice - sign * lenB;
+  const endPrice = legC.endPrice ?? waveBEndPrice + sign * lenC;
+  const totalHeight = Math.abs(endPrice - startPrice);
+
+  const bOverAPct = lenA > 0 ? Math.round((lenB / lenA) * 1000) / 10 : 0;
+  const cOverAPct = lenA > 0 ? Math.round((lenC / lenA) * 1000) / 10 : 0;
+  const cCoversB100Pct = lenB > 0 ? Math.round((lenC / lenB) * 1000) / 10 : lenC > 0 ? 100 : 0;
+
+  const endpointCoversB =
+    direction === 'BULLISH'
+      ? endPrice >= waveAEndPrice - 1e-6
+      : endPrice <= waveAEndPrice + 1e-6;
+  const lengthCoversB = lenC >= lenB - 1e-6;
+  const cCoversB100 = lengthCoversB && endpointCoversB;
+  const isBorderlineC100B = cCoversB100 && Math.abs(cCoversB100Pct - 100) <= 0.05;
+
+  const sig = `${legA.subwaveCount}-${legB.subwaveCount}-${legC.subwaveCount}`;
+  let variant: ZigzagVariant = 'INVALID';
+  let variantLabelFa = `ساختار نامعتبر (${sig})`;
+
+  if (sig === '5-3-5') {
+    variant = 'IDEAL';
+    variantLabelFa = 'زیگزاگ ایده‌آل (۵-۳-۵)';
+  } else if (sig === '3-3-3') {
+    variant = 'SIMPLE';
+    variantLabelFa =
+      bOverAPct > 61.8
+        ? 'ساختار ۳-۳-۳ با موج B بزرگ (> ۶۱.۸٪ — احتمال الگوی ترکیبی)'
+        : 'زیگزاگ سیمپل (۳-۳-۳)';
+  } else if (sig === '3-5-5') {
+    variant = 'ANTI';
+    variantLabelFa = 'زیگزاگ آنتی‌ای (۳-۵-۵)';
+  }
+
+  const lengthClass: ZigzagLengthClass =
+    cOverAPct < 61.8 - 1e-4
+      ? 'INVALID_SHORT'
+      : cOverAPct < 100 - 1e-4
+      ? 'TRUNCATED'
+      : cOverAPct <= 161.8 + 1e-4
+      ? 'NORMAL'
+      : 'EXTENDED';
+
+  const isAbCd = lenA > 0 && Math.abs(lenC - lenA) / lenA <= 0.05 + 1e-6;
+  const simpleLargeBInvalid = variant === 'SIMPLE' && bOverAPct > 61.8 + 1e-4;
+  const isValid =
+    variant !== 'INVALID' &&
+    !simpleLargeBInvalid &&
+    cCoversB100 &&
+    lenA > 0 &&
+    lenB > 0 &&
+    lenC > 0 &&
+    lengthClass !== 'INVALID_SHORT';
+
+  let reasonFa = '';
+  if (variant === 'INVALID') {
+    reasonFa = `ساختار درونی ${sig} جزء سه نوع معتبر زیگزاگ (۵-۳-۵، ۳-۳-۳، ۳-۵-۵) نیست.`;
+  } else if (!cCoversB100) {
+    reasonFa = `نقض قانون طلایی زیگزاگ: موج C (${cCoversB100Pct}%) باید حداقل ۱۰۰٪ موج B را پوشش دهد.`;
+  } else if (simpleLargeBInvalid) {
+    reasonFa = `ساختار ۳-۳-۳ با اصلاح B برابر ${bOverAPct}% (> ۶۱.۸٪ موج A) به الگوی ترکیبی نزدیک‌تر است تا زیگزاگ سیمپل خالص.`;
+  } else if (lengthClass === 'INVALID_SHORT') {
+    reasonFa = `موج C برابر ${cOverAPct}% موج A (< ۶۱.۸٪) است و برای زیگزاگ معتبر کوتاه است (احتمال فلت).`;
+  } else if (isBorderlineC100B) {
+    reasonFa = `${variantLabelFa} معتبر (حالت مرزی: پوشش دقیق ۱۰۰٪ موج B).`;
+  } else {
+    reasonFa = `${variantLabelFa} معتبر با پوشش ${cCoversB100Pct}% موج B و نسبت C/A برابر ${cOverAPct}%.`;
+  }
+
+  return {
+    isValid,
+    variant,
+    variantLabelFa,
+    signature: sig,
+    direction,
+    cCoversB100,
+    isBorderlineC100B,
+    cCoversB100Pct,
+    bOverAPct,
+    cOverAPct,
+    lengthClass,
+    isAbCd,
+    startPrice,
+    waveAEndPrice,
+    waveBEndPrice,
+    endPrice,
+    totalHeight,
+    waveCLength: lenC,
+    reasonFa
+  };
+}
+
+/**
+ * Session 10 Post-Zigzag Target Calculator:
+ * Computes 38.2% and 61.8% retracement targets (plus 23.6% & Wave-C 61.8%/81% when applicable)
+ * based on total pattern height |endPrice - startPrice| and Session 10 Fibonacci rules.
+ */
+export function calculateZigzagTargets(
+  zigZagPattern: ZigzagPatternTargetInput
+): ZigzagTargetsResult {
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  let startPrice = 0;
+  let endPrice = 0;
+  let totalHeight = 0;
+  let waveCLength = 0;
+  let bOverAPct = 65;
+  let lengthClass: ZigzagLengthClass = 'NORMAL';
+  let direction: 'BULLISH' | 'BEARISH' = 'BULLISH';
+
+  if ('vertices' in zigZagPattern && Array.isArray(zigZagPattern.vertices) && zigZagPattern.vertices.length >= 4) {
+    const v = zigZagPattern.vertices;
+    startPrice = v[0].price;
+    endPrice = v[3].price;
+    totalHeight = Math.abs(endPrice - startPrice);
+    waveCLength = Math.abs(v[3].price - v[2].price);
+    const lenA = Math.max(1e-9, Math.abs(v[1].price - v[0].price));
+    const lenB = Math.abs(v[2].price - v[1].price);
+    bOverAPct = (lenB / lenA) * 100;
+    const cOverAPct = (waveCLength / lenA) * 100;
+    lengthClass =
+      cOverAPct < 61.8 ? 'INVALID_SHORT' : cOverAPct < 100 ? 'TRUNCATED' : cOverAPct <= 161.8 ? 'NORMAL' : 'EXTENDED';
+    direction = zigZagPattern.direction ?? (endPrice >= startPrice ? 'BULLISH' : 'BEARISH');
+  } else if ('signature' in zigZagPattern) {
+    startPrice = zigZagPattern.startPrice;
+    endPrice = zigZagPattern.endPrice;
+    totalHeight = zigZagPattern.totalHeight;
+    waveCLength = zigZagPattern.waveCLength;
+    bOverAPct = zigZagPattern.bOverAPct;
+    lengthClass = zigZagPattern.lengthClass;
+    direction = zigZagPattern.direction;
+  } else {
+    startPrice = zigZagPattern.startPrice ?? 0;
+    totalHeight =
+      zigZagPattern.totalHeight ??
+      (zigZagPattern.endPrice !== undefined ? Math.abs(zigZagPattern.endPrice - startPrice) : 0);
+    direction =
+      zigZagPattern.direction ??
+      (zigZagPattern.endPrice !== undefined && zigZagPattern.endPrice < startPrice ? 'BEARISH' : 'BULLISH');
+    endPrice = zigZagPattern.endPrice ?? (direction === 'BULLISH' ? startPrice + totalHeight : startPrice - totalHeight);
+    waveCLength =
+      zigZagPattern.waveCLength ??
+      (zigZagPattern.waveBEndPrice !== undefined ? Math.abs(endPrice - zigZagPattern.waveBEndPrice) : totalHeight);
+    bOverAPct = zigZagPattern.bOverAPct ?? 65;
+    if (zigZagPattern.lengthClass) {
+      lengthClass = zigZagPattern.lengthClass;
+    } else if (zigZagPattern.zigzagType) {
+      lengthClass = zigZagPattern.zigzagType;
+    } else if (zigZagPattern.cOverAPct !== undefined) {
+      lengthClass =
+        zigZagPattern.cOverAPct < 61.8
+          ? 'INVALID_SHORT'
+          : zigZagPattern.cOverAPct < 100
+          ? 'TRUNCATED'
+          : zigZagPattern.cOverAPct <= 161.8
+          ? 'NORMAL'
+          : 'EXTENDED';
+    }
+  }
+
+  // Post-zigzag move travels opposite to Wave C's terminal direction
+  const postMoveDirection: 'BULLISH' | 'BEARISH' = direction === 'BULLISH' ? 'BEARISH' : 'BULLISH';
+  const moveSign = postMoveDirection === 'BULLISH' ? 1 : -1;
+
+  const target382 = round2(endPrice + moveSign * totalHeight * 0.382);
+  const target618 = round2(endPrice + moveSign * totalHeight * 0.618);
+  const target236 = round2(endPrice + moveSign * totalHeight * 0.236);
+  const waveC618 = waveCLength > 0 ? round2(endPrice + moveSign * waveCLength * 0.618) : null;
+  const waveC810 = waveCLength > 0 ? round2(endPrice + moveSign * waveCLength * 0.81) : null;
+
+  const isLargeB = bOverAPct > 61.8;
+  let primaryTargetPct = 61.8;
+  let primaryTargetPrice = target618;
+  let secondaryTargetPct = 38.2;
+  let secondaryTargetPrice = target382;
+  let referenceBase: 'FULL_PATTERN' | 'WAVE_C' = 'FULL_PATTERN';
+
+  if (lengthClass === 'TRUNCATED') {
+    if (isLargeB && waveC810 !== null && waveC618 !== null) {
+      referenceBase = 'WAVE_C';
+      primaryTargetPct = 61.8;
+      primaryTargetPrice = waveC618;
+      secondaryTargetPct = 81;
+      secondaryTargetPrice = waveC810;
+    } else {
+      primaryTargetPct = 38.2;
+      primaryTargetPrice = target382;
+      secondaryTargetPct = 61.8;
+      secondaryTargetPrice = target618;
+    }
+  } else if (lengthClass === 'EXTENDED') {
+    if (isLargeB) {
+      primaryTargetPct = 38.2;
+      primaryTargetPrice = target382;
+      secondaryTargetPct = 61.8;
+      secondaryTargetPrice = target618;
+    } else {
+      primaryTargetPct = 23.6;
+      primaryTargetPrice = target236;
+      secondaryTargetPct = 38.2;
+      secondaryTargetPrice = target382;
+    }
+  } else {
+    // NORMAL
+    if (isLargeB) {
+      primaryTargetPct = 61.8;
+      primaryTargetPrice = target618;
+      secondaryTargetPct = 38.2;
+      secondaryTargetPrice = target382;
+    } else {
+      primaryTargetPct = 38.2;
+      primaryTargetPrice = target382;
+      secondaryTargetPct = 61.8;
+      secondaryTargetPrice = target618;
+    }
+  }
+
+  const summaryFa =
+    referenceBase === 'WAVE_C'
+      ? `هدف اولیه زیگزاگ کوتاه‌شده (${primaryTargetPct}% تا ${secondaryTargetPct}% موج C): ${primaryTargetPrice.toLocaleString()} (۳۸.۲٪ کل: ${target382.toLocaleString()} | ۶۱.۸٪ کل: ${target618.toLocaleString()})`
+      : `اهداف پساالگویی بر مبنای ارتفاع کل (${round2(totalHeight).toLocaleString()}): هدف ۳۸.۲٪ = ${target382.toLocaleString()} | هدف ۶۱.۸٪ = ${target618.toLocaleString()} (اولویت جلسه ۱۰: ${primaryTargetPct}%)`;
+
+  return {
+    totalHeight: round2(totalHeight),
+    startPrice: round2(startPrice),
+    endPrice: round2(endPrice),
+    postMoveDirection,
+    target382,
+    target618,
+    target236,
+    waveC618,
+    waveC810,
+    primaryTargetPct,
+    primaryTargetPrice,
+    secondaryTargetPct,
+    secondaryTargetPrice,
+    referenceBase,
+    lengthClass,
+    summaryFa
+  };
+}
+

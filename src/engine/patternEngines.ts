@@ -1383,13 +1383,16 @@ export class PatternEngines {
     cCoversB100Pct: number;
     cProjectionPctOfA: number;
     isMarketEnd?: boolean;
+    hasExtraConfirmation?: boolean;
   }): {
     isValid: boolean;
     structureType: 'IDEAL_ZIGZAG' | 'SIMPLE_ZIGZAG' | 'ANTI_ZIGZAG' | 'COMBINATION_PATTERN' | 'DEFICIENT_FLAT' | 'INVALID';
     projectionType: 'TRUNCATED' | 'NORMAL' | 'EXTENDED' | 'INVALID';
     postPatternTarget: ReturnType<typeof PatternEngines.getZigzagPostPatternTarget> | null;
+    interpretationFa: string;
+    setupActionFa: string;
     setupRecommended: boolean;
-    marketEndConfidence: 'HIGH' | 'LOW';
+    marketEndConfidence: 'HIGH' | 'MEDIUM' | 'LOW';
     summaryFa: string;
   } {
     const sig = PatternEngines.classifyCorrectiveSignature(params.subwaves);
@@ -1435,10 +1438,33 @@ export class PatternEngines {
           })
         : null;
 
-    const marketEndConfidence: 'HIGH' | 'LOW' = params.isMarketEnd ? 'LOW' : 'HIGH';
+    const interpretationFa =
+      proj.type === 'TRUNCATED'
+        ? 'اصلاح ضعیف (کوتاه‌شده)'
+        : proj.type === 'EXTENDED'
+        ? 'اصلاح قوی (کشیده)'
+        : proj.type === 'NORMAL'
+        ? 'اصلاح استاندارد (معمولی)'
+        : 'ساختار نامعتبر زیگزاگ';
+
+    const setupActionFa = !isValid
+      ? 'عدم ورود — نقض شروط زیگزاگ'
+      : proj.type === 'TRUNCATED'
+      ? 'ورود در انتهای موج C (با تایید برگشت)'
+      : proj.type === 'EXTENDED'
+      ? 'صبر برای اصلاح بیشتر / تثبیت ساختار'
+      : 'ستاپ استاندارد پس از تکمیل موج C';
+
+    const marketEndConfidence: 'HIGH' | 'MEDIUM' | 'LOW' = !params.isMarketEnd
+      ? 'HIGH'
+      : params.hasExtraConfirmation
+      ? 'MEDIUM'
+      : 'LOW';
     const prefix = params.symbol ? `${params.symbol}: ` : '';
     const marketEndNote = params.isMarketEnd
-      ? ' — هشدار انتهای بازار: اعتبار پایین و احتمال تبدیل به فلت یا مثلث.'
+      ? marketEndConfidence === 'MEDIUM'
+        ? ' — انتهای بازار با تایید اضافه (اعتبار متوسط).'
+        : ' — هشدار انتهای بازار بدون تایید: اعتبار کم و احتمال تبدیل به فلت یا مثلث.'
       : '';
     const summaryFa = isValid
       ? `${prefix}${proj.labelFa} با ساختار ${params.subwaves.join('-')} (${structureType}) — هدف پساالگویی: ${postPatternTarget?.targetPct}%${marketEndNote}`
@@ -1449,7 +1475,9 @@ export class PatternEngines {
       structureType,
       projectionType: proj.type,
       postPatternTarget,
-      setupRecommended: isValid && !params.isMarketEnd,
+      interpretationFa,
+      setupActionFa,
+      setupRecommended: isValid && marketEndConfidence !== 'LOW',
       marketEndConfidence,
       summaryFa
     };

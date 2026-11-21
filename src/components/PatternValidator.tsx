@@ -974,15 +974,25 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
               {auditResult.specializedReport.kind === 'ZIGZAG' && (
                 <div className="space-y-1 text-slate-300">
                   <div className="flex items-center justify-between font-semibold text-white">
-                    <span>{auditResult.specializedReport.data.subTypeLabelFa}</span>
+                    <span>
+                      {auditResult.specializedReport.data.subTypeLabelFa} ({auditResult.specializedReport.data.structureLabel})
+                    </span>
                     <span className="font-mono text-cyan-300 tabular-nums">
                       B/A: {auditResult.specializedReport.data.bOverARatioPct}٪ · C/A: {auditResult.specializedReport.data.cOverARatioPct}٪
                     </span>
                   </div>
                   <p className="text-slate-400 leading-relaxed">
-                    {auditResult.specializedReport.data.waveCClassFa} · هدف پسازیگزاگ: {auditResult.specializedReport.data.postPatternTargetPrice.toLocaleString()}
-                    {auditResult.specializedReport.data.isAbCd ? ' · هم‌راستا با AB=CD' : ''}
+                    {auditResult.specializedReport.data.waveCClassFa} · هدف پساالگویی ({auditResult.specializedReport.data.postPatternBasisFa}):{' '}
+                    {auditResult.specializedReport.data.postPatternTargetPrice.toLocaleString()}
+                    {auditResult.specializedReport.data.isAbCd
+                      ? ` · هم‌راستا با AB=CD (تلورانس ${auditResult.specializedReport.data.abCdTolerancePct}٪)`
+                      : ''}
                   </p>
+                  {auditResult.specializedReport.data.warnings.length > 0 && (
+                    <p className="text-[10.5px] text-amber-300 leading-relaxed">
+                      {auditResult.specializedReport.data.warnings[0]}
+                    </p>
+                  )}
                 </div>
               )}
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PatternEngines } from '../src/engine/patternEngines';
 import { RulesEngine, inferWaveRole } from '../src/engine/rulesEngine';
-import { FractalEngine } from '../src/engine/fractalEngine';
+import { FractalEngine, identifyZigzag, calculateZigzagTargets } from '../src/engine/fractalEngine';
 import { generateRealisticCandles } from '../src/data/sampleMarketData';
 import {
   MOTIVE_PATTERN_FAMILIES,
@@ -427,6 +427,69 @@ describe('Session 10: Corrective Patterns & Zigzag (§2.1 - §2.6, T-10.1..T-10.
       projectionType: 'TRUNCATED',
       setupRecommended: true
     });
+
+    // T-10.30..T-10.32: Truncated (70%) vs Extended (180%) vs Normal (120%) differences
+    expect(
+      PatternEngines.analyzeZigzagWorkflow({
+        subwaves: [5, 3, 5],
+        bPctOfA: 55,
+        cCoversB100Pct: 110,
+        cProjectionPctOfA: 70
+      })
+    ).toMatchObject({
+      projectionType: 'TRUNCATED',
+      interpretationFa: expect.stringContaining('ضعیف'),
+      setupActionFa: expect.stringContaining('انتهای موج C')
+    });
+
+    expect(
+      PatternEngines.analyzeZigzagWorkflow({
+        subwaves: [5, 3, 5],
+        bPctOfA: 55,
+        cCoversB100Pct: 165,
+        cProjectionPctOfA: 180
+      })
+    ).toMatchObject({
+      projectionType: 'EXTENDED',
+      interpretationFa: expect.stringContaining('قوی'),
+      setupActionFa: expect.stringContaining('صبر برای اصلاح بیشتر')
+    });
+
+    // T-10.36..T-10.38: Past market (HIGH) vs Market-End with confirmation (MEDIUM) vs Market-End without confirmation (LOW)
+    expect(
+      PatternEngines.analyzeZigzagWorkflow({
+        subwaves: [5, 3, 5],
+        bPctOfA: 65,
+        cCoversB100Pct: 120,
+        cProjectionPctOfA: 120,
+        isMarketEnd: false
+      }).marketEndConfidence
+    ).toBe('HIGH');
+
+    expect(
+      PatternEngines.analyzeZigzagWorkflow({
+        subwaves: [5, 3, 5],
+        bPctOfA: 65,
+        cCoversB100Pct: 120,
+        cProjectionPctOfA: 120,
+        isMarketEnd: true,
+        hasExtraConfirmation: true
+      }).marketEndConfidence
+    ).toBe('MEDIUM');
+
+    expect(
+      PatternEngines.analyzeZigzagWorkflow({
+        subwaves: [5, 3, 5],
+        bPctOfA: 65,
+        cCoversB100Pct: 120,
+        cProjectionPctOfA: 120,
+        isMarketEnd: true,
+        hasExtraConfirmation: false
+      })
+    ).toMatchObject({
+      marketEndConfidence: 'LOW',
+      setupRecommended: false
+    });
   });
 });
 
@@ -676,5 +739,124 @@ describe('ChartToolsEngine (Indicators, Heikin-Ashi, Price Scale Transforms)', (
       const back = inverseTransformPrice(transformed, mode, 5000);
       expect(back).toBeCloseTo(6250, 4);
     }
+  });
+});
+
+describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
+  it('identifies Ideal (5-3-5), Simple (3-3-3), Anti (3-5-5), and enforces C >= 100% B', () => {
+    // Ideal 5-3-5 bullish zigzag: A=100->200 (100), B=200->135 (65 = 65% A), C=135->265 (130 > B)
+    const ideal = identifyZigzag(
+      { startPrice: 100, endPrice: 200, subwaveCount: 5 },
+      { startPrice: 200, endPrice: 135, subwaveCount: 3 },
+      { startPrice: 135, endPrice: 265, subwaveCount: 5 }
+    );
+    expect(ideal).toMatchObject({
+      isValid: true,
+      variant: 'IDEAL',
+      signature: '5-3-5',
+      cCoversB100: true,
+      lengthClass: 'NORMAL',
+      totalHeight: 165
+    });
+
+    // Simple 3-3-3 with B <= 61.8% A and C >= 100% B
+    const simple = FractalEngine.identifyZigzag(
+      { startPrice: 100, endPrice: 200, subwaveCount: 3 },
+      { startPrice: 200, endPrice: 150, subwaveCount: 3 },
+      { startPrice: 150, endPrice: 240, subwaveCount: 3 }
+    );
+    expect(simple).toMatchObject({
+      isValid: true,
+      variant: 'SIMPLE',
+      signature: '3-3-3',
+      cCoversB100: true,
+      lengthClass: 'TRUNCATED'
+    });
+
+    // Simple 3-3-3 with B > 61.8% A -> rejected as pure Simple Zigzag (Combination/Flat territory)
+    const simpleLargeB = identifyZigzag(
+      { length: 100, subwaveCount: 3 },
+      { length: 72, subwaveCount: 3 },
+      { length: 110, subwaveCount: 3 }
+    );
+    expect(simpleLargeB.variant).toBe('SIMPLE');
+    expect(simpleLargeB.isValid).toBe(false);
+
+    // Anti 3-5-5 valid
+    const anti = identifyZigzag(
+      { startPrice: 300, endPrice: 200, subwaveCount: 3 },
+      { startPrice: 200, endPrice: 250, subwaveCount: 5 },
+      { startPrice: 250, endPrice: 120, subwaveCount: 5 }
+    );
+    expect(anti).toMatchObject({
+      isValid: true,
+      variant: 'ANTI',
+      signature: '3-5-5',
+      direction: 'BEARISH',
+      cCoversB100: true,
+      totalHeight: 180
+    });
+
+    // Invalid when Wave C < 100% Wave B
+    const invalidCoverage = identifyZigzag(
+      { startPrice: 100, endPrice: 200, subwaveCount: 5 },
+      { startPrice: 200, endPrice: 120, subwaveCount: 3 },
+      { startPrice: 120, endPrice: 195, subwaveCount: 5 }
+    );
+    expect(invalidCoverage).toMatchObject({
+      isValid: false,
+      cCoversB100: false
+    });
+
+    // Borderline C == 100% B
+    const borderline100 = identifyZigzag(
+      { startPrice: 100, endPrice: 200, subwaveCount: 5 },
+      { startPrice: 200, endPrice: 130, subwaveCount: 3 },
+      { startPrice: 130, endPrice: 200, subwaveCount: 5 }
+    );
+    expect(borderline100).toMatchObject({
+      isValid: true,
+      cCoversB100: true,
+      isBorderlineC100B: true
+    });
+  });
+
+  it('calculates 38.2% and 61.8% post-zigzag targets from total pattern height and Session 10 rules', () => {
+    // Bullish Normal Zigzag with large B (>61.8% A): start=100, end=265 -> totalHeight=165 -> post-move goes down
+    const normalBull = identifyZigzag(
+      { startPrice: 100, endPrice: 200, subwaveCount: 5 },
+      { startPrice: 200, endPrice: 135, subwaveCount: 3 },
+      { startPrice: 135, endPrice: 265, subwaveCount: 5 }
+    );
+    const targetsNormal = calculateZigzagTargets(normalBull);
+    expect(targetsNormal.totalHeight).toBe(165);
+    expect(targetsNormal.postMoveDirection).toBe('BEARISH');
+    expect(targetsNormal.target382).toBeCloseTo(265 - 165 * 0.382, 2);
+    expect(targetsNormal.target618).toBeCloseTo(265 - 165 * 0.618, 2);
+    expect(targetsNormal.primaryTargetPct).toBe(61.8);
+    expect(targetsNormal.primaryTargetPrice).toBe(targetsNormal.target618);
+
+    // Normal Zigzag with small B (<61.8% A): primary target is 38.2% of full pattern
+    const smallB = identifyZigzag(
+      { startPrice: 100, endPrice: 200, subwaveCount: 5 },
+      { startPrice: 200, endPrice: 150, subwaveCount: 3 },
+      { startPrice: 150, endPrice: 270, subwaveCount: 5 }
+    );
+    const targetsSmallB = FractalEngine.calculateZigzagTargets(smallB);
+    expect(targetsSmallB.primaryTargetPct).toBe(38.2);
+    expect(targetsSmallB.primaryTargetPrice).toBe(targetsSmallB.target382);
+
+    // Bearish Extended Zigzag with small B (<61.8% A): post-move rallies upward; primary=23.6%, plus valid 38.2% & 61.8%
+    const bearishExt = identifyZigzag(
+      { startPrice: 300, endPrice: 200, subwaveCount: 5 },
+      { startPrice: 200, endPrice: 240, subwaveCount: 3 },
+      { startPrice: 240, endPrice: 60, subwaveCount: 5 }
+    );
+    const targetsBearExt = calculateZigzagTargets(bearishExt);
+    expect(targetsBearExt.totalHeight).toBe(240);
+    expect(targetsBearExt.postMoveDirection).toBe('BULLISH');
+    expect(targetsBearExt.target382).toBeCloseTo(60 + 240 * 0.382, 2);
+    expect(targetsBearExt.target618).toBeCloseTo(60 + 240 * 0.618, 2);
+    expect(targetsBearExt.primaryTargetPct).toBe(23.6);
   });
 });
