@@ -21,6 +21,22 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
+interface LiveStudioTreeContext {
+  rootScenarios: WaveScenario[];
+  activeRootScenarioId: string;
+  subScenariosByKey: Record<string, WaveScenario[]>;
+  activeSubIdByKey: Record<string, string>;
+  drillStack: Array<{
+    key: string;
+    waveLabel: string;
+    targetTimeframe: string;
+    parentScenarioId: string;
+    legIndex?: number;
+    role: string;
+  }>;
+  onJumpToLevel?: (levelIdx: number) => void;
+}
+
 interface FractalTreeProps {
   currentDegree: WaveDegree;
   onSelectDegree: (degree: WaveDegree) => void;
@@ -29,6 +45,7 @@ interface FractalTreeProps {
   candles?: Candle[];
   marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
   onPromoteDegree?: (scenarioId?: string) => void;
+  liveTreeContext?: LiveStudioTreeContext;
 }
 
 export const FractalTree: React.FC<FractalTreeProps> = ({
@@ -38,7 +55,8 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
   onBranchScenario,
   candles = [],
   marketType = 'CRYPTO',
-  onPromoteDegree
+  onPromoteDegree,
+  liveTreeContext
 }) => {
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({
     node_v: true,
@@ -140,6 +158,79 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
           </button>
         )}
       </div>
+
+      {/* Live Multi-Level Synchronized Fractal Hierarchy (Studio Tree) */}
+      {liveTreeContext && liveTreeContext.rootScenarios.length > 0 && (
+        <div className="p-3 rounded-xl bg-slate-950/85 border border-indigo-500/35 space-y-2">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+              <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
+              <span>درخت زنده همگام‌سازی سطوح (کلان ← ریز)</span>
+            </span>
+            <span className="font-mono text-slate-400 tabular-nums">
+              عمق فعال: {liveTreeContext.drillStack.length + 1}
+            </span>
+          </div>
+
+          {(() => {
+            const rootSc =
+              liveTreeContext.rootScenarios.find(s => s.id === liveTreeContext.activeRootScenarioId) ||
+              liveTreeContext.rootScenarios[0];
+            if (!rootSc) return null;
+            const rootHardOk = rootSc.rulesResults.filter(r => r.type === 'HARD').every(r => r.passed);
+            return (
+              <div className="space-y-1.5 font-mono text-[10.5px]">
+                <button
+                  type="button"
+                  onClick={() => liveTreeContext.onJumpToLevel?.(-1)}
+                  className={`w-full text-right p-2 rounded-lg border flex items-center justify-between gap-2 transition-colors ${
+                    liveTreeContext.drillStack.length === 0
+                      ? 'bg-indigo-950/50 border-indigo-400/60 text-white'
+                      : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                  }`}
+                >
+                  <span className="truncate font-sans font-semibold">
+                    کلان ({rootSc.timeframe}): {rootSc.name.split('(')[0].trim()}
+                  </span>
+                  <span className={rootHardOk ? 'text-emerald-400 shrink-0' : 'text-rose-400 shrink-0'}>
+                    {rootSc.validityScore}% {rootHardOk ? '✓' : '✕'}
+                  </span>
+                </button>
+
+                {liveTreeContext.drillStack.map((d, idx) => {
+                  const subList = liveTreeContext.subScenariosByKey[d.key] || [];
+                  const activeSubId = liveTreeContext.activeSubIdByKey[d.key];
+                  const subSc = subList.find(s => s.id === activeSubId) || subList[0];
+                  const isLeaf = idx === liveTreeContext.drillStack.length - 1;
+                  const subHardOk = subSc ? subSc.rulesResults.filter(r => r.type === 'HARD').every(r => r.passed) : true;
+                  return (
+                    <div key={d.key} className="mr-3 pr-2 border-r border-cyan-500/40">
+                      <button
+                        type="button"
+                        onClick={() => liveTreeContext.onJumpToLevel?.(idx)}
+                        className={`w-full text-right p-2 rounded-lg border flex items-center justify-between gap-2 transition-colors ${
+                          isLeaf
+                            ? 'bg-cyan-950/45 border-cyan-400/60 text-cyan-100'
+                            : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <span className="truncate font-sans">
+                          {d.waveLabel} ({d.targetTimeframe}) · {d.role === 'MOTIVE' ? 'پیشرو' : 'اصلاحی'}
+                        </span>
+                        {subSc && (
+                          <span className={subHardOk ? 'text-emerald-400 shrink-0' : 'text-amber-300 shrink-0'}>
+                            {subSc.validityScore}% {subHardOk ? '✓' : '!'}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Tree Visualization */}
       <div className="flex flex-col gap-2 font-mono text-xs">

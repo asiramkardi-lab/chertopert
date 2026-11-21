@@ -79,6 +79,21 @@ interface SleekSidebarProps {
   candlesByTf?: Record<string, Candle[]>;
   marketType?: 'CRYPTO' | 'TSE_IRAN' | 'COMMODITY';
   onPromoteDegree?: (scenarioId?: string) => void;
+  liveTreeContext?: {
+    rootScenarios: WaveScenario[];
+    activeRootScenarioId: string;
+    subScenariosByKey: Record<string, WaveScenario[]>;
+    activeSubIdByKey: Record<string, string>;
+    drillStack: Array<{
+      key: string;
+      waveLabel: string;
+      targetTimeframe: string;
+      parentScenarioId: string;
+      legIndex?: number;
+      role: string;
+    }>;
+    onJumpToLevel?: (levelIdx: number) => void;
+  };
 }
 
 export const SleekSidebar: React.FC<SleekSidebarProps> = ({
@@ -107,7 +122,8 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   candles = [],
   candlesByTf,
   marketType = 'CRYPTO',
-  onPromoteDegree
+  onPromoteDegree,
+  liveTreeContext
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
   const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'CONFLUENCE' | 'PRZ'>('RADAR');
@@ -343,6 +359,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               candles={candles}
               marketType={marketType}
               onPromoteDegree={onPromoteDegree}
+              liveTreeContext={liveTreeContext}
             />
           </div>
         )}

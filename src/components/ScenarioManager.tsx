@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Candle, WaveScenario, PatternFamily, WaveRole, WaveVertex } from '../types/elliott';
 import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole } from '../engine/rulesEngine';
+import { filterPatternsForRole } from '../engine/fractalSyncEngine';
 import { SmartRuleAlertEngine, ScenarioQuickStatusReport } from '../engine/smartRuleAlertEngine';
 import { ChartInteractionMode } from './ChartStudio';
 import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
@@ -500,7 +501,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                 onChange={e => onApplyPattern(e.target.value as PatternFamily)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 disabled:opacity-50"
               >
-                {(Object.keys(PATTERN_LABELS_FA) as PatternFamily[]).map(pf => (
+                {filterPatternsForRole(parentRole).map(pf => (
                   <option key={pf} value={pf}>
                     {PATTERN_LABELS_FA[pf]}
                   </option>
@@ -517,7 +518,10 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                 onClick={() => {
                   const verts = activeScenario.vertices;
                   const last = verts[verts.length - 1];
-                  const defaultLabels = ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C', 'D', 'E'];
+                  const defaultLabels =
+                    parentRole === 'CORRECTIVE'
+                      ? ['0', 'A', 'B', 'C', 'D', 'E']
+                      : ['0', '1', '2', '3', '4', '5'];
                   const nextLabel = defaultLabels[verts.length] || `W${verts.length}`;
                   onUpdateVertices([
                     ...verts,

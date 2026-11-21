@@ -12,9 +12,17 @@ import {
   PatternFamily,
   WaveDegree,
   WaveRole,
-  Candle
+  Candle,
+  DrillDownContext
 } from './types/elliott';
 import { RulesEngine, ValidationSummary, SCENARIO_COLORS, inferWaveRole } from './engine/rulesEngine';
+import {
+  alignSubwaveToParentInterval,
+  resolveWindowCandleBounds,
+  syncFractalHierarchyBottomUp,
+  syncFractalHierarchyTopDown,
+  isPatternAllowedForRole
+} from './engine/fractalSyncEngine';
 import {
   FractalEngine,
   getDegreeForTimeframe,
@@ -339,7 +347,7 @@ export default function App() {
       const startTimestamp = Math.min(vStart.timestamp, vEnd.timestamp);
       const endTimestamp = Math.max(vStart.timestamp, vEnd.timestamp);
       const waveLabel = `موج ${vStart.label}→${vEnd.label}`;
-      const role = inferWaveRole(vEnd.label);
+      const role = inferWaveRole(vEnd.label, parentSc.patternType);
       const direction: 'BULLISH' | 'BEARISH' = vEnd.price >= vStart.price ? 'BULLISH' : 'BEARISH';
       const targetDegree = getLowerDegree(parentSc.degree);
       const parentPrefix = currentStudioDrill ? currentStudioDrill.key : 'ROOT';
@@ -350,17 +358,9 @@ export default function App() {
           startTs: startTimestamp,
           endTs: endTimestamp
         });
-        let startIdx = legCandles.findIndex(c => c.timestamp >= startTimestamp);
-        if (startIdx < 0) startIdx = 0;
-        let endIdx = legCandles.length - 1;
-        for (let i = legCandles.length - 1; i >= startIdx; i--) {
-          if (legCandles[i].timestamp <= endTimestamp) {
-            endIdx = i;
-            break;
-          }
-        }
+        const { startIdx, endIdx } = resolveWindowCandleBounds(legCandles, startTimestamp, endTimestamp);
 
-        const generated = RulesEngine.generateCandidateScenarios(
+        const rawGenerated = RulesEngine.generateCandidateScenarios(
           legCandles,
           targetTF,
           targetDegree,
@@ -371,6 +371,34 @@ export default function App() {
           waveLabel,
           endIdx
         );
+        const generated = rawGenerated.map(sc => {
+          const aligned = alignSubwaveToParentInterval(
+            sc.vertices,
+            startIdx,
+            endIdx,
+            legCandles,
+            vStart.price,
+            vEnd.price
+          );
+          const val = RulesEngine.validateStructure(
+            sc.patternType,
+            aligned,
+            sc.direction,
+            role,
+            waveLabel,
+            legCandles
+          );
+          return {
+            ...sc,
+            vertices: aligned,
+            validityScore: val.validityScore,
+            idealnessScore: val.idealnessScore,
+            confidenceScore: val.confidenceScore,
+            invalidationPrice: val.invalidationPrice,
+            targets: val.targets,
+            rulesResults: val.rules
+          };
+        });
         setStudioSubScenariosByKey(prev => ({ ...prev, [key]: generated }));
         if (generated[0]) {
           setStudioActiveSubIdByKey(prev => ({ ...prev, [key]: generated[0].id }));
@@ -419,17 +447,13 @@ export default function App() {
           startTs: currentStudioDrill.startTimestamp,
           endTs: currentStudioDrill.endTimestamp
         });
-        let startIdx = legCandles.findIndex(c => c.timestamp >= currentStudioDrill.startTimestamp);
-        if (startIdx < 0) startIdx = 0;
-        let endIdx = legCandles.length - 1;
-        for (let i = legCandles.length - 1; i >= startIdx; i--) {
-          if (legCandles[i].timestamp <= currentStudioDrill.endTimestamp) {
-            endIdx = i;
-            break;
-          }
-        }
+        const { startIdx, endIdx } = resolveWindowCandleBounds(
+          legCandles,
+          currentStudioDrill.startTimestamp,
+          currentStudioDrill.endTimestamp
+        );
 
-        const generated = RulesEngine.generateCandidateScenarios(
+        const rawGenerated = RulesEngine.generateCandidateScenarios(
           legCandles,
           newTf,
           nextDegree,
@@ -440,6 +464,27 @@ export default function App() {
           currentStudioDrill.waveLabel,
           endIdx
         );
+        const generated = rawGenerated.map(sc => {
+          const aligned = alignSubwaveToParentInterval(sc.vertices, startIdx, endIdx, legCandles);
+          const val = RulesEngine.validateStructure(
+            sc.patternType,
+            aligned,
+            sc.direction,
+            currentStudioDrill.role,
+            currentStudioDrill.waveLabel,
+            legCandles
+          );
+          return {
+            ...sc,
+            vertices: aligned,
+            validityScore: val.validityScore,
+            idealnessScore: val.idealnessScore,
+            confidenceScore: val.confidenceScore,
+            invalidationPrice: val.invalidationPrice,
+            targets: val.targets,
+            rulesResults: val.rules
+          };
+        });
         setStudioSubScenariosByKey(prev => ({ ...prev, [nextKey]: generated }));
         if (generated[0]) {
           setStudioActiveSubIdByKey(prev => ({ ...prev, [nextKey]: generated[0].id }));
@@ -479,23 +524,82 @@ export default function App() {
     }
   };
 
+  const toDrillContexts = (stack: StudioDrillEntry[]): DrillDownContext[] =>
+    stack.map(entry => ({
+      nodeId: entry.key,
+      parentScenarioId: entry.parentScenarioId,
+      parentScenarioName: entry.parentScenarioName,
+      parentTimeframe: entry.parentTimeframe,
+      targetTimeframe: entry.targetTimeframe,
+      waveLabel: entry.waveLabel,
+      role: entry.role,
+      direction: entry.direction,
+      startTimestamp: entry.startTimestamp,
+      endTimestamp: entry.endTimestamp,
+      startPrice: 0,
+      endPrice: 0,
+      degree: entry.degree,
+      legIndex: entry.legIndex
+    }));
+
+  const applyStudioBottomUpSync = (editedChild: WaveScenario, updatedSubList: WaveScenario[]) => {
+    if (!currentStudioDrill) return;
+    const synced = syncFractalHierarchyBottomUp({
+      assetId: selectedAssetId,
+      highestTimeframe: selectedTimeframe,
+      highestCandles: candles,
+      drillStack: toDrillContexts(studioDrillStack),
+      editedScenario: editedChild,
+      subScenariosByKey: {
+        ...studioSubScenariosByKey,
+        [currentStudioDrill.key]: updatedSubList
+      },
+      macroScenarios: scenarios
+    });
+    setScenarios(synced.macroScenarios);
+    setStudioSubScenariosByKey(synced.subScenariosByKey);
+    setStudioDrillStack(prev =>
+      prev.map((item, idx) =>
+        synced.drillStack[idx]
+          ? {
+              ...item,
+              startTimestamp: synced.drillStack[idx].startTimestamp,
+              endTimestamp: synced.drillStack[idx].endTimestamp
+            }
+          : item
+      )
+    );
+  };
+
   const handleUpdateVertices = (newVertices: WaveVertex[], targetScenarioId?: string) => {
     const targetId = targetScenarioId || effectiveActiveScenario?.id;
-    updateEffectiveScenarios(prev =>
-      prev.map(sc => {
+    if (currentStudioDrill) {
+      const list = studioSubScenariosByKey[currentStudioDrill.key] || [];
+      const bounds = resolveWindowCandleBounds(
+        effectiveCandles,
+        currentStudioDrill.startTimestamp,
+        currentStudioDrill.endTimestamp
+      );
+      let editedChild: WaveScenario | null = null;
+      const updatedList = list.map(sc => {
         if (sc.id !== targetId) return sc;
-        const val = currentStudioDrill
-          ? RulesEngine.validateStructure(
-              sc.patternType,
-              newVertices,
-              sc.direction,
-              currentStudioDrill.role,
-              currentStudioDrill.waveLabel
-            )
-          : RulesEngine.validateStructure(sc.patternType, newVertices, sc.direction);
-        return {
+        const alignedVerts = alignSubwaveToParentInterval(
+          newVertices,
+          bounds.startIdx,
+          bounds.endIdx,
+          effectiveCandles
+        );
+        const val = RulesEngine.validateStructure(
+          sc.patternType,
+          alignedVerts,
+          sc.direction,
+          currentStudioDrill.role,
+          currentStudioDrill.waveLabel,
+          effectiveCandles
+        );
+        editedChild = {
           ...sc,
-          vertices: newVertices,
+          vertices: alignedVerts,
           validityScore: val.validityScore,
           idealnessScore: val.idealnessScore,
           confidenceScore: val.confidenceScore,
@@ -504,24 +608,86 @@ export default function App() {
           rulesResults: val.rules,
           source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
         };
-      })
-    );
+        return editedChild;
+      });
+      if (editedChild) {
+        applyStudioBottomUpSync(editedChild, updatedList);
+      } else {
+        setStudioSubScenariosByKey(prev => ({ ...prev, [currentStudioDrill.key]: updatedList }));
+      }
+      return;
+    }
+
+    let editedRoot: WaveScenario | null = null;
+    const nextRoots = scenarios.map(sc => {
+      if (sc.id !== targetId) return sc;
+      const val = RulesEngine.validateStructure(sc.patternType, newVertices, sc.direction, 'ROOT', '', candles);
+      editedRoot = {
+        ...sc,
+        vertices: newVertices,
+        validityScore: val.validityScore,
+        idealnessScore: val.idealnessScore,
+        confidenceScore: val.confidenceScore,
+        invalidationPrice: val.invalidationPrice,
+        targets: val.targets,
+        rulesResults: val.rules,
+        source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
+      };
+      return editedRoot;
+    });
+    setScenarios(nextRoots);
+    if (editedRoot) {
+      const topDown = syncFractalHierarchyTopDown({
+        assetId: selectedAssetId,
+        parentScenario: editedRoot,
+        parentNodeKeyOrId: 'ROOT',
+        subScenariosByKey: studioSubScenariosByKey
+      });
+      setStudioSubScenariosByKey(topDown.subScenariosByKey);
+    }
   };
 
   const handlePatternChange = (newPattern: PatternFamily, targetScenarioId?: string) => {
     const targetId = targetScenarioId || effectiveActiveScenario.id;
-    updateEffectiveScenarios(prev =>
+    if (currentStudioDrill) {
+      if (!isPatternAllowedForRole(newPattern, currentStudioDrill.role)) return;
+      const list = studioSubScenariosByKey[currentStudioDrill.key] || [];
+      let editedChild: WaveScenario | null = null;
+      const updatedList = list.map(sc => {
+        if (sc.id !== targetId) return sc;
+        const val = RulesEngine.validateStructure(
+          newPattern,
+          sc.vertices,
+          sc.direction,
+          currentStudioDrill.role,
+          currentStudioDrill.waveLabel,
+          effectiveCandles
+        );
+        editedChild = {
+          ...sc,
+          patternType: newPattern,
+          validityScore: val.validityScore,
+          idealnessScore: val.idealnessScore,
+          confidenceScore: val.confidenceScore,
+          invalidationPrice: val.invalidationPrice,
+          targets: val.targets,
+          rulesResults: val.rules,
+          source: 'USER_EDITED'
+        };
+        return editedChild;
+      });
+      if (editedChild) {
+        applyStudioBottomUpSync(editedChild, updatedList);
+      } else {
+        setStudioSubScenariosByKey(prev => ({ ...prev, [currentStudioDrill.key]: updatedList }));
+      }
+      return;
+    }
+
+    setScenarios(prev =>
       prev.map(sc => {
         if (sc.id !== targetId) return sc;
-        const val = currentStudioDrill
-          ? RulesEngine.validateStructure(
-              newPattern,
-              sc.vertices,
-              sc.direction,
-              currentStudioDrill.role,
-              currentStudioDrill.waveLabel
-            )
-          : RulesEngine.validateStructure(newPattern, sc.vertices, sc.direction);
+        const val = RulesEngine.validateStructure(newPattern, sc.vertices, sc.direction, 'ROOT', '', candles);
         return {
           ...sc,
           patternType: newPattern,
@@ -538,7 +704,32 @@ export default function App() {
   };
 
   const handleValidateScenario = (id: string, summary: ValidationSummary) => {
-    updateEffectiveScenarios(prev =>
+    if (currentStudioDrill) {
+      const list = studioSubScenariosByKey[currentStudioDrill.key] || [];
+      let validatedChild: WaveScenario | null = null;
+      const updatedList = list.map(sc => {
+        if (sc.id !== id) return sc;
+        validatedChild = {
+          ...sc,
+          patternType: summary.patternType,
+          validityScore: summary.validityScore,
+          idealnessScore: summary.idealnessScore,
+          confidenceScore: summary.confidenceScore,
+          invalidationPrice: summary.invalidationPrice,
+          targets: summary.targets,
+          rulesResults: summary.rules
+        };
+        return validatedChild;
+      });
+      if (validatedChild) {
+        applyStudioBottomUpSync(validatedChild, updatedList);
+      } else {
+        setStudioSubScenariosByKey(prev => ({ ...prev, [currentStudioDrill.key]: updatedList }));
+      }
+      return;
+    }
+
+    setScenarios(prev =>
       prev.map(sc =>
         sc.id === id
           ? {
@@ -975,6 +1166,14 @@ export default function App() {
             candlesByTf={multiTfData}
             marketType={currentAsset.marketType}
             onPromoteDegree={handlePromoteScenarioDegree}
+            liveTreeContext={{
+              rootScenarios: scenarios,
+              activeRootScenarioId: activeScenarioId,
+              subScenariosByKey: studioSubScenariosByKey,
+              activeSubIdByKey: studioActiveSubIdByKey,
+              drillStack: studioDrillStack,
+              onJumpToLevel: handleStudioJumpDrillLevel
+            }}
           />
         </main>
       )}

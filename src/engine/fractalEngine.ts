@@ -977,11 +977,13 @@ export class FractalEngine {
 
   /**
    * Check parent-child fractal consistency (C01, C03, C04, P07)
+   * Strictly enforces mutual exclusion between Motive and Corrective subwaves.
    */
   public static checkConsistency(
     parentRole: WaveRole,
     parentWaveLabel: string,
-    subwavePattern: PatternFamily
+    subwavePattern: PatternFamily,
+    subwaveVertices?: WaveVertex[]
   ): { isConsistent: boolean; warningFa?: string } {
     if (parentRole === 'ROOT') return { isConsistent: true };
 
@@ -1007,15 +1009,41 @@ export class FractalEngine {
     if (parentRole === 'MOTIVE' && correctivePatterns.includes(subwavePattern)) {
       return {
         isConsistent: false,
-        warningFa: `تعارض فرکتالی (C04): موج مادر «${parentWaveLabel}» یک موج اصلی (پیشرو) است و باید ساختار درونی ۵ موجی (ایده‌آل، ترمینال یا قطر) داشته باشد، اما الگوی اصلاحی سه‌موجی انتخاب شده است.`
+        warningFa: `تعارض فرکتالی (C04): موج مادر «${parentWaveLabel}» یک موج اصلی (پیشرو) است و باید ساختار درونی ۵ موجی (ایده‌آل، ترمینال یا قطر) داشته باشد، نه الگوی اصلاحی (abc / فلت / مثلث).`
       };
     }
 
     if (parentRole === 'CORRECTIVE' && motivePatterns.includes(subwavePattern)) {
       return {
         isConsistent: false,
-        warningFa: `تعارض فرکتالی (C04): موج مادر «${parentWaveLabel}» یک موج اصلاحی است و باید ساختار درونی ۳ موجی (زیگزاگ، فلت، مثلث یا ترکیبی) داشته باشد، نه ساختار ۵ موجی.`
+        warningFa: `تعارض فرکتالی (C04): موج مادر «${parentWaveLabel}» یک موج اصلاحی است و باید ساختار درونی ۳ موجی (زیگزاگ، فلت، مثلث یا ترکیبی) داشته باشد، نه ساختار ۵ موجی شتابدار.`
       };
+    }
+
+    if (subwaveVertices && subwaveVertices.length >= 2) {
+      const cleanLabels = subwaveVertices
+        .map(v => v.label.replace(/[()VW\s]/g, '').toUpperCase())
+        .filter(lbl => lbl && lbl !== '0');
+
+      if (parentRole === 'MOTIVE') {
+        const hasCorrectiveLabels = cleanLabels.some(lbl => ['A', 'B', 'C', 'D', 'E', 'W', 'X', 'Y', 'Z'].includes(lbl));
+        if (hasCorrectiveLabels) {
+          return {
+            isConsistent: false,
+            warningFa: `تعارض برچسب زیرموج: موج مادر «${parentWaveLabel}» پیشرو/اصلی است و زیرموج‌های آن نمی‌توانند برچسب اصلاحی (A, B, C, W, X, Y) داشته باشند.`
+          };
+        }
+      }
+
+      if (parentRole === 'CORRECTIVE' && subwavePattern !== 'ANTI_CYCLE') {
+        const hasImpulseLabels = cleanLabels.some(lbl => ['1', '2', '3', '4', '5'].includes(lbl));
+        if (hasImpulseLabels) {
+          return {
+            isConsistent: false,
+            warningFa: `تعارض برچسب زیرموج: موج مادر «${parentWaveLabel}» اصلاحی است و زیرموج‌های آن نمی‌توانند شمارش شتابدار (۱ تا ۵) داشته باشند.`
+          };
+        }
+      }
     }
 
     return { isConsistent: true };

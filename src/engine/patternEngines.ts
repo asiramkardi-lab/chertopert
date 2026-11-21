@@ -66,12 +66,12 @@ export class PatternEngines {
     const notes: string[] = [];
 
     const cleanParent = parentWaveLabel.replace(/[()VW\s]/g, '').toUpperCase();
-    const waveLocation: '1' | '3' | '5' | 'A' | 'C' =
-      cleanParent === '1' || cleanParent === '3' || cleanParent === '5' || cleanParent === 'A' || cleanParent === 'C'
-        ? (cleanParent as '1' | '3' | '5' | 'A' | 'C')
-        : scenario.patternType === 'LEADING_DIAGONAL' || scenario.patternType === 'ANTI_LEADING_DIAGONAL'
-        ? '1'
-        : '5';
+    const locMatch = cleanParent.match(/([135AC])$/) || cleanParent.match(/([135AC])/);
+    const waveLocation: '1' | '3' | '5' | 'A' | 'C' = locMatch
+      ? (locMatch[1] as '1' | '3' | '5' | 'A' | 'C')
+      : scenario.patternType === 'LEADING_DIAGONAL' || scenario.patternType === 'ANTI_LEADING_DIAGONAL'
+      ? '1'
+      : '5';
 
     const isCommonLocation = waveLocation === '1' || waveLocation === '5' || waveLocation === 'C';
     if (!isCommonLocation) {
@@ -187,7 +187,10 @@ export class PatternEngines {
     notes.push(`الگوی قدرت امواج (۱ / ۳ / ۵): ${strengthPattern === 'INCREASING' ? 'صعودی (آنتی‌قطر)' : strengthPattern === 'DECREASING' ? 'نزولی (گوه‌ای)' : 'مختلط'}`);
     warnings.push('توصیه مدیریت ریسک جلسه ۹: به دلیل پیچیدگی و ضعف روند درون قطر، تا تکمیل الگو و شکست قطعی از معامله پرهیز کنید.');
 
-    const detected = wave2Covered100 && (scenario.patternType.includes('DIAGONAL') || strengthPattern !== 'MIXED');
+    const isAll3WaveSub = w1Subs === 3 && w2Subs === 3 && w3Subs === 3 && w4Subs === 3 && w5Subs === 3;
+    const detected =
+      wave2Covered100 &&
+      (scenario.patternType.includes('DIAGONAL') || strengthPattern !== 'MIXED' || isAll3WaveSub);
     const confidence =
       !wave2Covered100
         ? 0.45
@@ -216,6 +219,480 @@ export class PatternEngines {
       confidence,
       warnings,
       notes
+    };
+  }
+
+  /**
+   * Session 9 (§2.1 & §2.2):
+   * Classifies 5-leg subwave signature:
+   * - [3,3,3,3,3] with Rule 3 overlap -> DIAGONAL (weak trend)
+   * - [3,3,3,3,3] without Rule 3 overlap -> LEADING_DIAGONAL
+   * - [5,3,5,3,5] -> IDEAL_CYCLE (not Diagonal)
+   * - [3,3,5,3,3] -> FLAT (not Diagonal)
+   * - Any other mixed 5-wave (e.g. [3,3,3,5,3] or [3,3,3,3,5]) -> INVALID diagonal structure
+   */
+  public static classifyDiagonalStructureSignature(
+    subwaveCounts: [number, number, number, number, number],
+    options?: { hasRule3Overlap?: boolean; postAntiCycle?: boolean }
+  ): {
+    classification: 'DIAGONAL' | 'LEADING_DIAGONAL' | 'IDEAL_CYCLE' | 'FLAT' | 'INVALID';
+    isValidDiagonal: boolean;
+    isLeadingDiagonal: boolean;
+    isWeakTrend: boolean;
+    reasonFa: string;
+  } {
+    const sig = subwaveCounts.join('-');
+    if (sig === '3-3-3-3-3') {
+      const noOverlap = options?.hasRule3Overlap === false;
+      if (noOverlap) {
+        return {
+          classification: 'LEADING_DIAGONAL',
+          isValidDiagonal: true,
+          isLeadingDiagonal: true,
+          isWeakTrend: true,
+          reasonFa:
+            'ساختار ۳-۳-۳-۳-۳ بدون نقض قانون ۳: الگوی محتمل قطر پیشرو (Leading Diagonal) با نشانه ضعف روند است.'
+        };
+      }
+      return {
+        classification: 'DIAGONAL',
+        isValidDiagonal: true,
+        isLeadingDiagonal: false,
+        isWeakTrend: true,
+        reasonFa: options?.postAntiCycle
+          ? 'ساختار ۳-۳-۳-۳-۳ پس از آنتی‌سیکل با هم‌پوشانی ۴ و ۱: الگوی قطر (نشانه ضعف روند) تشخیص داده شد.'
+          : 'ساختار ۳-۳-۳-۳-۳ با هم‌پوشانی قانون ۳: الگوی قطر معتبر است و ضعف کلی روند را نشان می‌دهد.'
+      };
+    }
+
+    if (sig === '5-3-5-3-5') {
+      return {
+        classification: 'IDEAL_CYCLE',
+        isValidDiagonal: false,
+        isLeadingDiagonal: false,
+        isWeakTrend: false,
+        reasonFa: 'ساختار ۵-۳-۵-۳-۵ مربوط به سیکل ایده‌آل است، نه الگوی قطر.'
+      };
+    }
+
+    if (sig === '3-3-5-3-3') {
+      return {
+        classification: 'FLAT',
+        isValidDiagonal: false,
+        isLeadingDiagonal: false,
+        isWeakTrend: false,
+        reasonFa: 'ساختار ۳-۳-۵-۳-۳ مربوط به ساختارهای اصلاحی فلت است، نه الگوی قطر.'
+      };
+    }
+
+    return {
+      classification: 'INVALID',
+      isValidDiagonal: false,
+      isLeadingDiagonal: false,
+      isWeakTrend: false,
+      reasonFa: `ساختار ${sig} برای الگوی قطر نامعتبر است (در قطر هر ۵ موج باید سه‌موجی ۳-۳-۳-۳-۳ باشند).`
+    };
+  }
+
+  /**
+   * Session 9 (§2.3 & §2.4):
+   * Early Diagonal detection from Wave 1 & Wave 2 subwave structure + Wave 2 100% coverage confirmation.
+   */
+  public static detectEarlyDiagonalFromWave1And2(
+    w1Subwaves: 3 | 5,
+    w2Subwaves: 3 | 5,
+    options?: { w3CoversW2Pct?: number; hasRule3Overlap?: boolean }
+  ): {
+    hypothesis: 'DIAGONAL' | 'IDEAL_CYCLE' | 'ANTI_CYCLE' | 'UNCONFIRMED';
+    isProbableDiagonal: boolean;
+    isDiagonalConfirmed: boolean;
+    hasRule3Overlap: boolean;
+    reasonFa: string;
+  } {
+    const w3Covers = options?.w3CoversW2Pct;
+    const hasOverlap = Boolean(options?.hasRule3Overlap);
+
+    if (w1Subwaves === 5 && w2Subwaves === 3) {
+      return {
+        hypothesis: 'IDEAL_CYCLE',
+        isProbableDiagonal: false,
+        isDiagonalConfirmed: false,
+        hasRule3Overlap: hasOverlap,
+        reasonFa: 'موج ۱ پنج‌موجی و موج ۲ سه‌موجی است؛ ساختار سیکل ایده‌آل است و قطر نیست.'
+      };
+    }
+
+    if (w1Subwaves === 3 && w2Subwaves === 5) {
+      return {
+        hypothesis: 'ANTI_CYCLE',
+        isProbableDiagonal: false,
+        isDiagonalConfirmed: false,
+        hasRule3Overlap: hasOverlap,
+        reasonFa: 'موج ۱ سه‌موجی و موج ۲ پنج‌موجی است؛ ساختار آنتی‌سیکل ۳-۵ است و قطر نیست.'
+      };
+    }
+
+    if (w1Subwaves === 3 && w2Subwaves === 3) {
+      // §2.4: Wave 3 must exceed 100% of Wave 2 for confirmation (> 100%, not <= 99%)
+      const confirmed = w3Covers === undefined ? false : w3Covers > 100;
+      if (w3Covers !== undefined && w3Covers <= 100) {
+        return {
+          hypothesis: 'UNCONFIRMED',
+          isProbableDiagonal: true,
+          isDiagonalConfirmed: false,
+          hasRule3Overlap: hasOverlap,
+          reasonFa: `موج ۱ و ۲ هر دو سه‌موجی هستند اما موج ۳ تنها ${w3Covers}٪ موج ۲ را پوشش داده (< ۱۰۰٪)؛ قطر هنوز تایید نشده است.`
+        };
+      }
+      return {
+        hypothesis: 'DIAGONAL',
+        isProbableDiagonal: true,
+        isDiagonalConfirmed: confirmed,
+        hasRule3Overlap: hasOverlap,
+        reasonFa: confirmed
+          ? hasOverlap
+            ? 'موج ۱ و ۲ سه‌موجی + پوشش > ۱۰۰٪ موج ۲ توسط موج ۳ (حتی با ورود موج ۴ به محدوده ۱): قطر تایید شد.'
+            : 'موج ۱ و ۲ سه‌موجی + پوشش > ۱۰۰٪ موج ۲ توسط موج ۳: الگوی قطر تایید شد.'
+          : 'موج ۱ و ۲ هر دو سه‌موجی هستند: احتمال بالای شکل‌گیری الگوی قطر (در انتظار پوشش ۱۰۰٪ موج ۲).'
+      };
+    }
+
+    return {
+      hypothesis: 'UNCONFIRMED',
+      isProbableDiagonal: false,
+      isDiagonalConfirmed: false,
+      hasRule3Overlap: hasOverlap,
+      reasonFa: 'ساختار ۱ و ۲ با الگوهای استاندارد مطابقت ندارد.'
+    };
+  }
+
+  /**
+   * Session 9 (§2.5):
+   * Leading Diagonal classification when Wave 3 forms as a 3-3-3-3-3 Diagonal:
+   * - W3 = Diagonal (3-3-3-3-3) + W1/W2 = Ideal (5-3) -> LEADING_DIAGONAL
+   * - W3 = Diagonal (3-3-3-3-3) + W1/W2 = Non-Ideal (3-3 / 3-5) -> ANTI_LEADING_DIAGONAL
+   * - W3 = 5-3-5 (or Ideal Cycle) -> NOT Leading Diagonal
+   */
+  public static classifyLeadingDiagonalFromWave3(params: {
+    w3SubwaveCounts: [number, number, number, number, number] | [number, number, number];
+    w1Subwaves: 3 | 5;
+    w2Subwaves: 3 | 5;
+  }): {
+    pattern: 'LEADING_DIAGONAL' | 'ANTI_LEADING_DIAGONAL' | 'NOT_LEADING_DIAGONAL';
+    isLeadingDiagonal: boolean;
+    isAntiLeadingDiagonal: boolean;
+    reasonFa: string;
+  } {
+    const { w3SubwaveCounts, w1Subwaves, w2Subwaves } = params;
+    const isW3Diagonal =
+      w3SubwaveCounts.length === 5 && w3SubwaveCounts.every(c => c === 3);
+
+    if (!isW3Diagonal) {
+      return {
+        pattern: 'NOT_LEADING_DIAGONAL',
+        isLeadingDiagonal: false,
+        isAntiLeadingDiagonal: false,
+        reasonFa: `موج ۳ دارای ساختار ${w3SubwaveCounts.join('-')} است و قطر ۳-۳-۳-۳-۳ نیست؛ قطر پیشرو رد شد.`
+      };
+    }
+
+    const isW1W2Ideal = w1Subwaves === 5 && w2Subwaves === 3;
+    if (isW1W2Ideal) {
+      return {
+        pattern: 'LEADING_DIAGONAL',
+        isLeadingDiagonal: true,
+        isAntiLeadingDiagonal: false,
+        reasonFa: 'موج ۳ به‌صورت قطر ۳-۳-۳-۳-۳ و امواج ۱ و ۲ به‌صورت ایده‌آل ۵-۳ است: الگوی قطر پیشرو (Leading Diagonal) تشخیص داده شد.'
+      };
+    }
+
+    return {
+      pattern: 'ANTI_LEADING_DIAGONAL',
+      isLeadingDiagonal: true,
+      isAntiLeadingDiagonal: true,
+      reasonFa: 'موج ۳ به‌صورت قطر ۳-۳-۳-۳-۳ و امواج ۱ و ۲ غیرایده‌آل است: الگوی قطر پیشرو آنتی (Anti-Leading Diagonal) تشخیص داده شد.'
+    };
+  }
+
+  /**
+   * Session 9 (§2.6):
+   * Impulsive Diagonal (قطر شتابدار):
+   * - ALL 5 waves (1,2,3,4,5) have 3-wave internal structure (NONE is 5-wave).
+   * - Wave 1 = 5-wave -> NOT Impulsive Diagonal (Leading Diagonal / Ideal Cycle with W3 Diagonal).
+   * - Wave 3 = 5-wave -> NOT Impulsive Diagonal.
+   */
+  public static classifyImpulsiveDiagonal(
+    subwaveCounts: [number, number, number, number, number],
+    options?: { hasRule3Overlap?: boolean }
+  ): {
+    isImpulsiveDiagonal: boolean;
+    diagonalType: 'IMPULSIVE_DIAGONAL' | 'LEADING_DIAGONAL' | 'NOT_IMPULSIVE_DIAGONAL';
+    strengthRank: 'STRONGEST_DIAGONAL' | 'SECONDARY' | 'INVALID';
+    hasRule3Overlap: boolean;
+    reasonFa: string;
+  } {
+    const hasOverlap = Boolean(options?.hasRule3Overlap);
+    const allThree = subwaveCounts.every(c => c === 3);
+
+    if (allThree) {
+      return {
+        isImpulsiveDiagonal: true,
+        diagonalType: 'IMPULSIVE_DIAGONAL',
+        strengthRank: 'STRONGEST_DIAGONAL',
+        hasRule3Overlap: hasOverlap,
+        reasonFa: hasOverlap
+          ? 'همه امواج ۱ تا ۵ سه‌موجی (۳-۳-۳-۳-۳) همراه با هم‌پوشانی ۴ و ۱: الگوی قطر شتابدار (قوی‌ترین نوع قطر) تایید شد.'
+          : 'همه امواج ۱ تا ۵ سه‌موجی (۳-۳-۳-۳-۳): الگوی قطر شتابدار (قوی‌ترین نوع قطر) تایید شد.'
+      };
+    }
+
+    if (subwaveCounts[0] === 5 && subwaveCounts[2] === 3) {
+      return {
+        isImpulsiveDiagonal: false,
+        diagonalType: 'LEADING_DIAGONAL',
+        strengthRank: 'SECONDARY',
+        hasRule3Overlap: hasOverlap,
+        reasonFa: 'موج ۱ پنج‌موجی است؛ ساختار قطر شتابدار نیست (ممکن است قطر پیشرو یا سیکل ایده‌آل با قطر در موج ۳ باشد).'
+      };
+    }
+
+    return {
+      isImpulsiveDiagonal: false,
+      diagonalType: 'NOT_IMPULSIVE_DIAGONAL',
+      strengthRank: 'INVALID',
+      hasRule3Overlap: hasOverlap,
+      reasonFa:
+        subwaveCounts[2] === 5
+          ? 'موج ۳ پنج‌موجی است و شرط ساختار تمام‌سه‌موجی قطر شتابدار را نقض می‌کند.'
+          : `ساختار ${subwaveCounts.join('-')} شرط تمام‌سه‌موجی قطر شتابدار (۳-۳-۳-۳-۳) را برآورده نمی‌کند.`
+    };
+  }
+
+  /**
+   * Session 9 (§2.7):
+   * Anti-Diagonal vs Standard Diagonal by Wave 1, 3, 5 strength/length ordering (3-3-3-3-3 structure):
+   * - len1 < len3 < len5 (increasing, broadening wedge) -> ANTI_DIAGONAL
+   * - len1 > len3 > len5 (decreasing, contracting wedge) -> DIAGONAL
+   * - len1 < len3 > len5 (or any non-monotone strength) -> INVALID (neither Diagonal nor Anti-Diagonal)
+   */
+  public static classifyDiagonalStrengthOrder(
+    len1: number,
+    len3: number,
+    len5: number
+  ): {
+    diagonalClass: 'ANTI_DIAGONAL' | 'DIAGONAL' | 'INVALID';
+    strengthPattern: 'INCREASING' | 'DECREASING' | 'MIXED';
+    isBroadeningWedge: boolean;
+    reasonFa: string;
+  } {
+    if (len1 < len3 - 1e-9 && len3 < len5 - 1e-9) {
+      return {
+        diagonalClass: 'ANTI_DIAGONAL',
+        strengthPattern: 'INCREASING',
+        isBroadeningWedge: true,
+        reasonFa: 'قدرت امواج افزایشی است (موج ۱ < موج ۳ < موج ۵) با ساختار قیف بازشونده: الگوی آنتی‌قطر (Anti-Diagonal).'
+      };
+    }
+
+    if (len1 > len3 + 1e-9 && len3 > len5 + 1e-9) {
+      return {
+        diagonalClass: 'DIAGONAL',
+        strengthPattern: 'DECREASING',
+        isBroadeningWedge: false,
+        reasonFa: 'قدرت امواج کاهشی است (موج ۱ > موج ۳ > موج ۵): الگوی قطر معمولی.'
+      };
+    }
+
+    return {
+      diagonalClass: 'INVALID',
+      strengthPattern: 'MIXED',
+      isBroadeningWedge: false,
+      reasonFa: 'ترتیب قدرت امواج (۱ / ۳ / ۵) نه صعودی یکنواخت است و نه نزولی یکنواخت؛ ساختار قطر / آنتی‌قطر نامعتبر است.'
+    };
+  }
+
+  /**
+   * Session 9 (§2.9 & §2.12):
+   * Ending Diagonal (Wave 5 of Ideal/Terminal Cycle forms as 3-3-3-3-3 Diagonal)
+   * and post-Ending-Diagonal reversal drop assessment:
+   * - W5 = Diagonal -> ENDING_DIAGONAL; W3 = Diagonal -> LEADING_DIAGONAL (not Ending Diagonal)
+   * - Sharp drop returning to Diagonal origin (~85..115% of Diagonal span) -> STRONG_SELL (standard)
+   * - Drop < 85% of Diagonal origin -> warning (incomplete / rare shallow return)
+   * - Drop > 115% beyond Diagonal origin -> requires extra confirmation
+   */
+  public static classifyEndingDiagonalContext(params: {
+    cycleType?: 'IDEAL_CYCLE' | 'TERMINAL';
+    diagonalWaveSlot: '1' | '3' | '5' | 'A' | 'C';
+    postDropRetracementPct?: number;
+  }): {
+    pattern: 'ENDING_DIAGONAL' | 'LEADING_DIAGONAL';
+    isEndingDiagonal: boolean;
+    signalStrength: 'STRONG_SELL' | 'WARNING' | 'NEEDS_CONFIRMATION' | 'NONE';
+    dropAssessment: 'STANDARD_TO_ORIGIN' | 'SHALLOW_INCOMPLETE' | 'OVERSHOOT_ORIGIN' | 'PENDING';
+    reasonFa: string;
+  } {
+    const { cycleType = 'IDEAL_CYCLE', diagonalWaveSlot, postDropRetracementPct } = params;
+
+    if (diagonalWaveSlot === '3' || diagonalWaveSlot === '1' || diagonalWaveSlot === 'A') {
+      return {
+        pattern: 'LEADING_DIAGONAL',
+        isEndingDiagonal: false,
+        signalStrength: 'NONE',
+        dropAssessment: 'PENDING',
+        reasonFa: `قطر در موج ${diagonalWaveSlot} تشکیل شده که قطر پیشرو محسوب می‌شود، نه قطر پایانی.`
+      };
+    }
+
+    if (postDropRetracementPct === undefined) {
+      return {
+        pattern: 'ENDING_DIAGONAL',
+        isEndingDiagonal: true,
+        signalStrength: 'NONE',
+        dropAssessment: 'PENDING',
+        reasonFa: `موج ${diagonalWaveSlot} در سیکل ${cycleType === 'TERMINAL' ? 'ترمینال' : 'ایده‌آل'} به‌صورت قطر پایانی شکل گرفته است؛ انتظار بازگشت سریع تا مبدأ قطر.`
+      };
+    }
+
+    if (postDropRetracementPct < 85) {
+      return {
+        pattern: 'ENDING_DIAGONAL',
+        isEndingDiagonal: true,
+        signalStrength: 'WARNING',
+        dropAssessment: 'SHALLOW_INCOMPLETE',
+        reasonFa: `هشدار: ریزش پس از قطر پایانی (${postDropRetracementPct}٪) هنوز به مبدأ قطر (≥۸۵٪–۱۰۰٪) نرسیده است.`
+      };
+    }
+
+    if (postDropRetracementPct > 115) {
+      return {
+        pattern: 'ENDING_DIAGONAL',
+        isEndingDiagonal: true,
+        signalStrength: 'NEEDS_CONFIRMATION',
+        dropAssessment: 'OVERSHOOT_ORIGIN',
+        reasonFa: `ریزش پس از قطر پایانی (${postDropRetracementPct}٪) از مبدأ قطر عبور کرده است و نیاز به تأیید اضافی شکست ساختار دارد.`
+      };
+    }
+
+    return {
+      pattern: 'ENDING_DIAGONAL',
+      isEndingDiagonal: true,
+      signalStrength: 'STRONG_SELL',
+      dropAssessment: 'STANDARD_TO_ORIGIN',
+      reasonFa: `سیگنال فروش قوی: قطر پایانی تکمیل و ریزش سریع تا محدوده شروع قطر (${postDropRetracementPct}٪) تایید شد.`
+    };
+  }
+
+  /**
+   * Session 9 (§2.11):
+   * Post-Diagonal Correction Depth:
+   * - Standard Diagonal + 50%..61.8% -> STANDARD
+   * - Anti-Diagonal + > 61.8% -> STANDARD
+   * - < 50% -> SHALLOW
+   * - > 78.6% (non-anti) -> DEEP_RARE
+   */
+  public static evaluatePostDiagonalCorrection(
+    isAntiDiagonal: boolean,
+    correctionPct: number
+  ): {
+    classification: 'STANDARD' | 'SHALLOW' | 'DEEP_RARE';
+    isStandard: boolean;
+    reasonFa: string;
+  } {
+    if (isAntiDiagonal) {
+      if (correctionPct > 61.8) {
+        return {
+          classification: 'STANDARD',
+          isStandard: true,
+          reasonFa: `اصلاح ${correctionPct}٪ (>۶۱.۸٪) پس از آنتی‌قطر کاملاً استاندارد است.`
+        };
+      }
+      if (correctionPct < 50) {
+        return {
+          classification: 'SHALLOW',
+          isStandard: false,
+          reasonFa: `اصلاح ${correctionPct}٪ (<۵۰٪) پس از آنتی‌قطر کم‌عمق است.`
+        };
+      }
+      return {
+        classification: 'STANDARD',
+        isStandard: true,
+        reasonFa: `اصلاح ${correctionPct}٪ پس از آنتی‌قطر در محدوده قابل قبول است.`
+      };
+    }
+
+    if (correctionPct < 50) {
+      return {
+        classification: 'SHALLOW',
+        isStandard: false,
+        reasonFa: `اصلاح ${correctionPct}٪ (<۵۰٪) پس از قطر معمولی یک اصلاح کم‌عمق است.`
+      };
+    }
+    if (correctionPct <= 61.8) {
+      return {
+        classification: 'STANDARD',
+        isStandard: true,
+        reasonFa: `اصلاح ${correctionPct}٪ در بازه استاندارد ۵۰٪ تا ۶۱.۸٪ پس از قطر معمولی قرار دارد.`
+      };
+    }
+    if (correctionPct <= 78.6) {
+      return {
+        classification: 'STANDARD',
+        isStandard: true,
+        reasonFa: `اصلاح ${correctionPct}٪ پس از قطر قابل قبول (نزدیک ۶۱.۸٪–۷۸.۶٪) است.`
+      };
+    }
+    return {
+      classification: 'DEEP_RARE',
+      isStandard: false,
+      reasonFa: `اصلاح ${correctionPct}٪ (>۷۸.۶٪) پس از قطر معمولی نادر و عمیق است.`
+    };
+  }
+
+  /**
+   * Session 9 (§2.13):
+   * Post-completion Diagonal Trading Decision (avoid trading inside weak Diagonal):
+   * - Wave 5 + Drop confirmed -> SELL_AFTER_DIAGONAL
+   * - Wave 1 + Rise/Breakout confirmed -> BUY_AFTER_DIAGONAL
+   * - Wave 3 or unconfirmed -> WAIT_DO_NOT_TRADE (high risk / rare Wave 3 diagonal)
+   */
+  public static getDiagonalTradingSignal(params: {
+    diagonalWaveSlot: '1' | '3' | '5' | 'A' | 'C';
+    postDropConfirmed?: boolean;
+    postRiseConfirmed?: boolean;
+  }): {
+    action: 'SELL_AFTER_DIAGONAL' | 'BUY_AFTER_DIAGONAL' | 'WAIT_DO_NOT_TRADE';
+    isSafeToTrade: boolean;
+    reasonFa: string;
+  } {
+    const { diagonalWaveSlot, postDropConfirmed, postRiseConfirmed } = params;
+    if (diagonalWaveSlot === '3') {
+      return {
+        action: 'WAIT_DO_NOT_TRADE',
+        isSafeToTrade: false,
+        reasonFa: 'هشدار صبر (جلسه ۹): تشکیل قطر در موج ۳ نادر و پرریسک است؛ تا تایید تکمیل ساختار معامله نکنید.'
+      };
+    }
+
+    if ((diagonalWaveSlot === '5' || diagonalWaveSlot === 'C') && postDropConfirmed) {
+      return {
+        action: 'SELL_AFTER_DIAGONAL',
+        isSafeToTrade: true,
+        reasonFa: `سیگنال فروش پس از قطر پایانی موج ${diagonalWaveSlot}: تکمیل الگو و شروع ریزش تایید شد.`
+      };
+    }
+
+    if ((diagonalWaveSlot === '1' || diagonalWaveSlot === 'A') && postRiseConfirmed) {
+      return {
+        action: 'BUY_AFTER_DIAGONAL',
+        isSafeToTrade: true,
+        reasonFa: `سیگنال خرید پس از قطر پیشرو موج ${diagonalWaveSlot}: شکست و صعود تایید شد.`
+      };
+    }
+
+    return {
+      action: 'WAIT_DO_NOT_TRADE',
+      isSafeToTrade: false,
+      reasonFa: 'قطر نشانه ضعف روند و نوسان پیچیده است؛ تا تکمیل الگو و شکست قطعی از معامله پرهیز کنید.'
     };
   }
 
@@ -380,6 +857,601 @@ export class PatternEngines {
       confidence,
       warnings,
       notes
+    };
+  }
+
+  /**
+   * Session 10 (§2.1):
+   * Intro classification of a corrective wave:
+   * - 3-wave A-B-C -> IDEAL (valid)
+   * - 5-wave (Anti-Cycle) -> NON_IDEAL_VALID (valid)
+   * - Accelerated/impulsive without clear internal count -> IMPULSIVE_ASSUME_3 (assume 3-wave, valid)
+   */
+  public static classifyCorrectiveStructureMode(params: {
+    waveCount: 3 | 5 | 'IMPULSIVE';
+    hasAntiCycle?: boolean;
+  }): {
+    classification: 'IDEAL' | 'NON_IDEAL_VALID' | 'IMPULSIVE_ASSUME_3';
+    isValid: boolean;
+    isIdeal: boolean;
+    assumedWaves: 3 | 5;
+    reasonFa: string;
+  } {
+    if (params.waveCount === 3) {
+      return {
+        classification: 'IDEAL',
+        isValid: true,
+        isIdeal: true,
+        assumedWaves: 3,
+        reasonFa: 'موج اصلاحی با ساختار سه‌موجی (A-B-C): حالت ایده‌آل و معتبر.'
+      };
+    }
+    if (params.waveCount === 5 || params.hasAntiCycle) {
+      return {
+        classification: 'NON_IDEAL_VALID',
+        isValid: true,
+        isIdeal: false,
+        assumedWaves: 5,
+        reasonFa: 'موج اصلاحی پنج‌موجی (آنتی‌سیکل): غیرایده‌آل اما طبق قواعد بهاری معتبر است.'
+      };
+    }
+    return {
+      classification: 'IMPULSIVE_ASSUME_3',
+      isValid: true,
+      isIdeal: false,
+      assumedWaves: 3,
+      reasonFa: 'موج اصلاحی شتابدار بدون ساختار مشخص: فرض ساختار ۳ موجی (A-B-C) لحاظ شد.'
+    };
+  }
+
+  /**
+   * Session 10 (§2.2):
+   * Corrective 3-leg / 5-leg internal signature classifier:
+   * - [5,3,5] -> IDEAL_ZIGZAG
+   * - [3,3,5] -> FLAT
+   * - [3,3,3] (3 legs) -> SIMPLE_ZIGZAG; (5 legs [3,3,3,3,3]) -> TRIANGLE
+   * - [3,5,5] -> ANTI_ZIGZAG
+   * - [5,5,3] or other -> INVALID
+   */
+  public static classifyCorrectiveSignature(
+    subwaves: [number, number, number] | [number, number, number, number, number]
+  ): {
+    pattern: 'IDEAL_ZIGZAG' | 'SIMPLE_ZIGZAG' | 'ANTI_ZIGZAG' | 'FLAT' | 'TRIANGLE' | 'INVALID';
+    isValid: boolean;
+    isIdeal: boolean;
+    reasonFa: string;
+  } {
+    if (subwaves.length === 5) {
+      if (subwaves.every(w => w === 3)) {
+        return {
+          pattern: 'TRIANGLE',
+          isValid: true,
+          isIdeal: true,
+          reasonFa: 'ساختار پنج‌ضلعی ۳-۳-۳-۳-۳: الگوی مثلث اصلاحی.'
+        };
+      }
+      return {
+        pattern: 'INVALID',
+        isValid: false,
+        isIdeal: false,
+        reasonFa: `ساختار ${subwaves.join('-')} برای الگوی اصلاحی ۵ ضلعی نامعتبر است.`
+      };
+    }
+
+    const sig = subwaves.join('-');
+    if (sig === '5-3-5') {
+      return {
+        pattern: 'IDEAL_ZIGZAG',
+        isValid: true,
+        isIdeal: true,
+        reasonFa: 'ساختار ۵-۳-۵: زیگزاگ ایده‌آل (A=۵، B=۳، C=۵).'
+      };
+    }
+    if (sig === '3-3-5') {
+      return {
+        pattern: 'FLAT',
+        isValid: true,
+        isIdeal: true,
+        reasonFa: 'ساختار ۳-۳-۵: الگوی اصلاحی فلت (A=۳، B=۳، C=۵).'
+      };
+    }
+    if (sig === '3-3-3') {
+      return {
+        pattern: 'SIMPLE_ZIGZAG',
+        isValid: true,
+        isIdeal: false,
+        reasonFa: 'ساختار سه‌موجی ۳-۳-۳: زیگزاگ سیمپل.'
+      };
+    }
+    if (sig === '3-5-5') {
+      return {
+        pattern: 'ANTI_ZIGZAG',
+        isValid: true,
+        isIdeal: false,
+        reasonFa: 'ساختار ۳-۵-۵: زیگزاگ آنتی‌ای (غیرایده‌آل).'
+      };
+    }
+    return {
+      pattern: 'INVALID',
+      isValid: false,
+      isIdeal: false,
+      reasonFa: `ساختار ${sig} برای امواج اصلاحی نامعتبر است (نقص ترتیب ۵/۳ در A-B-C).`
+    };
+  }
+
+  /**
+   * Session 10 (§2.3 & §2.4):
+   * Evaluates Zigzag Wave C coverage of Wave B + Ideal (5-3-5) check:
+   * - cCoversB100Pct > 100 -> VALID_ZIGZAG
+   * - cCoversB100Pct == 100 -> BORDERLINE_ZIGZAG (valid borderline)
+   * - cCoversB100Pct < 100 -> INVALID_PROBABLE_FLAT
+   */
+  public static evaluateZigzagWaveC(
+    cCoversB100Pct: number,
+    subwaves?: [3 | 5, 3 | 5, 3 | 5]
+  ): {
+    status: 'VALID_ZIGZAG' | 'BORDERLINE_ZIGZAG' | 'INVALID_PROBABLE_FLAT';
+    isValid: boolean;
+    isBorderline: boolean;
+    isIdeal: boolean;
+    probableAlternative: 'FLAT' | null;
+    reasonFa: string;
+  } {
+    const isIdealSig = subwaves ? subwaves[0] === 5 && subwaves[1] === 3 && subwaves[2] === 5 : false;
+    if (cCoversB100Pct > 100 + 1e-4) {
+      return {
+        status: 'VALID_ZIGZAG',
+        isValid: true,
+        isBorderline: false,
+        isIdeal: isIdealSig,
+        probableAlternative: null,
+        reasonFa: isIdealSig
+          ? `زیگزاگ ایده‌آل (۵-۳-۵): موج C (${cCoversB100Pct}%) بیش از ۱۰۰٪ موج B را پوشش داده است.`
+          : `زیگزاگ معتبر: موج C (${cCoversB100Pct}%) بیش از ۱۰۰٪ موج B را پوشش داده است.`
+      };
+    }
+    if (Math.abs(cCoversB100Pct - 100) <= 1e-4) {
+      return {
+        status: 'BORDERLINE_ZIGZAG',
+        isValid: true,
+        isBorderline: true,
+        isIdeal: isIdealSig,
+        probableAlternative: null,
+        reasonFa: 'زیگزاگ معتبر مرزی: موج C دقیقاً ۱۰۰٪ موج B را پوشش داده است.'
+      };
+    }
+    return {
+      status: 'INVALID_PROBABLE_FLAT',
+      isValid: false,
+      isBorderline: false,
+      isIdeal: false,
+      probableAlternative: 'FLAT',
+      reasonFa: `زیگزاگ نامعتبر: موج C (${cCoversB100Pct}%) کمتر از ۱۰۰٪ موج B را پوشش داده است (احتمالاً فلت).`
+    };
+  }
+
+  /**
+   * Session 10 (§2.5):
+   * Simple Zigzag (3-3-3) boundary rules:
+   * - C < 100% B -> DEFICIENT_FLAT (not Zigzag)
+   * - B > 61.8% A (with 3-3-3) -> COMBINATION_PATTERN (not pure Simple Zigzag)
+   * - B <= 61.8% A & C >= 100% B -> SIMPLE_ZIGZAG
+   */
+  public static classifySimpleZigzag333(params: {
+    subwaves: [number, number, number];
+    bPctOfA: number;
+    cCoversB100Pct: number;
+  }): {
+    classification: 'SIMPLE_ZIGZAG' | 'COMBINATION_PATTERN' | 'DEFICIENT_FLAT' | 'OTHER';
+    isSimpleZigzag: boolean;
+    reasonFa: string;
+  } {
+    const { subwaves, bPctOfA, cCoversB100Pct } = params;
+    const is333 = subwaves[0] === 3 && subwaves[1] === 3 && subwaves[2] === 3;
+    if (!is333) {
+      return {
+        classification: 'OTHER',
+        isSimpleZigzag: false,
+        reasonFa: `ساختار ${subwaves.join('-')} ساختار ۳-۳-۳ زیگزاگ سیمپل نیست.`
+      };
+    }
+    if (cCoversB100Pct < 100 - 1e-6) {
+      return {
+        classification: 'DEFICIENT_FLAT',
+        isSimpleZigzag: false,
+        reasonFa: `ساختار ۳-۳-۳ با پوشش ناکامل موج B (${cCoversB100Pct}% < ۱۰۰٪): فلت ناقص است، نه زیگزاگ سیمپل.`
+      };
+    }
+    if (bPctOfA > 61.8 + 1e-6) {
+      return {
+        classification: 'COMBINATION_PATTERN',
+        isSimpleZigzag: false,
+        reasonFa: `ساختار ۳-۳-۳ با موج B = ${bPctOfA}% (> ۶۱.۸٪ موج A): الگوی ترکیبی (نه زیگزاگ سیمپل خالص).`
+      };
+    }
+    return {
+      classification: 'SIMPLE_ZIGZAG',
+      isSimpleZigzag: true,
+      reasonFa: `زیگزاگ سیمپل (۳-۳-۳): موج B (${bPctOfA}% ≤ ۶۱.۸٪ موج A) و پوشش کامل موج B توسط C (${cCoversB100Pct}%).`
+    };
+  }
+
+  /**
+   * Session 10 (§2.6):
+   * Anti-Zigzag (3-5-5) vs Ideal Zigzag (5-3-5):
+   * - A=3, B=5, C=5 & C >= 100% B -> ANTI_ZIGZAG (valid non-ideal)
+   * - A=3, B=5, C=5 & C < 100% B -> INVALID
+   * - A=5, B=3, C=5 & C >= 100% B -> IDEAL_ZIGZAG
+   */
+  public static classifyAntiZigzag355(params: {
+    subwaves: [number, number, number];
+    cCoversB100Pct: number;
+  }): {
+    classification: 'ANTI_ZIGZAG' | 'IDEAL_ZIGZAG' | 'INVALID';
+    isValid: boolean;
+    isIdeal: boolean;
+    reasonFa: string;
+  } {
+    const { subwaves, cCoversB100Pct } = params;
+    const sig = subwaves.join('-');
+    if (sig === '3-5-5') {
+      if (cCoversB100Pct >= 100 - 1e-6) {
+        return {
+          classification: 'ANTI_ZIGZAG',
+          isValid: true,
+          isIdeal: false,
+          reasonFa: `زیگزاگ آنتی‌ای (۳-۵-۵) معتبر (غیرایده‌آل): موج C (${cCoversB100Pct}%) موج B را پوشش داده است.`
+        };
+      }
+      return {
+        classification: 'INVALID',
+        isValid: false,
+        isIdeal: false,
+        reasonFa: `زیگزاگ آنتی‌ای (۳-۵-۵) نامعتبر: موج C (${cCoversB100Pct}% < ۱۰۰٪) موج B را پوشش نداده است.`
+      };
+    }
+    if (sig === '5-3-5' && cCoversB100Pct >= 100 - 1e-6) {
+      return {
+        classification: 'IDEAL_ZIGZAG',
+        isValid: true,
+        isIdeal: true,
+        reasonFa: 'ساختار ۵-۳-۵ زیگزاگ ایده‌آل است (نه آنتی‌ای).'
+      };
+    }
+    return {
+      classification: 'INVALID',
+      isValid: false,
+      isIdeal: false,
+      reasonFa: `ساختار ${sig} با پوشش ${cCoversB100Pct}% شرط زیگزاگ آنتی‌ای معتبر را ندارد.`
+    };
+  }
+
+  /**
+   * Session 10 (§2.8):
+   * Zigzag naming based on 3-point Fibonacci Projection of Wave C relative to Wave A:
+   * - C < 61.8% A -> INVALID (probable Flat)
+   * - 61.8% <= C < 100% A -> TRUNCATED (کوتاه‌شده)
+   * - 100% <= C <= 161.8% A -> NORMAL (معمولی)
+   * - C > 161.8% A -> EXTENDED (کشیده)
+   */
+  public static classifyZigzagByWaveCProjection(
+    cProjectionPctOfA: number
+  ): {
+    type: 'TRUNCATED' | 'NORMAL' | 'EXTENDED' | 'INVALID';
+    labelFa: string;
+    isValid: boolean;
+    isBorderline: boolean;
+    probableAlternative: 'FLAT' | null;
+    reasonFa: string;
+  } {
+    if (cProjectionPctOfA < 61.8 - 1e-4) {
+      return {
+        type: 'INVALID',
+        labelFa: 'نامعتبر (احتمالاً فلت)',
+        isValid: false,
+        isBorderline: false,
+        probableAlternative: 'FLAT',
+        reasonFa: `موج C برابر ${cProjectionPctOfA}% موج A (< ۶۱.۸٪) است؛ زیگزاگ نامعتبر و احتمالاً فلت است.`
+      };
+    }
+    if (cProjectionPctOfA < 100 - 1e-4) {
+      const isBorder = Math.abs(cProjectionPctOfA - 61.8) <= 1e-4;
+      return {
+        type: 'TRUNCATED',
+        labelFa: 'زیگزاگ کوتاه‌شده (Truncated)',
+        isValid: true,
+        isBorderline: isBorder,
+        probableAlternative: null,
+        reasonFa: `موج C برابر ${cProjectionPctOfA}% موج A (بین ۶۱.۸٪ و ۱۰۰٪): زیگزاگ کوتاه‌شده.`
+      };
+    }
+    if (cProjectionPctOfA <= 161.8 + 1e-4) {
+      const isBorder = Math.abs(cProjectionPctOfA - 100) <= 1e-4 || Math.abs(cProjectionPctOfA - 161.8) <= 1e-4;
+      return {
+        type: 'NORMAL',
+        labelFa: 'زیگزاگ معمولی (Normal)',
+        isValid: true,
+        isBorderline: isBorder,
+        probableAlternative: null,
+        reasonFa: `موج C برابر ${cProjectionPctOfA}% موج A (بین ۱۰۰٪ تا ۱۶۱.۸٪): زیگزاگ معمولی.`
+      };
+    }
+    return {
+      type: 'EXTENDED',
+      labelFa: 'زیگزاگ کشیده (Extended)',
+      isValid: true,
+      isBorderline: false,
+      probableAlternative: null,
+      reasonFa: `موج C برابر ${cProjectionPctOfA}% موج A (> ۱۶۱.۸٪): زیگزاگ کشیده.`
+    };
+  }
+
+  /**
+   * Session 10 (§2.9):
+   * Post-pattern initial move target after Zigzag completion based on Zigzag type & Wave B size:
+   * - NORMAL: B > 61.8% -> 61.8% of FULL_PATTERN; B <= 61.8% -> 38.2% of FULL_PATTERN
+   * - TRUNCATED: B > 61.8% -> 61.8% (or 81%) of WAVE_C; B <= 61.8% -> 38.2% of FULL_PATTERN
+   * - EXTENDED: B > 61.8% -> 38.2% of FULL_PATTERN; B <= 61.8% -> 23.6% of FULL_PATTERN
+   */
+  public static getZigzagPostPatternTarget(params: {
+    zigzagType: 'TRUNCATED' | 'NORMAL' | 'EXTENDED';
+    bPctOfA: number;
+  }): {
+    targetPct: number;
+    altTargetPct?: number;
+    referenceBase: 'FULL_PATTERN' | 'WAVE_C';
+    isLargeB: boolean;
+    reasonFa: string;
+  } {
+    const isLargeB = params.bPctOfA > 61.8;
+    if (params.zigzagType === 'NORMAL') {
+      return isLargeB
+        ? {
+            targetPct: 61.8,
+            referenceBase: 'FULL_PATTERN',
+            isLargeB,
+            reasonFa: 'زیگزاگ معمولی با موج B بزرگ (> ۶۱.۸٪): هدف اولیه حرکت پساالگویی ۶۱.۸٪ کل الگو است.'
+          }
+        : {
+            targetPct: 38.2,
+            referenceBase: 'FULL_PATTERN',
+            isLargeB,
+            reasonFa: 'زیگزاگ معمولی با موج B کوچک (≤ ۶۱.۸٪): هدف اولیه حرکت پساالگویی ۳۸.۲٪ کل الگو است.'
+          };
+    }
+    if (params.zigzagType === 'TRUNCATED') {
+      return isLargeB
+        ? {
+            targetPct: 61.8,
+            altTargetPct: 81,
+            referenceBase: 'WAVE_C',
+            isLargeB,
+            reasonFa: 'زیگزاگ کوتاه‌شده با موج B بزرگ (> ۶۱.۸٪): هدف اولیه ۶۱.۸٪ یا ۸۱٪ موج C است.'
+          }
+        : {
+            targetPct: 38.2,
+            referenceBase: 'FULL_PATTERN',
+            isLargeB,
+            reasonFa: 'زیگزاگ کوتاه‌شده با موج B کوچک (≤ ۶۱.۸٪): هدف اولیه ۳۸.۲٪ کل الگو است.'
+          };
+    }
+    return isLargeB
+      ? {
+          targetPct: 38.2,
+          referenceBase: 'FULL_PATTERN',
+          isLargeB,
+          reasonFa: 'زیگزاگ کشیده با موج B بزرگ (> ۶۱.۸٪): هدف اولیه ۳۸.۲٪ کل الگو است.'
+        }
+      : {
+          targetPct: 23.6,
+          referenceBase: 'FULL_PATTERN',
+          isLargeB,
+          reasonFa: 'زیگزاگ کشیده با موج B کوچک (≤ ۶۱.۸٪): هدف اولیه ۲۳.۶٪ کل الگو است.'
+        };
+  }
+
+  /**
+   * Session 10 (§2.10):
+   * Key 38.2% & 61.8% Zigzag post-pattern targeting & PRZ confluence:
+   * - HIGH validity: 38.2% FULL overlaps 61.8% C
+   * - MEDIUM validity: 61.8% FULL overlaps 100% C (or 81% C in Truncated Zigzag)
+   * - LOW validity: no overlap
+   */
+  public static evaluateZigzagTargetConfluence(params: {
+    zigzagType: 'TRUNCATED' | 'NORMAL' | 'EXTENDED';
+    fullPattern382Price: number;
+    fullPattern618Price: number;
+    waveC618Price?: number;
+    waveC810Price?: number;
+    waveC100Price?: number;
+    tolerancePct?: number;
+  }): {
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    overlapPairs: string[];
+    primaryTargetPct: 38.2 | 61.8;
+    reasonFa: string;
+  } {
+    const tol = params.tolerancePct ?? 2.5;
+    const isNear = (a?: number, b?: number) => {
+      if (a === undefined || b === undefined) return false;
+      const denom = Math.max(1e-6, Math.abs(a));
+      return (Math.abs(a - b) / denom) * 100 <= tol;
+    };
+
+    const overlapPairs: string[] = [];
+    if (isNear(params.fullPattern382Price, params.waveC618Price)) {
+      overlapPairs.push('38.2% کل الگو ≈ 61.8% موج C');
+    }
+    if (isNear(params.fullPattern618Price, params.waveC100Price)) {
+      overlapPairs.push('61.8% کل الگو ≈ 100% موج C');
+    }
+    if (params.zigzagType === 'TRUNCATED' && isNear(params.fullPattern618Price, params.waveC810Price)) {
+      overlapPairs.push('61.8% کل الگو ≈ 81% موج C');
+    }
+
+    const primaryTargetPct: 38.2 | 61.8 = params.zigzagType === 'EXTENDED' ? 38.2 : 61.8;
+    if (overlapPairs.includes('38.2% کل الگو ≈ 61.8% موج C')) {
+      return {
+        confidence: 'HIGH',
+        overlapPairs,
+        primaryTargetPct,
+        reasonFa: 'اعتبار بالا (PRZ همپوشان): تراز ۳۸.۲٪ کل الگو با ۶۱.۸٪ موج C همپوشانی دارد.'
+      };
+    }
+    if (overlapPairs.length > 0) {
+      return {
+        confidence: 'MEDIUM',
+        overlapPairs,
+        primaryTargetPct,
+        reasonFa: `اعتبار متوسط: همپوشانی ${overlapPairs.join(' و ')} شناسایی شد.`
+      };
+    }
+    return {
+      confidence: 'LOW',
+      overlapPairs: [],
+      primaryTargetPct,
+      reasonFa: 'اعتبار کم: همپوشانی مستقیمی بین ترازهای ۳۸.۲٪/۶۱.۸٪ کل الگو و موج C وجود ندارد.'
+    };
+  }
+
+  /**
+   * Session 10 (§2.12):
+   * Evaluates correspondence between Ideal Zigzag (5-3-5) and Harmonic AB=CD:
+   * - |C - A| / A == 0 -> EXACT_ABCD (isABCD: true)
+   * - |C - A| / A <= 5% -> APPROX_ABCD (isABCD: true, isApproximate: true)
+   * - |C - A| / A > 5% -> NOT_ABCD (isABCD: false, standard Zigzag)
+   */
+  public static evaluateZigzagAsABCD(
+    lenA: number,
+    lenC: number
+  ): {
+    classification: 'EXACT_ABCD' | 'APPROX_ABCD' | 'NOT_ABCD';
+    isABCD: boolean;
+    isApproximate: boolean;
+    diffPct: number;
+    ratioCA: number;
+    reasonFa: string;
+  } {
+    const safeA = Math.max(1e-9, Math.abs(lenA));
+    const safeC = Math.abs(lenC);
+    const diffPct = Math.round((Math.abs(safeC - safeA) / safeA) * 10000) / 100;
+    const ratioCA = Math.round((safeC / safeA) * 1000) / 1000;
+
+    if (diffPct <= 1e-3) {
+      return {
+        classification: 'EXACT_ABCD',
+        isABCD: true,
+        isApproximate: false,
+        diffPct: 0,
+        ratioCA,
+        reasonFa: 'الگوی دقیق AB=CD (طول موج C دقیقاً برابر طول موج A — زیرمجموعه زیگزاگ ایده‌آل ۵-۳-۵).'
+      };
+    }
+    if (diffPct <= 5 + 1e-4) {
+      return {
+        classification: 'APPROX_ABCD',
+        isABCD: true,
+        isApproximate: true,
+        diffPct,
+        ratioCA,
+        reasonFa: `الگوی تقریبی AB=CD (اختلاف ${diffPct}% ≤ ۵٪ بین موج A و C).`
+      };
+    }
+    return {
+      classification: 'NOT_ABCD',
+      isABCD: false,
+      isApproximate: false,
+      diffPct,
+      ratioCA,
+      reasonFa: `زیگزاگ معمولی بدون تناسب AB=CD (اختلاف ${diffPct}% > ۵٪ بین طول A و C).`
+    };
+  }
+
+  /**
+   * Session 10 (§2.14 practical workflow):
+   * End-to-end Zigzag analyzer combining:
+   * 1) Internal structure (5-3-5 / 3-3-3 / 3-5-5)
+   * 2) Hard rule C >= 100% B
+   * 3) Naming by Wave C projection vs A (TRUNCATED / NORMAL / EXTENDED / INVALID)
+   * 4) Post-pattern target based on Wave B & Zigzag type
+   * 5) Setup readiness at completion of Wave C
+   */
+  public static analyzeZigzagWorkflow(params: {
+    symbol?: string;
+    subwaves: [3 | 5, 3 | 5, 3 | 5];
+    bPctOfA: number;
+    cCoversB100Pct: number;
+    cProjectionPctOfA: number;
+    isMarketEnd?: boolean;
+  }): {
+    isValid: boolean;
+    structureType: 'IDEAL_ZIGZAG' | 'SIMPLE_ZIGZAG' | 'ANTI_ZIGZAG' | 'COMBINATION_PATTERN' | 'DEFICIENT_FLAT' | 'INVALID';
+    projectionType: 'TRUNCATED' | 'NORMAL' | 'EXTENDED' | 'INVALID';
+    postPatternTarget: ReturnType<typeof PatternEngines.getZigzagPostPatternTarget> | null;
+    setupRecommended: boolean;
+    marketEndConfidence: 'HIGH' | 'LOW';
+    summaryFa: string;
+  } {
+    const sig = PatternEngines.classifyCorrectiveSignature(params.subwaves);
+    const cCov = PatternEngines.evaluateZigzagWaveC(params.cCoversB100Pct, params.subwaves);
+    const proj = PatternEngines.classifyZigzagByWaveCProjection(params.cProjectionPctOfA);
+
+    let structureType: 'IDEAL_ZIGZAG' | 'SIMPLE_ZIGZAG' | 'ANTI_ZIGZAG' | 'COMBINATION_PATTERN' | 'DEFICIENT_FLAT' | 'INVALID' =
+      sig.pattern === 'IDEAL_ZIGZAG'
+        ? 'IDEAL_ZIGZAG'
+        : sig.pattern === 'SIMPLE_ZIGZAG'
+        ? 'SIMPLE_ZIGZAG'
+        : sig.pattern === 'ANTI_ZIGZAG'
+        ? 'ANTI_ZIGZAG'
+        : 'INVALID';
+
+    if (sig.pattern === 'SIMPLE_ZIGZAG') {
+      const s333 = PatternEngines.classifySimpleZigzag333({
+        subwaves: params.subwaves,
+        bPctOfA: params.bPctOfA,
+        cCoversB100Pct: params.cCoversB100Pct
+      });
+      if (s333.classification === 'COMBINATION_PATTERN') structureType = 'COMBINATION_PATTERN';
+      else if (s333.classification === 'DEFICIENT_FLAT') structureType = 'DEFICIENT_FLAT';
+    } else if (sig.pattern === 'ANTI_ZIGZAG') {
+      const a355 = PatternEngines.classifyAntiZigzag355({
+        subwaves: params.subwaves,
+        cCoversB100Pct: params.cCoversB100Pct
+      });
+      if (!a355.isValid) structureType = 'INVALID';
+    }
+
+    const isValid =
+      sig.isValid &&
+      cCov.isValid &&
+      proj.isValid &&
+      (structureType === 'IDEAL_ZIGZAG' || structureType === 'SIMPLE_ZIGZAG' || structureType === 'ANTI_ZIGZAG');
+
+    const postPatternTarget =
+      isValid && proj.type !== 'INVALID'
+        ? PatternEngines.getZigzagPostPatternTarget({
+            zigzagType: proj.type,
+            bPctOfA: params.bPctOfA
+          })
+        : null;
+
+    const marketEndConfidence: 'HIGH' | 'LOW' = params.isMarketEnd ? 'LOW' : 'HIGH';
+    const prefix = params.symbol ? `${params.symbol}: ` : '';
+    const marketEndNote = params.isMarketEnd
+      ? ' — هشدار انتهای بازار: اعتبار پایین و احتمال تبدیل به فلت یا مثلث.'
+      : '';
+    const summaryFa = isValid
+      ? `${prefix}${proj.labelFa} با ساختار ${params.subwaves.join('-')} (${structureType}) — هدف پساالگویی: ${postPatternTarget?.targetPct}%${marketEndNote}`
+      : `${prefix}الگوی زیگزاگ نامعتبر (${cCov.reasonFa})`;
+
+    return {
+      isValid,
+      structureType,
+      projectionType: proj.type,
+      postPatternTarget,
+      setupRecommended: isValid && !params.isMarketEnd,
+      marketEndConfidence,
+      summaryFa
     };
   }
 

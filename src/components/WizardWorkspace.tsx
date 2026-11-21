@@ -35,6 +35,13 @@ import {
   SCENARIO_COLORS,
   inferWaveRole
 } from '../engine/rulesEngine';
+import {
+  alignSubwaveToParentInterval,
+  resolveWindowCandleBounds,
+  syncFractalHierarchyBottomUp,
+  syncFractalHierarchyTopDown,
+  isPatternAllowedForRole
+} from '../engine/fractalSyncEngine';
 import { ChartStudio, ChartInteractionMode } from './ChartStudio';
 import { WizardStep1Timeframes } from './WizardStep1Timeframes';
 import { WizardStep2Scenarios } from './WizardStep2Scenarios';
@@ -417,7 +424,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
       if (targetIdx > lowestIdx || currentDegLevel >= asset.maxAllowedDegree) return;
 
       const legLabel = `موج ${vStart.label}→${vEnd.label}`;
-      const role = inferWaveRole(vEnd.label);
+      const role = inferWaveRole(vEnd.label, parentScenario.patternType);
       const direction = vEnd.price >= vStart.price ? 'BULLISH' : 'BEARISH';
       const targetDegree = getLowerDegree(parentScenario.degree);
       const key = `${parentNodeId}__${parentScenario.id}__leg${legIndex}__${targetTF}`;
@@ -447,17 +454,13 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
           endTs: drillCtx.endTimestamp
         });
 
-        let startIdx = legCandles.findIndex(c => c.timestamp >= drillCtx.startTimestamp);
-        if (startIdx < 0) startIdx = 0;
-        let endIdx = legCandles.length - 1;
-        for (let i = legCandles.length - 1; i >= startIdx; i--) {
-          if (legCandles[i].timestamp <= drillCtx.endTimestamp) {
-            endIdx = i;
-            break;
-          }
-        }
+        const { startIdx, endIdx } = resolveWindowCandleBounds(
+          legCandles,
+          drillCtx.startTimestamp,
+          drillCtx.endTimestamp
+        );
 
-        const generated = RulesEngine.generateCandidateScenarios(
+        const rawGenerated = RulesEngine.generateCandidateScenarios(
           legCandles,
           targetTF,
           targetDegree,
@@ -468,6 +471,35 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
           legLabel,
           endIdx
         );
+
+        const generated = rawGenerated.map(sc => {
+          const aligned = alignSubwaveToParentInterval(
+            sc.vertices,
+            startIdx,
+            endIdx,
+            legCandles,
+            vStart.price,
+            vEnd.price
+          );
+          const val = RulesEngine.validateStructure(
+            sc.patternType,
+            aligned,
+            sc.direction,
+            role,
+            legLabel,
+            legCandles
+          );
+          return {
+            ...sc,
+            vertices: aligned,
+            validityScore: val.validityScore,
+            idealnessScore: val.idealnessScore,
+            confidenceScore: val.confidenceScore,
+            invalidationPrice: val.invalidationPrice,
+            targets: val.targets,
+            rulesResults: val.rules
+          };
+        });
 
         setSubScenariosByKey(prev => ({ ...prev, [key]: generated }));
         if (generated[0]) {
@@ -669,60 +701,115 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
   const handleUpdateVertices = (newVertices: WaveVertex[], targetScenarioId?: string) => {
     const targetId = targetScenarioId || activeScenarioForChart.id;
     if (step === 2 || (step === 3 && !currentDrill)) {
-      setMacroScenarios(prev =>
-        prev.map(sc => {
-          if (sc.id !== targetId) return sc;
-          const val = RulesEngine.validateStructure(sc.patternType, newVertices, sc.direction);
-          if (step === 3) {
-            const hardValid = val.rules.filter(r => r.type === 'HARD').every(r => r.passed);
-            setFractalTreeNodes(nodes =>
-              nodes.map(n =>
-                n.scenarioId === sc.id
-                  ? { ...n, vertices: newVertices, validityScore: val.validityScore, isValid: hardValid }
-                  : n
-              )
-            );
-          }
-          return {
-            ...sc,
-            vertices: newVertices,
-            validityScore: val.validityScore,
-            idealnessScore: val.idealnessScore,
-            confidenceScore: val.confidenceScore,
-            invalidationPrice: val.invalidationPrice,
-            targets: val.targets,
-            rulesResults: val.rules,
-            source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
-          };
-        })
-      );
-    } else if (step === 3 && currentDrill) {
-      setSubScenariosByKey(prev => {
-        const list = prev[currentDrillKey] || [];
-        const updatedList: WaveScenario[] = list.map((sc): WaveScenario => {
-          if (sc.id !== targetId) return sc;
-          const val = RulesEngine.validateStructure(
-            sc.patternType,
-            newVertices,
-            sc.direction,
-            currentDrill.role,
-            currentDrill.waveLabel
-          );
-          return {
-            ...sc,
-            vertices: newVertices,
-            validityScore: val.validityScore,
-            idealnessScore: val.idealnessScore,
-            confidenceScore: val.confidenceScore,
-            invalidationPrice: val.invalidationPrice,
-            targets: val.targets,
-            rulesResults: val.rules,
-            source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
-          };
-        });
-        syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill, drillStack);
-        return { ...prev, [currentDrillKey]: updatedList };
+      let editedMacro: WaveScenario | null = null;
+      const nextMacro = macroScenarios.map(sc => {
+        if (sc.id !== targetId) return sc;
+        const val = RulesEngine.validateStructure(sc.patternType, newVertices, sc.direction, 'ROOT', '', highestTfCandles);
+        editedMacro = {
+          ...sc,
+          vertices: newVertices,
+          validityScore: val.validityScore,
+          idealnessScore: val.idealnessScore,
+          confidenceScore: val.confidenceScore,
+          invalidationPrice: val.invalidationPrice,
+          targets: val.targets,
+          rulesResults: val.rules,
+          source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
+        };
+        return editedMacro;
       });
+      setMacroScenarios(nextMacro);
+
+      if (step === 3 && editedMacro) {
+        const scObj: WaveScenario = editedMacro;
+        const hardValid = scObj.rulesResults.filter(r => r.type === 'HARD').every(r => r.passed);
+        const updatedTree = fractalTreeNodes.map(n =>
+          n.scenarioId === scObj.id
+            ? {
+                ...n,
+                vertices: newVertices,
+                startPrice: newVertices[0]?.price ?? n.startPrice,
+                endPrice: newVertices[newVertices.length - 1]?.price ?? n.endPrice,
+                startTimestamp: newVertices[0]?.timestamp ?? n.startTimestamp,
+                endTimestamp: newVertices[newVertices.length - 1]?.timestamp ?? n.endTimestamp,
+                validityScore: scObj.validityScore,
+                isValid: hardValid
+              }
+            : n
+        );
+        const topDown = syncFractalHierarchyTopDown({
+          assetId: asset.id,
+          parentScenario: scObj,
+          parentNodeKeyOrId: `node_${scObj.id}`,
+          subScenariosByKey,
+          fractalTreeNodes: updatedTree
+        });
+        setSubScenariosByKey(topDown.subScenariosByKey);
+        setFractalTreeNodes(topDown.fractalTreeNodes || updatedTree);
+      }
+    } else if (step === 3 && currentDrill) {
+      const list = subScenariosByKey[currentDrillKey] || [];
+      const bounds = resolveWindowCandleBounds(
+        activeChartCandles,
+        currentDrill.startTimestamp,
+        currentDrill.endTimestamp
+      );
+      let editedChild: WaveScenario | null = null;
+
+      const updatedList: WaveScenario[] = list.map((sc): WaveScenario => {
+        if (sc.id !== targetId) return sc;
+        const alignedVerts = alignSubwaveToParentInterval(
+          newVertices,
+          bounds.startIdx,
+          bounds.endIdx,
+          activeChartCandles
+        );
+        const val = RulesEngine.validateStructure(
+          sc.patternType,
+          alignedVerts,
+          sc.direction,
+          currentDrill.role,
+          currentDrill.waveLabel,
+          activeChartCandles
+        );
+        editedChild = {
+          ...sc,
+          vertices: alignedVerts,
+          validityScore: val.validityScore,
+          idealnessScore: val.idealnessScore,
+          confidenceScore: val.confidenceScore,
+          invalidationPrice: val.invalidationPrice,
+          targets: val.targets,
+          rulesResults: val.rules,
+          source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
+        };
+        return editedChild;
+      });
+
+      const baseSubMap = { ...subScenariosByKey, [currentDrillKey]: updatedList };
+      if (editedChild) {
+        const synced = syncFractalHierarchyBottomUp({
+          assetId: asset.id,
+          highestTimeframe: confirmedHighestTF,
+          highestCandles: highestTfCandles,
+          drillStack,
+          editedScenario: editedChild,
+          subScenariosByKey: baseSubMap,
+          macroScenarios,
+          fractalTreeNodes
+        });
+        setMacroScenarios(synced.macroScenarios);
+        setSubScenariosByKey(synced.subScenariosByKey);
+        setDrillStack(synced.drillStack);
+        if (synced.fractalTreeNodes) {
+          setFractalTreeNodes(synced.fractalTreeNodes);
+        }
+        const activeDrill = synced.drillStack[synced.drillStack.length - 1] || currentDrill;
+        syncChildrenInTree(activeDrill.nodeId, updatedList, activeDrill, synced.drillStack);
+      } else {
+        setSubScenariosByKey(baseSubMap);
+        syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill, drillStack);
+      }
     }
   };
 
@@ -733,7 +820,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
       setMacroScenarios(prev =>
         prev.map(sc => {
           if (sc.id !== targetId) return sc;
-          const val = RulesEngine.validateStructure(newPattern, sc.vertices, sc.direction);
+          const val = RulesEngine.validateStructure(newPattern, sc.vertices, sc.direction, 'ROOT', '', highestTfCandles);
           if (step === 3) {
             const hardValid = val.rules.filter(r => r.type === 'HARD').every(r => r.passed);
             setFractalTreeNodes(nodes =>
@@ -758,32 +845,58 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
         })
       );
     } else if (step === 3 && currentDrill) {
-      setSubScenariosByKey(prev => {
-        const list = prev[currentDrillKey] || [];
-        const updatedList: WaveScenario[] = list.map((sc): WaveScenario => {
-          if (sc.id !== targetId) return sc;
-          const val = RulesEngine.validateStructure(
-            newPattern,
-            sc.vertices,
-            sc.direction,
-            currentDrill.role,
-            currentDrill.waveLabel
-          );
-          return {
-            ...sc,
-            patternType: newPattern,
-            validityScore: val.validityScore,
-            idealnessScore: val.idealnessScore,
-            confidenceScore: val.confidenceScore,
-            invalidationPrice: val.invalidationPrice,
-            targets: val.targets,
-            rulesResults: val.rules,
-            source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
-          };
-        });
-        syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill, drillStack);
-        return { ...prev, [currentDrillKey]: updatedList };
+      if (!isPatternAllowedForRole(newPattern, currentDrill.role)) {
+        return;
+      }
+      const list = subScenariosByKey[currentDrillKey] || [];
+      let editedChild: WaveScenario | null = null;
+      const updatedList: WaveScenario[] = list.map((sc): WaveScenario => {
+        if (sc.id !== targetId) return sc;
+        const val = RulesEngine.validateStructure(
+          newPattern,
+          sc.vertices,
+          sc.direction,
+          currentDrill.role,
+          currentDrill.waveLabel,
+          activeChartCandles
+        );
+        editedChild = {
+          ...sc,
+          patternType: newPattern,
+          validityScore: val.validityScore,
+          idealnessScore: val.idealnessScore,
+          confidenceScore: val.confidenceScore,
+          invalidationPrice: val.invalidationPrice,
+          targets: val.targets,
+          rulesResults: val.rules,
+          source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
+        };
+        return editedChild;
       });
+      const baseSubMap = { ...subScenariosByKey, [currentDrillKey]: updatedList };
+      if (editedChild) {
+        const synced = syncFractalHierarchyBottomUp({
+          assetId: asset.id,
+          highestTimeframe: confirmedHighestTF,
+          highestCandles: highestTfCandles,
+          drillStack,
+          editedScenario: editedChild,
+          subScenariosByKey: baseSubMap,
+          macroScenarios,
+          fractalTreeNodes
+        });
+        setMacroScenarios(synced.macroScenarios);
+        setSubScenariosByKey(synced.subScenariosByKey);
+        setDrillStack(synced.drillStack);
+        if (synced.fractalTreeNodes) {
+          setFractalTreeNodes(synced.fractalTreeNodes);
+        }
+        const activeDrill = synced.drillStack[synced.drillStack.length - 1] || currentDrill;
+        syncChildrenInTree(activeDrill.nodeId, updatedList, activeDrill, synced.drillStack);
+      } else {
+        setSubScenariosByKey(baseSubMap);
+        syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill, drillStack);
+      }
     }
   };
 
@@ -816,25 +929,46 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
         );
       }
     } else if (step === 3 && currentDrill) {
-      setSubScenariosByKey(prev => {
-        const list = prev[currentDrillKey] || [];
-        const updatedList: WaveScenario[] = list.map(sc =>
-          sc.id === scenarioId
-            ? {
-                ...sc,
-                patternType: summary.patternType,
-                validityScore: summary.validityScore,
-                idealnessScore: summary.idealnessScore,
-                confidenceScore: summary.confidenceScore,
-                invalidationPrice: summary.invalidationPrice,
-                targets: summary.targets,
-                rulesResults: summary.rules
-              }
-            : sc
-        );
-        syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill, drillStack);
-        return { ...prev, [currentDrillKey]: updatedList };
+      const list = subScenariosByKey[currentDrillKey] || [];
+      let validatedChild: WaveScenario | null = null;
+      const updatedList: WaveScenario[] = list.map(sc => {
+        if (sc.id !== scenarioId) return sc;
+        validatedChild = {
+          ...sc,
+          patternType: summary.patternType,
+          validityScore: summary.validityScore,
+          idealnessScore: summary.idealnessScore,
+          confidenceScore: summary.confidenceScore,
+          invalidationPrice: summary.invalidationPrice,
+          targets: summary.targets,
+          rulesResults: summary.rules
+        };
+        return validatedChild;
       });
+      const baseSubMap = { ...subScenariosByKey, [currentDrillKey]: updatedList };
+      if (validatedChild) {
+        const synced = syncFractalHierarchyBottomUp({
+          assetId: asset.id,
+          highestTimeframe: confirmedHighestTF,
+          highestCandles: highestTfCandles,
+          drillStack,
+          editedScenario: validatedChild,
+          subScenariosByKey: baseSubMap,
+          macroScenarios,
+          fractalTreeNodes
+        });
+        setMacroScenarios(synced.macroScenarios);
+        setSubScenariosByKey(synced.subScenariosByKey);
+        setDrillStack(synced.drillStack);
+        if (synced.fractalTreeNodes) {
+          setFractalTreeNodes(synced.fractalTreeNodes);
+        }
+        const activeDrill = synced.drillStack[synced.drillStack.length - 1] || currentDrill;
+        syncChildrenInTree(activeDrill.nodeId, updatedList, activeDrill, synced.drillStack);
+      } else {
+        setSubScenariosByKey(baseSubMap);
+        syncChildrenInTree(currentDrill.nodeId, updatedList, currentDrill, drillStack);
+      }
     }
   };
 

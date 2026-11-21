@@ -15,6 +15,7 @@ import {
   WaveVertex
 } from '../types/elliott';
 import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole } from '../engine/rulesEngine';
+import { filterPatternsForRole } from '../engine/fractalSyncEngine';
 import { DEGREE_CONFIGS } from '../engine/fractalEngine';
 import { getLowerTimeframe } from '../data/sampleMarketData';
 import { ChartInteractionMode } from './ChartStudio';
@@ -223,7 +224,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
       const nodeLegs = nodeScenario.vertices.slice(0, -1).map((vStart, legIdx) => {
         const vEnd = nodeScenario.vertices[legIdx + 1];
         const legLabel = `موج ${vStart.label}→${vEnd.label}`;
-        const role = inferWaveRole(vEnd.label);
+        const role = inferWaveRole(vEnd.label, nodeScenario.patternType);
         const childBranches = node.children.filter(c =>
           c.legIndex !== undefined ? c.legIndex === legIdx : c.waveLabel === legLabel
         );
@@ -452,7 +453,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   // Wave legs of the currently displayed scenario (either Level 1 root or current sub-scenario)
   const waveLegs = activeLevelScenario.vertices.slice(0, -1).map((vStart, idx) => {
     const vEnd = activeLevelScenario.vertices[idx + 1];
-    const role = inferWaveRole(vEnd.label);
+    const role = inferWaveRole(vEnd.label, activeLevelScenario.patternType);
     const pctChange = vStart.price > 0 ? Math.round(((vEnd.price - vStart.price) / vStart.price) * 1000) / 10 : 0;
     const legLabel = `موج ${vStart.label}→${vEnd.label}`;
 
@@ -1119,7 +1120,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                   onChange={e => onPatternChange(e.target.value as PatternFamily)}
                   className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                 >
-                  {(Object.keys(PATTERN_LABELS_FA) as PatternFamily[]).map(pf => (
+                  {filterPatternsForRole(currentDrill?.role || 'ROOT').map(pf => (
                     <option key={pf} value={pf}>
                       {PATTERN_LABELS_FA[pf]}
                     </option>
@@ -1144,7 +1145,10 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                   onClick={() => {
                     const verts = activeLevelScenario.vertices;
                     const last = verts[verts.length - 1];
-                    const defaultLabels = ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C', 'D', 'E'];
+                    const defaultLabels =
+                      currentDrill?.role === 'CORRECTIVE'
+                        ? ['0', 'A', 'B', 'C', 'D', 'E']
+                        : ['0', '1', '2', '3', '4', '5'];
                     const nextLabel = defaultLabels[verts.length] || `W${verts.length}`;
                     onUpdateVertices([
                       ...verts,

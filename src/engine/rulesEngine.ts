@@ -121,9 +121,32 @@ export const PATTERN_LABELS_FA: Record<PatternFamily, string> = {
   COMPLEX_COMBINATION: 'ساختار ترکیبی (W-X-Y)'
 };
 
-export function inferWaveRole(label: string): WaveRole {
+export function inferWaveRole(label: string, parentPatternType?: PatternFamily): WaveRole {
   const clean = label.replace(/[()VW\s]/g, '').toUpperCase();
-  if (['2', '4', 'B', 'X', 'D'].includes(clean)) return 'CORRECTIVE';
+  if (parentPatternType) {
+    if (
+      parentPatternType === 'TRIANGLE_CONVERGING' ||
+      parentPatternType === 'TRIANGLE_EXPANDING' ||
+      parentPatternType === 'COMPLEX_COMBINATION' ||
+      parentPatternType === 'ENDING_DIAGONAL' ||
+      parentPatternType === 'ANTI_DIAGONAL' ||
+      parentPatternType === 'LEADING_DIAGONAL' ||
+      parentPatternType === 'ANTI_LEADING_DIAGONAL'
+    ) {
+      return 'CORRECTIVE';
+    }
+    if (
+      parentPatternType === 'FLAT_REGULAR' ||
+      parentPatternType === 'FLAT_EXPANDED' ||
+      parentPatternType === 'FLAT_RUNNING'
+    ) {
+      return clean === 'C' ? 'MOTIVE' : 'CORRECTIVE';
+    }
+    if (parentPatternType === 'ZIGZAG') {
+      return clean === 'B' ? 'CORRECTIVE' : 'MOTIVE';
+    }
+  }
+  if (['2', '4', 'B', 'X', 'D', 'W', 'Y', 'Z', 'E'].includes(clean)) return 'CORRECTIVE';
   return 'MOTIVE';
 }
 
@@ -263,9 +286,9 @@ export class RulesEngine {
       };
     }
 
-    // Check Parent-Child Fractal Consistency (C04 / P07)
+    // Check Parent-Child Fractal Consistency (C04 / P07) including subwave labels
     if (parentRole !== 'ROOT') {
-      const consistency = FractalEngine.checkConsistency(parentRole, parentWaveLabel, pattern);
+      const consistency = FractalEngine.checkConsistency(parentRole, parentWaveLabel, pattern, vertices);
       rules.push({
         ruleId: 'FRACTAL_CONSISTENCY',
         name: 'Parent-Child Fractal Consistency',
@@ -527,7 +550,7 @@ export class RulesEngine {
       if (pattern === 'ZIGZAG' && vertices.length >= 4 && len1 > 0) {
         const zzB = evaluateZigzagWaveB(len1, retrace2);
         const bRatio = zzB.ratio;
-        const cCoversB = isBull ? p3 > p1 : p3 < p1;
+        const cCoversB = isBull ? p3 >= p1 - 1e-6 : p3 <= p1 + 1e-6;
         rules.push({
           ruleId: 'ZIGZAG_B_RETRACE',
           name: 'Zigzag Wave B < 100% Wave A',
@@ -565,6 +588,34 @@ export class RulesEngine {
             : bPctOfA > 100.1
             ? 'ویژگی ایده‌آل نقض شده (فلت نامنظم): موج B بیش از ۱۰۰٪ موج A اصلاح کرده است.'
             : 'موج اصلاحی B به‌طور کامل توسط موج C پوشش داده شده (ویژگی ایده‌آل برقرار است).'
+        });
+        const cLen = Math.abs(p3 - p2);
+        const cProjPctOfA = len1 > 0 ? (cLen / len1) * 100 : 0;
+        const zzSubtype =
+          cProjPctOfA < 61.8 - 1e-4
+            ? 'INVALID_PROBABLE_FLAT'
+            : cProjPctOfA < 100 - 1e-4
+            ? 'TRUNCATED'
+            : cProjPctOfA <= 161.8 + 1e-4
+            ? 'NORMAL'
+            : 'EXTENDED';
+        rules.push({
+          ruleId: 'ZIGZAG_C_PROJECTION_TYPE',
+          name: 'Zigzag Naming by Wave C Projection (Session 10.2.8)',
+          nameFa: 'نام‌گذاری زیگزاگ بر اساس فیبوناچی پروجکشن موج C به A',
+          type: zzSubtype === 'INVALID_PROBABLE_FLAT' ? 'HARD' : 'STRUCTURE',
+          passed: zzSubtype !== 'INVALID_PROBABLE_FLAT',
+          score: zzSubtype === 'INVALID_PROBABLE_FLAT' ? 0 : zzSubtype === 'TRUNCATED' ? 82 : 100,
+          conceptId: 'C22',
+          messageFa:
+            zzSubtype === 'INVALID_PROBABLE_FLAT'
+              ? `پروجکشن موج C برابر ${cProjPctOfA.toFixed(1)}٪ (< ۶۱.۸٪ موج A) است — زیگزاگ نامعتبر (احتمالاً فلت).`
+              : zzSubtype === 'TRUNCATED'
+              ? `زیگزاگ کوتاه‌شده (Truncated): موج C برابر ${cProjPctOfA.toFixed(1)}٪ موج A (بین ۶۱.۸٪ تا ۱۰۰٪).`
+              : zzSubtype === 'NORMAL'
+              ? `زیگزاگ معمولی (Normal): موج C برابر ${cProjPctOfA.toFixed(1)}٪ موج A (بین ۱۰۰٪ تا ۱۶۱.۸٪).`
+              : `زیگزاگ کشیده (Extended): موج C برابر ${cProjPctOfA.toFixed(1)}٪ (> ۱۶۱.۸٪ موج A).`,
+          canBeSolvedByAlternate: zzSubtype === 'INVALID_PROBABLE_FLAT' ? 'FLAT_REGULAR' : undefined
         });
       } else if (
         (pattern === 'FLAT_REGULAR' || pattern === 'FLAT_EXPANDED' || pattern === 'FLAT_RUNNING') &&
@@ -1097,12 +1148,12 @@ export class RulesEngine {
           const isLeadingType = pattern === 'LEADING_DIAGONAL' || pattern === 'ANTI_LEADING_DIAGONAL';
           const isEndingType = pattern === 'ENDING_DIAGONAL' || pattern === 'ANTI_DIAGONAL';
           const locMatched =
-            (isLeadingType && ['1', 'A'].includes(diagTailToken)) ||
+            (isLeadingType && ['1', '3', 'A'].includes(diagTailToken)) ||
             (isEndingType && ['5', 'C'].includes(diagTailToken));
           rules.push({
             ruleId: 'DIAGONAL_LOCATION',
-            name: 'Diagonal Positional Fit (Leading in 1/A, Ending in 5/C)',
-            nameFa: 'جایگاه استاندارد قطر (پیشرو در ۱/A و پایانی در ۵/C)',
+            name: 'Diagonal Positional Fit (Leading in 1/3/A, Ending in 5/C)',
+            nameFa: 'جایگاه استاندارد قطر (پیشرو در ۱/۳/A و پایانی در ۵/C)',
             type: 'STRUCTURE',
             passed: locMatched,
             score: locMatched ? 100 : 60,
@@ -1110,10 +1161,10 @@ export class RulesEngine {
             messageFa: locMatched
               ? `الگوی ${isLeadingType ? 'قطر پیشرو' : 'قطر پایانی'} در جایگاه استاندارد موج ${diagTailToken} قرار دارد.`
               : isLeadingType
-              ? `قطر پیشرو معمولاً در موج ۱ یا A رخ می‌دهد، اما اکنون در موج ${diagTailToken} انتخاب شده است.`
+              ? `قطر پیشرو معمولاً در موج ۱، ۳ یا A رخ می‌دهد، اما اکنون در موج ${diagTailToken} انتخاب شده است.`
               : `قطر پایانی معمولاً در موج ۵ یا C رخ می‌دهد، اما اکنون در موج ${diagTailToken} انتخاب شده است.`,
             canBeSolvedByAlternate: !locMatched
-              ? ['1', 'A'].includes(diagTailToken)
+              ? ['1', '3', 'A'].includes(diagTailToken)
                 ? 'LEADING_DIAGONAL'
                 : ['5', 'C'].includes(diagTailToken)
                 ? 'ENDING_DIAGONAL'
@@ -2213,8 +2264,12 @@ export class RulesEngine {
       return { idx: bestIdx, price: bestPrice };
     };
 
+    const isBoundedChild = endIndex !== undefined;
     const span = safeEnd - safeStart;
-    const v0 = pickPeak(safeStart, Math.min(safeEnd, safeStart + 2), isBull ? 'LOW' : 'HIGH');
+    // In bounded drill-down mode, start strictly at safeStart and end strictly at safeEnd (neither less nor more).
+    const v0 = isBoundedChild
+      ? { idx: safeStart, price: isBull ? candles[safeStart].low : candles[safeStart].high }
+      : pickPeak(safeStart, Math.min(safeEnd, safeStart + 2), isBull ? 'LOW' : 'HIGH');
 
     const scenarios: WaveScenario[] = [];
 
@@ -2228,7 +2283,7 @@ export class RulesEngine {
       isPartial: boolean,
       isPrimary: boolean
     ): WaveScenario => {
-      const val = this.validateStructure(patternType, verts, inferredDir, parentRole, parentLegLabel || '');
+      const val = this.validateStructure(patternType, verts, inferredDir, parentRole, parentLegLabel || '', candles);
       return {
         id,
         name,
@@ -2264,25 +2319,60 @@ export class RulesEngine {
       isConfirmed: confirmed
     });
 
-    // Helper for 5-wave segmented picks
-    const w1 = pickPeak(safeStart + Math.round(span * 0.08), safeStart + Math.round(span * 0.28), isBull ? 'HIGH' : 'LOW');
-    const w2 = pickPeak(w1.idx + 3, safeStart + Math.round(span * 0.45), isBull ? 'LOW' : 'HIGH');
-    const w3 = pickPeak(w2.idx + 4, safeStart + Math.round(span * 0.78), isBull ? 'HIGH' : 'LOW');
-    const w4 = pickPeak(w3.idx + 3, safeStart + Math.round(span * 0.90), isBull ? 'LOW' : 'HIGH');
-    const w5 = pickPeak(w4.idx + 3, safeEnd, isBull ? 'HIGH' : 'LOW');
+    // Helper for 5-wave segmented picks strictly inside (safeStart, safeEnd)
+    const maxInterior = isBoundedChild ? Math.max(safeStart + 1, safeEnd - 1) : safeEnd;
+    const w1Raw = pickPeak(
+      safeStart + Math.max(1, Math.round(span * 0.08)),
+      Math.min(maxInterior - 4, safeStart + Math.max(2, Math.round(span * 0.28))),
+      isBull ? 'HIGH' : 'LOW'
+    );
+    const w1 = { ...w1Raw, idx: Math.max(safeStart + 1, Math.min(maxInterior - 4, w1Raw.idx)) };
+    const w2Raw = pickPeak(
+      w1.idx + 1,
+      Math.min(maxInterior - 3, Math.max(w1.idx + 2, safeStart + Math.round(span * 0.45))),
+      isBull ? 'LOW' : 'HIGH'
+    );
+    const w2 = { ...w2Raw, idx: Math.max(w1.idx + 1, Math.min(maxInterior - 3, w2Raw.idx)) };
+    const w3Raw = pickPeak(
+      w2.idx + 1,
+      Math.min(maxInterior - 2, Math.max(w2.idx + 2, safeStart + Math.round(span * 0.78))),
+      isBull ? 'HIGH' : 'LOW'
+    );
+    const w3 = { ...w3Raw, idx: Math.max(w2.idx + 1, Math.min(maxInterior - 2, w3Raw.idx)) };
+    const w4Raw = pickPeak(
+      w3.idx + 1,
+      Math.min(maxInterior, Math.max(w3.idx + 2, safeStart + Math.round(span * 0.90))),
+      isBull ? 'LOW' : 'HIGH'
+    );
+    const w4 = { ...w4Raw, idx: Math.max(w3.idx + 1, Math.min(maxInterior, w4Raw.idx)) };
+    const w5 = isBoundedChild
+      ? { idx: safeEnd, price: isBull ? candles[safeEnd].high : candles[safeEnd].low }
+      : pickPeak(Math.min(safeEnd, w4.idx + 3), safeEnd, isBull ? 'HIGH' : 'LOW');
 
     const prefix = degree === 'SUPER_CYCLE' ? 'V' : degree === 'CYCLE' ? 'W' : '';
     const fmt = (lbl: string) => (degree === 'INTERMEDIATE' ? `(${lbl})` : `${prefix}${lbl}`);
 
-    // Determine if data actually shows a partial 1-2-3 structure (like TSE_SHAPNA where w3 is near the end)
+    // Determine if data actually shows a partial 1-2-3 structure (only in unbounded root overview)
     const isActuallyPartial =
-      endIndex === undefined && (w3.idx >= safeEnd - 10 || w4.idx >= safeEnd - 4);
+      !isBoundedChild && (w3.idx >= safeEnd - 10 || w4.idx >= safeEnd - 4);
 
     if (parentRole === 'CORRECTIVE') {
-      // Corrective parent -> prioritize Zigzag, Flat, Triangle, W-X-Y
-      const a = pickPeak(safeStart + Math.round(span * 0.15), safeStart + Math.round(span * 0.42), isBull ? 'HIGH' : 'LOW');
-      const b = pickPeak(a.idx + 3, safeStart + Math.round(span * 0.68), isBull ? 'LOW' : 'HIGH');
-      const c = pickPeak(b.idx + 3, safeEnd, isBull ? 'HIGH' : 'LOW');
+      // Corrective parent -> strictly Corrective counts ONLY (Zigzag, Flat, Triangle, W-X-Y). Never 5-wave impulsive.
+      const aRaw = pickPeak(
+        safeStart + Math.max(1, Math.round(span * 0.15)),
+        Math.min(maxInterior - 1, safeStart + Math.max(2, Math.round(span * 0.42))),
+        isBull ? 'HIGH' : 'LOW'
+      );
+      const a = { ...aRaw, idx: Math.max(safeStart + 1, Math.min(maxInterior - 1, aRaw.idx)) };
+      const bRaw = pickPeak(
+        a.idx + 1,
+        Math.min(maxInterior, Math.max(a.idx + 2, safeStart + Math.round(span * 0.68))),
+        isBull ? 'LOW' : 'HIGH'
+      );
+      const b = { ...bRaw, idx: Math.max(a.idx + 1, Math.min(maxInterior, bRaw.idx)) };
+      const c = isBoundedChild
+        ? { idx: safeEnd, price: isBull ? candles[safeEnd].high : candles[safeEnd].low }
+        : pickPeak(Math.min(safeEnd, b.idx + 3), safeEnd, isBull ? 'HIGH' : 'LOW');
 
       scenarios.push(
         mkScenario(
@@ -2320,11 +2410,22 @@ export class RulesEngine {
         )
       );
 
-      if (span >= 24) {
-        const tB = pickPeak(a.idx + 3, safeStart + Math.round(span * 0.48), isBull ? 'LOW' : 'HIGH');
-        const tC = pickPeak(tB.idx + 3, safeStart + Math.round(span * 0.68), isBull ? 'HIGH' : 'LOW');
-        const tD = pickPeak(tC.idx + 3, safeStart + Math.round(span * 0.85), isBull ? 'LOW' : 'HIGH');
-        const tE = pickPeak(tD.idx + 3, safeEnd, isBull ? 'HIGH' : 'LOW');
+      if (span >= 18) {
+        const tARaw = pickPeak(
+          safeStart + Math.max(1, Math.round(span * 0.14)),
+          Math.min(maxInterior - 3, safeStart + Math.max(2, Math.round(span * 0.28))),
+          isBull ? 'HIGH' : 'LOW'
+        );
+        const tA = { ...tARaw, idx: Math.max(safeStart + 1, Math.min(maxInterior - 3, tARaw.idx)) };
+        const tBRaw = pickPeak(tA.idx + 1, Math.min(maxInterior - 2, Math.max(tA.idx + 2, safeStart + Math.round(span * 0.48))), isBull ? 'LOW' : 'HIGH');
+        const tB = { ...tBRaw, idx: Math.max(tA.idx + 1, Math.min(maxInterior - 2, tBRaw.idx)) };
+        const tCRaw = pickPeak(tB.idx + 1, Math.min(maxInterior - 1, Math.max(tB.idx + 2, safeStart + Math.round(span * 0.68))), isBull ? 'HIGH' : 'LOW');
+        const tC = { ...tCRaw, idx: Math.max(tB.idx + 1, Math.min(maxInterior - 1, tCRaw.idx)) };
+        const tDRaw = pickPeak(tC.idx + 1, Math.min(maxInterior, Math.max(tC.idx + 2, safeStart + Math.round(span * 0.85))), isBull ? 'LOW' : 'HIGH');
+        const tD = { ...tDRaw, idx: Math.max(tC.idx + 1, Math.min(maxInterior, tDRaw.idx)) };
+        const tE = isBoundedChild
+          ? { idx: safeEnd, price: isBull ? candles[safeEnd].high : candles[safeEnd].low }
+          : pickPeak(Math.min(safeEnd, tD.idx + 3), safeEnd, isBull ? 'HIGH' : 'LOW');
         scenarios.push(
           mkScenario(
             `sc_tri_${Date.now()}_3`,
@@ -2333,7 +2434,7 @@ export class RulesEngine {
             'TRIANGLE_CONVERGING',
             [
               makeVert('0', v0.idx, v0.price),
-              makeVert(fmt('A'), a.idx, a.price),
+              makeVert(fmt('A'), tA.idx, tA.price),
               makeVert(fmt('B'), tB.idx, tB.price),
               makeVert(fmt('C'), tC.idx, tC.price),
               makeVert(fmt('D'), tD.idx, tD.price),
@@ -2367,8 +2468,8 @@ export class RulesEngine {
     }
 
     // Motive / Root Scenarios:
-    // 1. Ideal 5-wave (or Partial 1-2-3 if chart hasn't completed 4-5)
-    if (!isActuallyPartial && w5.idx > w4.idx + 2) {
+    // 1. Ideal 5-wave (when parentRole === 'MOTIVE', always emit full 5-wave spanning exact [safeStart, safeEnd])
+    if ((isBoundedChild || !isActuallyPartial) && w5.idx > w4.idx) {
       const idealVerts = [
         makeVert('0', v0.idx, v0.price),
         makeVert(fmt('1'), w1.idx, w1.price),
@@ -2420,7 +2521,7 @@ export class RulesEngine {
         )
       );
 
-      // 4. Leading Diagonal (3-3-3-3-3)
+      // 4. Leading Diagonal
       scenarios.push(
         mkScenario(
           `sc_diag_${Date.now()}_4`,
@@ -2435,86 +2536,92 @@ export class RulesEngine {
       );
     }
 
-    // 5. Partial Developing Cycle: Only Wave 1-2-3 (or 1-2) occurred so far!
-    const partial3Verts = [
-      makeVert('0', v0.idx, v0.price),
-      makeVert(fmt('1'), w1.idx, w1.price),
-      makeVert(fmt('2'), w2.idx, w2.price),
-      makeVert(fmt('3'), w3.idx, w3.price, false)
-    ];
-    scenarios.push(
-      mkScenario(
-        `sc_part3_${Date.now()}_5`,
-        'سیکل در حال توسعه (فقط امواج ۱، ۲ و ۳ تشکیل شده)',
-        SCENARIO_COLORS[4],
-        'IDEAL_CYCLE',
-        partial3Verts,
-        `موج ${fmt('3')} در حال توسعه`,
-        true,
-        isActuallyPartial
-      )
-    );
-
-    // 6. Early Partial Cycle: Only Wave 1 and Wave 2 occurred (e.g. macro Super Cycle start)
-    const p1Early = pickPeak(safeStart + Math.round(span * 0.15), safeStart + Math.round(span * 0.50), isBull ? 'HIGH' : 'LOW');
-    const p2Early = pickPeak(p1Early.idx + 3, safeStart + Math.round(span * 0.85), isBull ? 'LOW' : 'HIGH');
-    scenarios.push(
-      mkScenario(
-        `sc_part2_${Date.now()}_6`,
-        'ابتدای سایکل کلان (فقط موج ۱ و موج ۲ شکل گرفته)',
-        SCENARIO_COLORS[5],
-        'IDEAL_CYCLE',
-        [
-          makeVert('0', v0.idx, v0.price),
-          makeVert(fmt('1'), p1Early.idx, p1Early.price),
-          makeVert(fmt('2'), p2Early.idx, p2Early.price, false)
-        ],
-        `پایان موج ${fmt('2')} / شروع ${fmt('3')}`,
-        true,
-        false
-      )
-    );
-
-    // 7. Corrective A-B-C Alternative (in case macro move is a Zigzag/Flat rather than 1-2-3-4-5)
-    scenarios.push(
-      mkScenario(
-        `sc_abc_alt_${Date.now()}_7`,
-        'سناریوی جایگزین اصلاحی (A-B-C زیگزاگ)',
-        SCENARIO_COLORS[6],
-        'ZIGZAG',
-        [
-          makeVert('0', v0.idx, v0.price),
-          makeVert(fmt('A'), w1.idx, w1.price),
-          makeVert(fmt('B'), w2.idx, w2.price),
-          makeVert(fmt('C'), w5.idx, w5.price, false)
-        ],
-        `موج ${fmt('C')} جایگزین`,
-        false,
-        false
-      )
-    );
-
-    // 8. Anti-Cycle (3-5) if Wave 2/B threatens Wave 0
-    if (pivots.length >= 2) {
+    // Partial developing cycles + Corrective A-B-C / Anti-Cycle alternatives are ONLY for ROOT overview!
+    // Never generate A-B-C corrective subwaves or shorter partial spans when parentRole === 'MOTIVE' or bounded child.
+    if (!isBoundedChild) {
+      // 5. Partial Developing Cycle: Only Wave 1-2-3 (or 1-2) occurred so far!
+      const partial3Verts = [
+        makeVert('0', v0.idx, v0.price),
+        makeVert(fmt('1'), w1.idx, w1.price),
+        makeVert(fmt('2'), w2.idx, w2.price),
+        makeVert(fmt('3'), w3.idx, w3.price, false)
+      ];
       scenarios.push(
         mkScenario(
-          `sc_anticycle_${Date.now()}_8`,
-          'ساختار آنتی‌سیکل (Anti-Cycle 3-5)',
-          SCENARIO_COLORS[7],
-          'ANTI_CYCLE',
+          `sc_part3_${Date.now()}_5`,
+          'سیکل در حال توسعه (فقط امواج ۱، ۲ و ۳ تشکیل شده)',
+          SCENARIO_COLORS[4],
+          'IDEAL_CYCLE',
+          partial3Verts,
+          `موج ${fmt('3')} در حال توسعه`,
+          true,
+          isActuallyPartial
+        )
+      );
+
+      // 6. Early Partial Cycle: Only Wave 1 and Wave 2 occurred (e.g. macro Super Cycle start)
+      const p1Early = pickPeak(safeStart + Math.round(span * 0.15), safeStart + Math.round(span * 0.50), isBull ? 'HIGH' : 'LOW');
+      const p2Early = pickPeak(p1Early.idx + 3, safeStart + Math.round(span * 0.85), isBull ? 'LOW' : 'HIGH');
+      scenarios.push(
+        mkScenario(
+          `sc_part2_${Date.now()}_6`,
+          'ابتدای سایکل کلان (فقط موج ۱ و موج ۲ شکل گرفته)',
+          SCENARIO_COLORS[5],
+          'IDEAL_CYCLE',
+          [
+            makeVert('0', v0.idx, v0.price),
+            makeVert(fmt('1'), p1Early.idx, p1Early.price),
+            makeVert(fmt('2'), p2Early.idx, p2Early.price, false)
+          ],
+          `پایان موج ${fmt('2')} / شروع ${fmt('3')}`,
+          true,
+          false
+        )
+      );
+    }
+
+    if (parentRole === 'ROOT') {
+      // 7. Corrective A-B-C Alternative (only for Root overview — strictly prohibited for MOTIVE child legs!)
+      scenarios.push(
+        mkScenario(
+          `sc_abc_alt_${Date.now()}_7`,
+          'سناریوی جایگزین اصلاحی (A-B-C زیگزاگ)',
+          SCENARIO_COLORS[6],
+          'ZIGZAG',
           [
             makeVert('0', v0.idx, v0.price),
             makeVert(fmt('A'), w1.idx, w1.price),
             makeVert(fmt('B'), w2.idx, w2.price),
-            makeVert(fmt('1'), w3.idx, w3.price),
-            makeVert(fmt('2'), w4.idx, w4.price),
-            makeVert(fmt('3'), w5.idx, w5.price, false)
+            makeVert(fmt('C'), w5.idx, w5.price, false)
           ],
-          'فاز دوم آنتی‌سیکل',
+          `موج ${fmt('C')} جایگزین`,
           false,
           false
         )
       );
+
+      // 8. Anti-Cycle (3-5)
+      if (pivots.length >= 2) {
+        scenarios.push(
+          mkScenario(
+            `sc_anticycle_${Date.now()}_8`,
+            'ساختار آنتی‌سیکل (Anti-Cycle 3-5)',
+            SCENARIO_COLORS[7],
+            'ANTI_CYCLE',
+            [
+              makeVert('0', v0.idx, v0.price),
+              makeVert(fmt('A'), w1.idx, w1.price),
+              makeVert(fmt('B'), w2.idx, w2.price),
+              makeVert(fmt('1'), w3.idx, w3.price),
+              makeVert(fmt('2'), w4.idx, w4.price),
+              makeVert(fmt('3'), w5.idx, w5.price, false)
+            ],
+            'فاز دوم آنتی‌سیکل',
+            false,
+            false
+          )
+        );
+      }
     }
 
     // Sort by primary first, then validity score, and break ties using 7-tier pattern priority (Step 3.4)
@@ -2604,17 +2711,19 @@ export class RulesEngine {
       const v2 = vertices[2];
       const v3 = vertices[3];
 
-      // Option A: Pattern morph to Anti-Cycle (3-5)
-      suggestions.push({
-        id: 'fix_r1_morph_anticycle',
-        ruleId: 'CARDINAL_RULE_1',
-        kind: 'MORPH_PATTERN',
-        titleFa: 'تبدیل به ساختار آنتی‌سیکل (Anti-Cycle 3-5)',
-        descriptionFa: 'در اصول بهاری وقتی اصلاح از مبدأ موج ۱ عبور کند، ساختار می‌تواند یک الگوی آنتی‌سیکل باشد.',
-        previewDiffFa: `الگو: ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← آنتی‌سیکل ۳-۵`,
-        impactBadgeFa: 'جایگزین ساختاری C21',
-        targetPattern: 'ANTI_CYCLE'
-      });
+      // Option A: Pattern morph to Anti-Cycle (3-5) — only when not inside a strict MOTIVE leg
+      if (parentRole !== 'MOTIVE') {
+        suggestions.push({
+          id: 'fix_r1_morph_anticycle',
+          ruleId: 'CARDINAL_RULE_1',
+          kind: 'MORPH_PATTERN',
+          titleFa: 'تبدیل به ساختار آنتی‌سیکل (Anti-Cycle 3-5)',
+          descriptionFa: 'در اصول بهاری وقتی اصلاح از مبدأ موج ۱ عبور کند، ساختار می‌تواند یک الگوی آنتی‌سیکل باشد.',
+          previewDiffFa: `الگو: ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← آنتی‌سیکل ۳-۵`,
+          impactBadgeFa: 'جایگزین ساختاری C21',
+          targetPattern: 'ANTI_CYCLE'
+        });
+      }
 
       // Option B: Snap Wave 2 to nearest valid candle extreme above p0 (~50% retrace)
       const idealW2 = (v0.price + v1.price) / 2;
@@ -2639,7 +2748,7 @@ export class RulesEngine {
           updatedVertices: updated
         });
       }
-      // Option C (2.11 Relabeling): Relabel W1/W2 as A/B of corrective Zigzag without touching parent W/V degrees
+      // Option C (2.11 Relabeling): Relabel W1/W2 as A/B of corrective Zigzag preserving higher degrees W/V
       const abRelabeled = vertices.slice(0, 3).map((v, i) => ({
         ...v,
         label: i === 0 ? '0' : i === 1 ? 'A' : 'B'
@@ -2920,7 +3029,13 @@ export class RulesEngine {
     }
 
     // 7. Generic Fallback Suggestion if a HARD error remains without a specific proposal
-    if (!summary.isValid && suggestions.length === 0 && summary.suggestedAlternative) {
+    const fallbackAllowed =
+      summary.suggestedAlternative &&
+      (parentRole === 'ROOT' ||
+        (parentRole === 'MOTIVE' && !['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING', 'TRIANGLE_CONVERGING', 'TRIANGLE_EXPANDING', 'COMPLEX_COMBINATION', 'ANTI_CYCLE'].includes(summary.suggestedAlternative)) ||
+        (parentRole === 'CORRECTIVE' && ['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING', 'TRIANGLE_CONVERGING', 'TRIANGLE_EXPANDING', 'COMPLEX_COMBINATION', 'ANTI_CYCLE'].includes(summary.suggestedAlternative)));
+
+    if (!summary.isValid && suggestions.length === 0 && summary.suggestedAlternative && fallbackAllowed) {
       suggestions.push({
         id: 'fix_generic_alt',
         ruleId: 'GENERAL',
@@ -2933,7 +3048,23 @@ export class RulesEngine {
       });
     }
 
-    return suggestions;
+    return suggestions.filter(s => {
+      if (s.id === 'fix_r1_relabel_ab') return true;
+      if (!s.targetPattern || parentRole === 'ROOT') return true;
+      const corr: PatternFamily[] = [
+        'ZIGZAG',
+        'FLAT_REGULAR',
+        'FLAT_EXPANDED',
+        'FLAT_RUNNING',
+        'TRIANGLE_CONVERGING',
+        'TRIANGLE_EXPANDING',
+        'COMPLEX_COMBINATION'
+      ];
+      if (parentRole === 'MOTIVE') {
+        return !corr.includes(s.targetPattern) && s.targetPattern !== 'ANTI_CYCLE';
+      }
+      return corr.includes(s.targetPattern) || s.targetPattern === 'ANTI_CYCLE';
+    });
   }
 
   /**

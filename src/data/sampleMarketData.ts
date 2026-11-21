@@ -200,20 +200,22 @@ export function generateRealisticCandles(
   // Determine fractal sampling depth by timeframe
   const depth = timeframe === '1M' ? 0 : timeframe === '1W' ? 1 : timeframe === '1D' ? 2 : 3;
 
-  let startTs: number;
+  let startOrigin: number;
   let actualCount: number;
   let stepMs = intervalMs;
 
   if (windowRange) {
-    // Drill-down mode: cover [startTs, endTs] cleanly with 45..90 candles
-    const span = Math.max(intervalMs * 12, windowRange.endTs - windowRange.startTs);
-    // Add 8% padding on both sides for context
-    const pad = span * 0.06;
-    startTs = windowRange.startTs - pad;
-    const totalWindow = span + pad * 2;
-    const naturalCount = Math.round(totalWindow / intervalMs);
-    actualCount = Math.max(28, Math.min(110, naturalCount));
-    stepMs = totalWindow / actualCount;
+    // Drill-down mode: align innerBars strictly to [windowRange.startTs, windowRange.endTs]
+    // so candles[startIdx].timestamp === startTs and candles[endIdx].timestamp === endTs
+    const rawSpan = windowRange.endTs - windowRange.startTs;
+    const span = rawSpan > 0 ? rawSpan : intervalMs * 24;
+    const padLeftBars = 3;
+    const padRightBars = 3;
+    const naturalInner = Math.round(span / intervalMs);
+    const innerBars = Math.max(24, Math.min(96, naturalInner));
+    stepMs = span / innerBars;
+    startOrigin = windowRange.startTs - (padLeftBars + 1) * stepMs;
+    actualCount = padLeftBars + innerBars + 1 + padRightBars;
   } else {
     // Full overview mode per timeframe
     // 1M covers full 30 months (~30 bars), 1W covers ~90 weeks (or subset), etc.
@@ -228,16 +230,16 @@ export function generateRealisticCandles(
     actualCount = count || defaultBars[timeframe] || 75;
     // Scale span so 1M shows full 900d, 1W shows full 900d (~128w -> let's span 900d in 68-80 bars or natural window)
     if (timeframe === '1M' || timeframe === '1W') {
-      startTs = ANCHOR_START_TS;
+      startOrigin = ANCHOR_START_TS;
       stepMs = TOTAL_SPAN_MS / actualCount;
     } else if (timeframe === '1D') {
       // Last ~360 days or full cycle
-      startTs = ANCHOR_START_TS + TOTAL_SPAN_MS * 0.05;
+      startOrigin = ANCHOR_START_TS + TOTAL_SPAN_MS * 0.05;
       stepMs = (TOTAL_SPAN_MS * 0.95) / actualCount;
     } else {
       // Lower TFs in overview show the active recent structure
       const fraction = timeframe === '4H' ? 0.35 : timeframe === '1H' ? 0.16 : 0.08;
-      startTs = ANCHOR_END_TS - TOTAL_SPAN_MS * fraction;
+      startOrigin = ANCHOR_END_TS - TOTAL_SPAN_MS * fraction;
       stepMs = (TOTAL_SPAN_MS * fraction) / actualCount;
     }
   }
@@ -247,8 +249,8 @@ export function generateRealisticCandles(
   const noiseAmp = timeframe === '15M' ? 0.008 : timeframe === '1H' ? 0.005 : 0.003;
 
   for (let i = 0; i < actualCount; i++) {
-    const tOpen = startTs + i * stepMs;
-    const tClose = startTs + (i + 1) * stepMs;
+    const tOpen = startOrigin + i * stepMs;
+    const tClose = startOrigin + (i + 1) * stepMs;
     const tMid1 = tOpen + stepMs * 0.33;
     const tMid2 = tOpen + stepMs * 0.66;
 

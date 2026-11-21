@@ -17,6 +17,24 @@ import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import { PatternValidator } from './PatternValidator';
 import { RuleViolationToast, ActiveViolationToast, ValidWaveSnapshot } from './RuleViolationToast';
 import {
+  filterPatternsForRole
+} from '../engine/fractalSyncEngine';
+import {
+  ChartStyleType,
+  PriceScaleMode,
+  DrawingToolKind,
+  DrawingPoint,
+  ChartDrawing,
+  toHeikinAshi,
+  computeEMA,
+  computeBollingerBands,
+  computeRSI,
+  transformPrice,
+  inverseTransformPrice,
+  formatScalePrice,
+  formatCandleAxisTime
+} from '../engine/chartToolsEngine';
+import {
   Lock,
   Unlock,
   RotateCcw,
@@ -37,7 +55,17 @@ import {
   ShieldCheck,
   Activity,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  MousePointer2,
+  TrendingUp,
+  ArrowUpRight,
+  Minus,
+  Ruler,
+  Type,
+  CandlestickChart,
+  SlidersHorizontal,
+  Undo2,
+  Columns2
 } from 'lucide-react';
 
 export type ChartInteractionMode = 'EDIT' | 'ADD_VERTEX' | 'DRAW_SCRATCH' | 'PICK_BOTTOM';
@@ -148,6 +176,19 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [snapToCandleExtreme, setSnapToCandleExtreme] = useState<boolean>(true);
   const [ruleGuardEnabled, setRuleGuardEnabled] = useState<boolean>(true);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [chartStyle, setChartStyle] = useState<ChartStyleType>('CANDLES');
+  const [scaleMode, setScaleMode] = useState<PriceScaleMode>('LINEAR');
+  const [drawingTool, setDrawingTool] = useState<DrawingToolKind>('SELECT');
+  const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
+  const [pendingDrawPoint, setPendingDrawPoint] = useState<DrawingPoint | null>(null);
+  const [viewRange, setViewRange] = useState<{ start: number; end: number } | null>(null);
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+  const panStartRef = useRef<{ clientX: number; startIdx: number; endIdx: number } | null>(null);
+  const [showEMA20, setShowEMA20] = useState<boolean>(false);
+  const [showEMA50, setShowEMA50] = useState<boolean>(false);
+  const [showBB, setShowBB] = useState<boolean>(false);
+  const [showRSI, setShowRSI] = useState<boolean>(false);
+  const [showIndicatorsMenu, setShowIndicatorsMenu] = useState<boolean>(false);
   const [drillNotice, setDrillNotice] = useState<string | null>(null);
   const [diagnosticOpenById, setDiagnosticOpenById] = useState<Record<string, boolean>>({});
   const [diagnosticSummaryById, setDiagnosticSummaryById] = useState<Record<string, ValidationSummary>>({});
@@ -223,13 +264,27 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     setDragMoved(false);
   }, [activeScenario.id, interactionMode, timeframe]);
 
-  // Reset open states when timeframe changes
+  // Reset open states & zoom viewport when timeframe or symbol changes
   useEffect(() => {
     setDiagnosticOpenById({});
     setDiagnosticSummaryById({});
     setValidatorOpenById({});
     setValidatorHighlightLeg(null);
-  }, [timeframe]);
+    setViewRange(null);
+    setPendingDrawPoint(null);
+  }, [timeframe, assetSymbol]);
+
+  useEffect(() => {
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setPendingDrawPoint(null);
+        setDrawingTool('SELECT');
+        setShowIndicatorsMenu(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Keep active scenario's open diagnostic summary live whenever vertices or pattern change
   useEffect(() => {
@@ -509,8 +564,31 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   };
 
   const { width, height } = dimensions;
-  const padding = { top: 48, right: 86, bottom: showVolume ? 74 : 40, left: 22 };
-  const volumeHeight = showVolume ? 58 : 0;
+  const padding = { top: 48, right: 86, bottom: 26, left: 22 };
+  const volumeHeight = showVolume ? 52 : 0;
+  const rsiHeight = showRSI ? 66 : 0;
+  const bottomReserved = padding.bottom + volumeHeight + rsiHeight;
+
+  const displayCandles = useMemo(() => {
+    return chartStyle === 'HEIKIN_ASHI' ? toHeikinAshi(candles) : candles;
+  }, [chartStyle, candles]);
+
+  const ema20Values = useMemo(
+    () => (showEMA20 ? computeEMA(displayCandles, 20) : []),
+    [showEMA20, displayCandles]
+  );
+  const ema50Values = useMemo(
+    () => (showEMA50 ? computeEMA(displayCandles, 50) : []),
+    [showEMA50, displayCandles]
+  );
+  const bbValues = useMemo(
+    () => (showBB ? computeBollingerBands(displayCandles, 20, 2) : []),
+    [showBB, displayCandles]
+  );
+  const rsiValues = useMemo(
+    () => (showRSI ? computeRSI(candles, 14) : []),
+    [showRSI, candles]
+  );
 
   // Dynamic completed-structure Fibonacci extensions, PRZ, TMV & Targets via TargetProjectionEngine
   const projectionReport = useMemo(() => {
@@ -524,19 +602,38 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   }, [activeScenario, candles]);
 
   const maxPlotIndex = Math.max(1, candles.length - 1);
+  const visStart = useMemo(() => {
+    if (!viewRange || candles.length <= 1) return 0;
+    return Math.max(0, Math.min(candles.length - 2, viewRange.start));
+  }, [viewRange, candles.length]);
+  const visEnd = useMemo(() => {
+    if (!viewRange || candles.length <= 1) return maxPlotIndex;
+    return Math.max(visStart + 1, Math.min(maxPlotIndex, viewRange.end));
+  }, [viewRange, candles.length, maxPlotIndex, visStart]);
+  const visSpan = Math.max(1, visEnd - visStart);
 
-  // Price bounds including overlays, bounded PRZ/targets, and absolute bottom
-  const { minPrice, maxPrice, priceRange, maxVolume } = useMemo(() => {
-    if (candles.length === 0) return { minPrice: 0, maxPrice: 100, priceRange: 100, maxVolume: 1000 };
+  const percentBaseline = useMemo(() => {
+    const c = displayCandles[visStart] || displayCandles[0];
+    return c ? Math.max(1e-6, c.close) : 1;
+  }, [displayCandles, visStart]);
+
+  // Price bounds including overlays, bounded PRZ/targets, and absolute bottom (computed over visible window)
+  const { minPrice, maxPrice, priceRange, sMin, sMax, sRange, maxVolume } = useMemo(() => {
+    if (displayCandles.length === 0) {
+      return { minPrice: 0, maxPrice: 100, priceRange: 100, sMin: 0, sMax: 100, sRange: 100, maxVolume: 1000 };
+    }
     let candleMin = Infinity;
     let candleMax = -Infinity;
     let maxVol = 0;
 
-    candles.forEach(c => {
+    const sliceStart = Math.max(0, visStart);
+    const sliceEnd = Math.min(displayCandles.length - 1, visEnd);
+    for (let i = sliceStart; i <= sliceEnd; i++) {
+      const c = displayCandles[i];
       if (c.low < candleMin) candleMin = c.low;
       if (c.high > candleMax) candleMax = c.high;
       if (c.volume > maxVol) maxVol = c.volume;
-    });
+    }
 
     let min = candleMin;
     let max = candleMax;
@@ -547,10 +644,12 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     const przGuardHigh = candleMax + candleSpan * 0.75;
 
     activeScenario.vertices.forEach(v => {
-      if (v.price < min) min = v.price;
-      if (v.price > max) max = v.price;
+      if (v.candleIndex >= sliceStart && v.candleIndex <= sliceEnd) {
+        if (v.price < min) min = v.price;
+        if (v.price > max) max = v.price;
+      }
     });
-    if (showTargets && !hideZoneControls) {
+    if (showTargets && !hideZoneControls && !viewRange) {
       const targetPool = projectionReport?.targets.length ? projectionReport.targets : activeScenario.targets;
       targetPool.forEach(t => {
         if (t.price >= guardLow && t.price <= guardHigh) {
@@ -559,7 +658,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         }
       });
     }
-    if (effectiveShowFibLayers && projectionReport?.extensionLayers) {
+    if (effectiveShowFibLayers && projectionReport?.extensionLayers && !viewRange) {
       projectionReport.extensionLayers.forEach(layer => {
         if (layer.bandLow >= guardLow && layer.bandHigh <= guardHigh) {
           if (layer.bandLow < min) min = layer.bandLow;
@@ -567,7 +666,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         }
       });
     }
-    if (effectiveShowPRZ && projectionReport) {
+    if (effectiveShowPRZ && projectionReport && !viewRange) {
       projectionReport.przZones.forEach(z => {
         if (z.highPrice >= przGuardLow && z.lowPrice <= przGuardHigh) {
           const clampedLow = Math.max(przGuardLow, z.lowPrice);
@@ -577,7 +676,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         }
       });
     }
-    if (effectiveShowTMV && projectionReport) {
+    if (effectiveShowTMV && projectionReport && !viewRange) {
       const tmvGuardLow = candleMin - candleSpan * 0.95;
       const tmvGuardHigh = candleMax + candleSpan * 0.95;
       projectionReport.tmvZones.forEach(z => {
@@ -590,45 +689,75 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         });
       });
     }
-    if (absoluteBottom) {
+    if (absoluteBottom && !viewRange) {
       if (absoluteBottom.price < min) min = absoluteBottom.price;
       if (absoluteBottom.price > max) max = absoluteBottom.price;
     }
 
-    const baseRange = Math.max(1, max - min);
+    const baseRange = Math.max(1e-4, max - min);
     const mid = (max + min) / 2;
     const zoomedRange = baseRange / Math.max(0.5, Math.min(2.5, priceZoom));
     const zoomedMin = mid - zoomedRange / 2;
     const zoomedMax = mid + zoomedRange / 2;
+    const finalMin = Math.max(scaleMode === 'LOG' ? Math.max(1e-3, candleMin * 0.5) : 0, zoomedMin - zoomedRange * 0.06);
+    const finalMax = zoomedMax + zoomedRange * 0.09;
+
+    const scaledMin = transformPrice(finalMin, scaleMode, percentBaseline);
+    const scaledMax = transformPrice(finalMax, scaleMode, percentBaseline);
     return {
-      minPrice: Math.max(0, zoomedMin - zoomedRange * 0.06),
-      maxPrice: zoomedMax + zoomedRange * 0.09,
-      priceRange: zoomedRange * 1.15,
+      minPrice: finalMin,
+      maxPrice: finalMax,
+      priceRange: Math.max(1e-4, finalMax - finalMin),
+      sMin: scaledMin,
+      sMax: scaledMax,
+      sRange: Math.max(1e-6, scaledMax - scaledMin),
       maxVolume: maxVol || 1
     };
-  }, [candles, activeScenario, showTargets, hideZoneControls, effectiveShowPRZ, effectiveShowTMV, effectiveShowFibLayers, projectionReport, absoluteBottom, priceZoom]);
+  }, [
+    displayCandles,
+    visStart,
+    visEnd,
+    viewRange,
+    activeScenario,
+    showTargets,
+    hideZoneControls,
+    effectiveShowPRZ,
+    effectiveShowTMV,
+    effectiveShowFibLayers,
+    projectionReport,
+    absoluteBottom,
+    priceZoom,
+    scaleMode,
+    percentBaseline
+  ]);
 
   const getX = (index: number) => {
     const usableWidth = width - padding.left - padding.right;
-    const step = usableWidth / Math.max(1, maxPlotIndex);
-    return padding.left + index * step;
+    const step = usableWidth / Math.max(1, visSpan);
+    return padding.left + (index - visStart) * step;
   };
 
   const getY = (price: number) => {
-    const usableHeight = height - padding.top - padding.bottom - volumeHeight;
-    const normalized = (price - minPrice) / priceRange;
-    return height - padding.bottom - volumeHeight - normalized * usableHeight;
+    const usableHeight = Math.max(20, height - padding.top - bottomReserved);
+    const scaled = transformPrice(price, scaleMode, percentBaseline);
+    const normalized = (scaled - sMin) / sRange;
+    return height - bottomReserved - normalized * usableHeight;
   };
 
   const getIndexAndPriceFromCoords = (mouseX: number, mouseY: number, forceLowSnap = false) => {
     const usableWidth = width - padding.left - padding.right;
-    const step = usableWidth / Math.max(1, maxPlotIndex);
-    const rawIndex = Math.round((mouseX - padding.left) / step);
+    const step = usableWidth / Math.max(1, visSpan);
+    const rawIndex = Math.round((mouseX - padding.left) / step) + visStart;
     const candleIndex = Math.max(0, Math.min(candles.length - 1, rawIndex));
-    const usableHeight = Math.max(1, height - padding.top - padding.bottom - volumeHeight);
+    const usableHeight = Math.max(1, height - padding.top - bottomReserved);
     const bounds = frozenBoundsRef.current || { minPrice, priceRange };
-    const normalized = (height - padding.bottom - volumeHeight - mouseY) / usableHeight;
-    const rawPrice = Math.round((bounds.minPrice + normalized * bounds.priceRange) * 10) / 10;
+    const normalized = (height - bottomReserved - mouseY) / usableHeight;
+    let rawPrice = bounds.minPrice + normalized * bounds.priceRange;
+    if (scaleMode !== 'LINEAR' && !frozenBoundsRef.current) {
+      const scaled = sMin + normalized * sRange;
+      rawPrice = inverseTransformPrice(scaled, scaleMode, percentBaseline);
+    }
+    rawPrice = Math.round(rawPrice * 10) / 10;
 
     const candle = candles[candleIndex];
     let finalPrice = rawPrice;
@@ -636,7 +765,6 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       if (forceLowSnap) {
         finalPrice = candle.low;
       } else {
-        // Snap strictly to the candle's high or low so vertices stay anchored to candles rather than empty coordinate space
         const distHigh = Math.abs(rawPrice - candle.high);
         const distLow = Math.abs(rawPrice - candle.low);
         finalPrice = distHigh <= distLow ? candle.high : candle.low;
@@ -694,10 +822,66 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     }
   };
 
+  const handleWheel = (e: React.WheelEvent) => {
+    if (candles.length < 16) return;
+    const { mouseX } = getSvgCoords(e);
+    const usableWidth = Math.max(1, width - padding.left - padding.right);
+    const anchorRatio = Math.max(0, Math.min(1, (mouseX - padding.left) / usableWidth));
+    const zoomIn = e.deltaY < 0;
+    const minVisibleBars = Math.min(candles.length - 1, 14);
+    const factor = zoomIn ? 0.84 : 1.18;
+    const targetSpan = Math.max(minVisibleBars, Math.min(maxPlotIndex, Math.round(visSpan * factor)));
+    if (targetSpan === visSpan) return;
+
+    const anchorIdx = visStart + anchorRatio * visSpan;
+    let nextStart = Math.round(anchorIdx - anchorRatio * targetSpan);
+    nextStart = Math.max(0, Math.min(maxPlotIndex - targetSpan, nextStart));
+    const nextEnd = nextStart + targetSpan;
+    if (nextStart === 0 && nextEnd >= maxPlotIndex) {
+      setViewRange(null);
+    } else {
+      setViewRange({ start: nextStart, end: nextEnd });
+    }
+  };
+
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (
+      drawingTool !== 'SELECT' ||
+      interactionMode !== 'EDIT' ||
+      draggingVertexIndex !== null ||
+      draggingBottom ||
+      draggingTmvEdge ||
+      candles.length < 8
+    ) {
+      return;
+    }
+    if (e.button !== 0 && e.button !== 1) return;
+    if (viewRange === null && !e.shiftKey) return;
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+    dragMovedRef.current = false;
+    panStartRef.current = { clientX: e.clientX, startIdx: visStart, endIdx: visEnd };
+    setIsPanning(true);
+  };
+
   const handleMouseMove = (e: React.MouseEvent | MouseEvent) => {
     if (!containerRef.current) return;
     const { mouseX, mouseY } = getSvgCoords(e);
     setMousePos({ x: mouseX, y: mouseY });
+
+    if (isPanning && panStartRef.current) {
+      const dxPx = e.clientX - panStartRef.current.clientX;
+      if (Math.abs(dxPx) >= 4) {
+        dragMovedRef.current = true;
+        setDragMoved(true);
+        const usableWidth = Math.max(1, width - padding.left - padding.right);
+        const span = panStartRef.current.endIdx - panStartRef.current.startIdx;
+        const barShift = Math.round((-dxPx / usableWidth) * span);
+        const nextStart = Math.max(0, Math.min(maxPlotIndex - span, panStartRef.current.startIdx + barShift));
+        const nextEnd = nextStart + span;
+        setViewRange({ start: nextStart, end: nextEnd });
+      }
+      return;
+    }
 
     if (draggingTmvEdge) {
       const endX = width - padding.right;
@@ -766,6 +950,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     setDraggingVertexIndex(null);
     setDraggingBottom(false);
     setDraggingTmvEdge(false);
+    setIsPanning(false);
+    panStartRef.current = null;
     dragStartPosRef.current = null;
     frozenBoundsRef.current = null;
   };
@@ -776,7 +962,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   mouseUpRef.current = handleMouseUp;
 
   useEffect(() => {
-    if (draggingVertexIndex === null && !draggingBottom && !draggingTmvEdge) return;
+    if (draggingVertexIndex === null && !draggingBottom && !draggingTmvEdge && !isPanning) return;
     const onWinMove = (ev: MouseEvent) => mouseMoveRef.current(ev);
     const onWinUp = () => mouseUpRef.current();
     window.addEventListener('mousemove', onWinMove);
@@ -785,7 +971,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       window.removeEventListener('mousemove', onWinMove);
       window.removeEventListener('mouseup', onWinUp);
     };
-  }, [draggingVertexIndex, draggingBottom, draggingTmvEdge]);
+  }, [draggingVertexIndex, draggingBottom, draggingTmvEdge, isPanning]);
 
   const handleSvgClick = (e: React.MouseEvent) => {
     if (!containerRef.current) return;
@@ -801,9 +987,63 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       mouseX < padding.left ||
       mouseX > width - padding.right ||
       mouseY < padding.top ||
-      mouseY > height - padding.bottom
+      mouseY > height - bottomReserved
     ) {
       setSelectedVertexIndex(null);
+      return;
+    }
+
+    if (drawingTool !== 'SELECT') {
+      const ptInfo = getIndexAndPriceFromCoords(mouseX, mouseY, false);
+      // For drawing tools, compute raw unsnapped price at cursor unless magnet is forced
+      const usableHeight = Math.max(1, height - padding.top - bottomReserved);
+      const norm = (height - bottomReserved - mouseY) / usableHeight;
+      const cursorPrice = Math.round(inverseTransformPrice(sMin + norm * sRange, scaleMode, percentBaseline) * 10) / 10;
+      const dp: DrawingPoint = {
+        candleIndex: ptInfo.candleIndex,
+        price: snapToCandleExtreme ? ptInfo.price : cursorPrice,
+        timestamp: ptInfo.timestamp
+      };
+
+      if (drawingTool === 'HLINE' || drawingTool === 'VLINE' || drawingTool === 'TEXT') {
+        const color =
+          drawingTool === 'HLINE' ? '#f59e0b' : drawingTool === 'VLINE' ? '#a855f7' : '#38bdf8';
+        setDrawings(prev => [
+          ...prev,
+          {
+            id: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: drawingTool,
+            points: [dp],
+            color,
+            label: drawingTool === 'TEXT' ? `یادداشت ${formatScalePrice(dp.price, scaleMode, percentBaseline)}` : undefined
+          }
+        ]);
+        setPendingDrawPoint(null);
+        return;
+      }
+
+      if (!pendingDrawPoint) {
+        setPendingDrawPoint(dp);
+      } else {
+        const color =
+          drawingTool === 'FIB_RETRACE'
+            ? '#eab308'
+            : drawingTool === 'MEASURE'
+            ? '#10b981'
+            : drawingTool === 'CHANNEL'
+            ? '#c084fc'
+            : '#38bdf8';
+        setDrawings(prev => [
+          ...prev,
+          {
+            id: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: drawingTool,
+            points: [pendingDrawPoint, dp],
+            color
+          }
+        ]);
+        setPendingDrawPoint(null);
+      }
       return;
     }
 
@@ -828,7 +1068,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       const { candleIndex, price, timestamp } = getIndexAndPriceFromCoords(mouseX, mouseY);
       const current = [...activeScenario.vertices];
       const nextIdx = current.length;
-      const defaultLabels = ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C', 'D', 'E'];
+      const defaultLabels =
+        parentRole === 'CORRECTIVE' && activeScenario.patternType !== 'ANTI_CYCLE'
+          ? ['0', 'A', 'B', 'C', 'D', 'E', 'W', 'X', 'Y']
+          : ['0', '1', '2', '3', '4', '5', 'A', 'B', 'C', 'D', 'E'];
       const nextLabel = defaultLabels[nextIdx] || `W${nextIdx}`;
 
       const rawVertex: WaveVertex = {
@@ -931,7 +1174,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       pathD,
       totalLength: Math.max(1, Math.ceil(totalLength))
     };
-  }, [activeHoveredScenario, candles.length, width, height, minPrice, priceRange, showVolume]);
+  }, [activeHoveredScenario, candles.length, width, height, minPrice, priceRange, sMin, sRange, scaleMode, percentBaseline, visStart, visEnd, showVolume, showRSI]);
 
   // Scale-adaptive & Timeframe-Synchronized PRZ Horizontal Bounding Box coordinates
   const renderedPrzBoxes = useMemo(() => {
@@ -939,13 +1182,12 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       return [];
     }
     const plotTop = padding.top;
-    const plotBottom = height - padding.bottom - volumeHeight;
+    const plotBottom = height - bottomReserved;
     const endX = width - padding.right;
     const usableW = Math.max(1, endX - padding.left);
-    const usableH = Math.max(1, plotBottom - plotTop);
     const maxIdx = Math.max(1, candles.length - 1);
-    const xAt = (idx: number) => padding.left + (idx / maxIdx) * usableW;
-    const yAt = (price: number) => plotBottom - ((price - minPrice) / Math.max(1e-6, priceRange)) * usableH;
+    const xAt = (idx: number) => getX(idx);
+    const yAt = (price: number) => getY(price);
 
     // Calibrate minimum horizontal projection horizon by active timeframe
     const tfMinShareMap: Record<string, number> = {
@@ -1026,10 +1268,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     padding.left,
     padding.right,
     padding.top,
-    padding.bottom,
-    volumeHeight,
+    bottomReserved,
     minPrice,
     priceRange,
+    sMin,
+    sRange,
+    scaleMode,
+    percentBaseline,
+    visStart,
+    visEnd,
     priceZoom
   ]);
 
@@ -1039,13 +1286,13 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       return [];
     }
     const plotTop = padding.top;
-    const plotBottom = height - padding.bottom - volumeHeight;
+    const plotBottom = height - bottomReserved;
     const endX = width - padding.right;
     const usableW = Math.max(80, endX - padding.left);
     const usableH = Math.max(1, plotBottom - plotTop);
     const maxIdx = Math.max(1, candles.length - 1);
-    const xAt = (idx: number) => padding.left + (idx / maxIdx) * usableW;
-    const yAt = (price: number) => plotBottom - ((price - minPrice) / Math.max(1e-6, priceRange)) * usableH;
+    const xAt = (idx: number) => getX(idx);
+    const yAt = (price: number) => getY(price);
 
     return projectionReport.tmvZones.map(tmv => {
       // Responsive horizontal width synchronized with Analysis Window / Mode / Custom Drag
@@ -1112,10 +1359,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     padding.left,
     padding.right,
     padding.top,
-    padding.bottom,
-    volumeHeight,
+    bottomReserved,
     minPrice,
     priceRange,
+    sMin,
+    sRange,
+    scaleMode,
+    percentBaseline,
+    visStart,
+    visEnd,
     priceZoom,
     tmvSpanMode,
     tmvCustomRatio
@@ -1227,13 +1479,12 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       return null;
     }
     const plotTop = padding.top;
-    const plotBottom = height - padding.bottom - volumeHeight;
+    const plotBottom = height - bottomReserved;
     const endX = width - padding.right;
     const usableW = Math.max(1, endX - padding.left);
-    const usableH = Math.max(1, plotBottom - plotTop);
     const maxIdx = Math.max(1, candles.length - 1);
-    const xAt = (idx: number) => padding.left + (idx / maxIdx) * usableW;
-    const yAt = (price: number) => Math.max(plotTop + 8, Math.min(plotBottom - 8, plotBottom - ((price - minPrice) / Math.max(1e-6, priceRange)) * usableH));
+    const xAt = (idx: number) => getX(idx);
+    const yAt = (price: number) => Math.max(plotTop + 8, Math.min(plotBottom - 8, getY(price)));
 
     const verts = activeScenario.vertices;
     const lastV = verts[verts.length - 1];
@@ -1279,10 +1530,6 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     const endPtX = Math.min(endX - 8, startX + spanX);
     const deltaY = destY - startY;
 
-    // Select fractal subwave cadence:
-    // - End of W5 / C (Bahari: no same-degree retracement -> 3-wave A-B-C next cycle start)
-    // - Corrective / Triangle / Flat -> 3-wave or breakout cadence
-    // - Developing Motive impulse (e.g. from W2/W4 into W3/W5) -> 5-subwave fractal impulse curve
     const isCorrectiveCadence =
       isCycleFinished ||
       parentRole === 'CORRECTIVE' ||
@@ -1312,7 +1559,6 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       y: Math.max(plotTop + 10, Math.min(plotBottom - 10, pt.y))
     }));
 
-    // Convert waypoints to smooth Catmull-Rom Cubic Bezier path
     const buildSmoothBezier = (pts: Array<{ x: number; y: number }>) => {
       if (pts.length < 2) return '';
       let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
@@ -1370,10 +1616,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     padding.left,
     padding.right,
     padding.top,
-    padding.bottom,
-    volumeHeight,
+    bottomReserved,
     minPrice,
     priceRange,
+    sMin,
+    sRange,
+    scaleMode,
+    percentBaseline,
+    visStart,
+    visEnd,
     priceZoom
   ]);
 
@@ -1381,14 +1632,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const gridLines = useMemo(() => {
     const lines = [];
     for (let i = 0; i <= gridSteps; i++) {
-      const p = minPrice + (priceRange / gridSteps) * i;
+      const scaledVal = sMin + (sRange / gridSteps) * i;
+      const p = inverseTransformPrice(scaledVal, scaleMode, percentBaseline);
       const y = getY(p);
-      lines.push({ price: Math.round(p), y });
+      lines.push({ price: p, label: formatScalePrice(p, scaleMode, percentBaseline), y });
     }
     return lines;
-  }, [minPrice, priceRange, height]);
+  }, [sMin, sRange, scaleMode, percentBaseline, height, bottomReserved]);
 
-  const lastCandle = candles[candles.length - 1];
+  const lastCandle = displayCandles[displayCandles.length - 1];
   const lastPrice = lastCandle?.close || 0;
   const lastPriceY = getY(lastPrice);
 
@@ -1465,13 +1717,116 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               disabled={activeScenario.isLocked}
               className="bg-slate-900 border border-slate-700 text-xs text-slate-200 font-medium rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-50"
             >
-              {(Object.keys(PATTERN_LABELS_FA) as PatternFamily[]).map(pf => (
-                <option key={pf} value={pf}>
-                  {PATTERN_LABELS_FA[pf]}
-                </option>
-              ))}
+              {(() => {
+                const allowed = filterPatternsForRole(parentRole, true);
+                const opts = allowed.includes(activeScenario.patternType)
+                  ? allowed
+                  : [activeScenario.patternType, ...allowed];
+                return opts.map(pf => (
+                  <option key={pf} value={pf}>
+                    {PATTERN_LABELS_FA[pf]}
+                  </option>
+                ));
+              })()}
             </select>
           </div>
+
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-0.5">
+            <CandlestickChart className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <select
+              value={chartStyle}
+              onChange={e => setChartStyle(e.target.value as ChartStyleType)}
+              title="نوع نمایش چارت قیمت (TradingView Chart Styles)"
+              className="bg-transparent text-[11px] text-slate-200 font-medium py-0.5 focus:outline-none cursor-pointer"
+            >
+              <option value="CANDLES" className="bg-slate-900">شمعی</option>
+              <option value="HOLLOW" className="bg-slate-900">توخالی</option>
+              <option value="HEIKIN_ASHI" className="bg-slate-900">هیکین‌آشی</option>
+              <option value="BARS" className="bg-slate-900">میله‌ای OHLC</option>
+              <option value="LINE" className="bg-slate-900">خطی</option>
+              <option value="AREA" className="bg-slate-900">مساحتی</option>
+            </select>
+          </div>
+
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5" title="مقیاس محور قیمت">
+            {(
+              [
+                { id: 'LINEAR', label: 'عادی' },
+                { id: 'LOG', label: 'لگ' },
+                { id: 'PERCENT', label: '٪' }
+              ] as const
+            ).map(m => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setScaleMode(m.id)}
+                className={`px-1.5 py-0.5 text-[10px] font-mono rounded-md transition-colors ${
+                  scaleMode === m.id
+                    ? 'bg-indigo-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowIndicatorsMenu(prev => !prev)}
+              className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded-lg border transition-colors ${
+                showEMA20 || showEMA50 || showBB || showRSI
+                  ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200 font-semibold'
+                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+              }`}
+              title="اندیکاتورهای تکنیکال (EMA, Bollinger Bands, RSI)"
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>اندیکاتورها</span>
+            </button>
+            {showIndicatorsMenu && (
+              <div
+                onClick={e => e.stopPropagation()}
+                className="absolute right-0 top-full mt-1.5 w-48 bg-[#0b1326] border border-slate-700 rounded-xl p-2 shadow-2xl z-40 space-y-1 text-[11px]"
+              >
+                {[
+                  { label: 'EMA (20)', active: showEMA20, toggle: () => setShowEMA20(v => !v), color: 'text-amber-300' },
+                  { label: 'EMA (50)', active: showEMA50, toggle: () => setShowEMA50(v => !v), color: 'text-sky-300' },
+                  { label: 'Bollinger (20, 2)', active: showBB, toggle: () => setShowBB(v => !v), color: 'text-indigo-300' },
+                  { label: 'RSI (14) زیرچارت', active: showRSI, toggle: () => setShowRSI(v => !v), color: 'text-violet-300' }
+                ].map(ind => (
+                  <button
+                    key={ind.label}
+                    type="button"
+                    onClick={ind.toggle}
+                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg border transition-colors ${
+                      ind.active
+                        ? 'bg-slate-800 border-cyan-500/40 text-white'
+                        : 'bg-slate-950/60 border-transparent text-slate-400 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span className={`font-mono ${ind.active ? ind.color : ''}`}>{ind.label}</span>
+                    <span className="text-[10px]">{ind.active ? '✓' : ''}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {(viewRange !== null || priceZoom !== 1) && (
+            <button
+              type="button"
+              onClick={() => {
+                setViewRange(null);
+                setPriceZoom(1);
+              }}
+              className="px-2 py-1 text-[10.5px] rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/35"
+              title="بازنشانی زوم افقی و عمودی چارت"
+            >
+              بازنشانی زوم
+            </button>
+          )}
         </div>
 
         {/* Left side in RTL: Interaction Modes & Overlays */}
@@ -1827,21 +2182,99 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         </div>
       )}
 
-      {/* Main Chart Canvas */}
-      <div
-        ref={containerRef}
-        onClick={handleSvgClick}
-        className={`flex-1 w-full h-full min-h-[380px] relative overflow-hidden ${
-          draggingTmvEdge
-            ? 'cursor-ew-resize'
-            : draggingVertexIndex !== null || draggingBottom
-            ? 'cursor-grabbing'
-            : interactionMode === 'ADD_VERTEX' || interactionMode === 'DRAW_SCRATCH' || interactionMode === 'PICK_BOTTOM'
-            ? 'cursor-crosshair'
-            : 'cursor-default'
-        }`}
-      >
-        <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} className="w-full h-full block">
+      {/* Main Chart Body: Right-aligned Canvas + Left Vertical TradingView Drawing Dock */}
+      <div className="flex-1 flex min-h-[380px] relative overflow-hidden">
+        {/* Left-Edge TradingView Drawing & Measurement Vertical Toolbar */}
+        <div
+          className="w-10 bg-[#0a1020] border-l border-slate-800 py-2 flex flex-col items-center gap-1 shrink-0 z-20"
+          title="ابزارهای ترسیم و اندازه‌گیری TradingView (کلیک روی چارت)"
+        >
+          {(
+            [
+              { id: 'SELECT', icon: MousePointer2, title: 'انتخاب و جابجایی / پن (Esc)' },
+              { id: 'TRENDLINE', icon: TrendingUp, title: 'خط روند (۲ کلیک)' },
+              { id: 'RAY', icon: ArrowUpRight, title: 'پرتو روند ممتد (۲ کلیک)' },
+              { id: 'HLINE', icon: Minus, title: 'خط حمایت / مقاومت افقی (۱ کلیک)' },
+              { id: 'VLINE', icon: Columns2, title: 'خط عمودی زمانی (۱ کلیک)' },
+              { id: 'FIB_RETRACE', icon: Layers, title: 'فیبوناچی اصلاحی دلخواه (۲ کلیک)' },
+              { id: 'MEASURE', icon: Ruler, title: 'خط‌کش قیمت و زمان (۲ کلیک)' },
+              { id: 'CHANNEL', icon: GitBranch, title: 'کانال موازی (۲ کلیک)' },
+              { id: 'TEXT', icon: Type, title: 'یادداشت قیمتی (۱ کلیک)' }
+            ] as const
+          ).map(tool => {
+            const Icon = tool.icon;
+            const active = drawingTool === tool.id;
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => {
+                  setDrawingTool(tool.id);
+                  setPendingDrawPoint(null);
+                }}
+                title={tool.title}
+                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  active
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </button>
+            );
+          })}
+
+          <div className="w-5 h-px bg-slate-800 my-1" />
+
+          <button
+            type="button"
+            disabled={drawings.length === 0 && !pendingDrawPoint}
+            onClick={() => {
+              if (pendingDrawPoint) {
+                setPendingDrawPoint(null);
+              } else {
+                setDrawings(prev => prev.slice(0, -1));
+              }
+            }}
+            title="واگرد آخرین ترسیم"
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/80 disabled:opacity-30"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={drawings.length === 0 && !pendingDrawPoint}
+            onClick={() => {
+              setDrawings([]);
+              setPendingDrawPoint(null);
+            }}
+            title="پاک کردن تمام ترسیم‌ها"
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 disabled:opacity-30"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Main Chart Canvas */}
+        <div
+          ref={containerRef}
+          onWheel={handleWheel}
+          onMouseDown={handleCanvasMouseDown}
+          onClick={handleSvgClick}
+          className={`flex-1 w-full h-full min-h-[380px] relative overflow-hidden ${
+            draggingTmvEdge
+              ? 'cursor-ew-resize'
+              : isPanning || draggingVertexIndex !== null || draggingBottom
+              ? 'cursor-grabbing'
+              : drawingTool !== 'SELECT' ||
+                interactionMode === 'ADD_VERTEX' ||
+                interactionMode === 'DRAW_SCRATCH' ||
+                interactionMode === 'PICK_BOTTOM'
+              ? 'cursor-crosshair'
+              : 'cursor-default'
+          }`}
+        >
+          <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} className="w-full h-full block">
           <defs>
             <linearGradient id="bullVol" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
@@ -1850,6 +2283,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             <linearGradient id="bearVol" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
               <stop offset="100%" stopColor="#ef4444" stopOpacity="0.05" />
+            </linearGradient>
+            <linearGradient id="areaChartFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.32" />
+              <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.02" />
             </linearGradient>
             <linearGradient id="tmvBullZoneGrad" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.24" />
@@ -1886,6 +2323,14 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <stop offset="50%" stopColor="#06b6d4" stopOpacity="0.18" />
               <stop offset="100%" stopColor="#fbbf24" stopOpacity="0.30" />
             </linearGradient>
+            <clipPath id="chartPlotClip">
+              <rect
+                x={padding.left}
+                y={padding.top - 4}
+                width={Math.max(10, width - padding.left - padding.right)}
+                height={Math.max(20, height - padding.top - bottomReserved + 8)}
+              />
+            </clipPath>
             <filter id="elliott-wave-glow" x="-30%" y="-30%" width="160%" height="160%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blurInner" />
               <feGaussianBlur in="SourceGraphic" stdDeviation="7.5" result="blurOuter" />
@@ -1906,12 +2351,12 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
           {/* Parent Wave Time-Window Shade (in Step 3 Drill-Down) */}
           {parentWindowBounds && (
-            <g>
+            <g clipPath="url(#chartPlotClip)">
               <rect
                 x={getX(parentWindowBounds.startIdx)}
                 y={padding.top}
                 width={Math.max(20, getX(parentWindowBounds.endIdx) - getX(parentWindowBounds.startIdx))}
-                height={height - padding.top - padding.bottom - volumeHeight}
+                height={Math.max(20, height - padding.top - bottomReserved)}
                 fill="#38bdf8"
                 fillOpacity="0.06"
                 stroke="#38bdf8"
@@ -1934,16 +2379,14 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           {/* Absolute Bottom (Horizontal Price Floor) + Starting Candle (Vertical Anchor) */}
           {absoluteBottom && (
             <g>
-              {/* Dim pre-start history left of Starting Candle */}
               <rect
                 x={padding.left}
                 y={padding.top}
                 width={Math.max(0, getX(absoluteBottom.candleIndex) - padding.left)}
-                height={height - padding.top - padding.bottom - volumeHeight}
+                height={Math.max(20, height - padding.top - bottomReserved)}
                 fill="#020617"
                 fillOpacity="0.44"
               />
-              {/* Primary Horizontal Price Floor Line across entire chart (کف مطلق افقی) */}
               <line
                 x1={padding.left}
                 y1={getY(absoluteBottom.price)}
@@ -1954,7 +2397,6 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 strokeDasharray="6 4"
                 opacity="0.92"
               />
-              {/* Right Price-Axis Pill for Horizontal Absolute Bottom */}
               <rect
                 x={width - padding.right + 2}
                 y={getY(absoluteBottom.price) - 9}
@@ -1973,9 +2415,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 fontWeight="bold"
                 fontFamily="JetBrains Mono, monospace"
               >
-                {absoluteBottom.price.toLocaleString()}
+                {formatScalePrice(absoluteBottom.price, scaleMode, percentBaseline)}
               </text>
-              {/* Vertical Marker for Selected Starting Candle (کندل شروع) */}
               <line
                 x1={getX(absoluteBottom.candleIndex)}
                 y1={padding.top}
@@ -2008,110 +2449,212 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 fontSize="10"
                 fontFamily="JetBrains Mono, monospace"
               >
-                {line.price.toLocaleString()}
+                {line.label}
               </text>
             </g>
           ))}
 
-          {/* Volume separator */}
+          {/* Volume separator & Bars */}
           {showVolume && (
-            <line
-              x1={padding.left}
-              y1={height - padding.bottom - volumeHeight}
-              x2={width - padding.right}
-              y2={height - padding.bottom - volumeHeight}
-              stroke="#1e293b"
-              strokeWidth="1"
-            />
+            <>
+              <line
+                x1={padding.left}
+                y1={height - bottomReserved}
+                x2={width - padding.right}
+                y2={height - bottomReserved}
+                stroke="#1e293b"
+                strokeWidth="1"
+              />
+              {displayCandles.slice(visStart, visEnd + 1).map((candle, offset) => {
+                const i = visStart + offset;
+                const x = getX(i);
+                const isUp = candle.close >= candle.open;
+                const barWidth = Math.max(2, ((width - padding.left - padding.right) / Math.max(1, visSpan)) * 0.62);
+                const vHeight = (candle.volume / maxVolume) * (volumeHeight - 8);
+                const y = height - padding.bottom - rsiHeight - vHeight;
+                return (
+                  <rect
+                    key={`vol-${i}`}
+                    x={x - barWidth / 2}
+                    y={y}
+                    width={barWidth}
+                    height={vHeight}
+                    fill={isUp ? 'url(#bullVol)' : 'url(#bearVol)'}
+                    opacity="0.85"
+                  />
+                );
+              })}
+            </>
           )}
 
-          {/* Volume Bars */}
-          {showVolume &&
-            candles.map((candle, i) => {
-              const x = getX(i);
-              const isUp = candle.close >= candle.open;
-              const barWidth = Math.max(2, ((width - padding.left - padding.right) / Math.max(1, maxPlotIndex)) * 0.62);
-              const vHeight = (candle.volume / maxVolume) * (volumeHeight - 10);
-              const y = height - padding.bottom - vHeight;
+          {/* Price Series Rendering by Active TradingView Chart Style */}
+          <g clipPath="url(#chartPlotClip)">
+            {(chartStyle === 'LINE' || chartStyle === 'AREA') &&
+              displayCandles.length >= 2 &&
+              (() => {
+                const pts = displayCandles
+                  .slice(visStart, visEnd + 1)
+                  .map((c, offset) => `${getX(visStart + offset).toFixed(1)},${getY(c.close).toFixed(1)}`);
+                const firstX = getX(visStart);
+                const lastX = getX(visEnd);
+                const baseY = height - bottomReserved;
+                return (
+                  <>
+                    {chartStyle === 'AREA' && (
+                      <polygon
+                        points={`${firstX},${baseY} ${pts.join(' ')} ${lastX},${baseY}`}
+                        fill="url(#areaChartFill)"
+                      />
+                    )}
+                    <polyline
+                      points={pts.join(' ')}
+                      fill="none"
+                      stroke="#22d3ee"
+                      strokeWidth="2"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                  </>
+                );
+              })()}
 
-              return (
-                <rect
-                  key={`vol-${i}`}
-                  x={x - barWidth / 2}
-                  y={y}
-                  width={barWidth}
-                  height={vHeight}
-                  fill={isUp ? 'url(#bullVol)' : 'url(#bearVol)'}
-                  opacity="0.85"
-                />
-              );
-            })}
+            {chartStyle !== 'LINE' &&
+              chartStyle !== 'AREA' &&
+              displayCandles.slice(visStart, visEnd + 1).map((candle, offset) => {
+                const i = visStart + offset;
+                const x = getX(i);
+                const openY = getY(candle.open);
+                const closeY = getY(candle.close);
+                const highY = getY(candle.high);
+                const lowY = getY(candle.low);
+                const isUp = candle.close >= candle.open;
+                const bodyColor = isUp ? '#10b981' : '#f43f5e';
+                const bodyTop = Math.min(openY, closeY);
+                const bodyHeight = Math.max(1.5, Math.abs(openY - closeY));
+                const barWidth = Math.max(2.5, ((width - padding.left - padding.right) / Math.max(1, visSpan)) * 0.62);
+                const slotWidth = Math.max(6, (width - padding.left - padding.right) / Math.max(1, visSpan));
+                const isStartCandle = Boolean(absoluteBottom && absoluteBottom.candleIndex === i);
+                const hollowFill = chartStyle === 'HOLLOW' && isUp ? '#080d1a' : bodyColor;
 
-          {/* Candlesticks */}
-          {candles.map((candle, i) => {
-            const x = getX(i);
-            const openY = getY(candle.open);
-            const closeY = getY(candle.close);
-            const highY = getY(candle.high);
-            const lowY = getY(candle.low);
-            const isUp = candle.close >= candle.open;
-            const bodyColor = isUp ? '#10b981' : '#f43f5e';
-            const bodyTop = Math.min(openY, closeY);
-            const bodyHeight = Math.max(1.5, Math.abs(openY - closeY));
-            const barWidth = Math.max(2.5, ((width - padding.left - padding.right) / Math.max(1, maxPlotIndex)) * 0.62);
-            const slotWidth = Math.max(6, (width - padding.left - padding.right) / Math.max(1, maxPlotIndex));
-            const isStartCandle = Boolean(absoluteBottom && absoluteBottom.candleIndex === i);
+                return (
+                  <g
+                    key={`candle-${i}`}
+                    onClick={
+                      onUpdateAbsoluteBottom && drawingTool === 'SELECT'
+                        ? e => {
+                            if (dragMovedRef.current) return;
+                            e.stopPropagation();
+                            onUpdateAbsoluteBottom({
+                              label: '0 (کف مطلق)',
+                              candleIndex: i,
+                              price: candles[i]?.low ?? candle.low,
+                              timestamp: candle.timestamp,
+                              isConfirmed: true
+                            });
+                          }
+                        : undefined
+                    }
+                    className={onUpdateAbsoluteBottom && drawingTool === 'SELECT' ? 'cursor-pointer' : undefined}
+                  >
+                    {isStartCandle && (
+                      <rect
+                        x={x - barWidth / 2 - 3}
+                        y={highY - 3}
+                        width={barWidth + 6}
+                        height={Math.max(8, lowY - highY + 6)}
+                        rx="3"
+                        fill="#f59e0b"
+                        fillOpacity="0.16"
+                        stroke="#f59e0b"
+                        strokeWidth="1.2"
+                      />
+                    )}
+                    {chartStyle === 'BARS' ? (
+                      <>
+                        <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.5" />
+                        <line x1={x - barWidth * 0.5} y1={openY} x2={x} y2={openY} stroke={bodyColor} strokeWidth="1.5" />
+                        <line x1={x} y1={closeY} x2={x + barWidth * 0.5} y2={closeY} stroke={bodyColor} strokeWidth="1.5" />
+                      </>
+                    ) : (
+                      <>
+                        <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.15" />
+                        <rect
+                          x={x - barWidth / 2}
+                          y={bodyTop}
+                          width={barWidth}
+                          height={bodyHeight}
+                          fill={hollowFill}
+                          stroke={bodyColor}
+                          strokeWidth={chartStyle === 'HOLLOW' && isUp ? '1.2' : '0.4'}
+                          rx="0.8"
+                        />
+                      </>
+                    )}
+                    {onUpdateAbsoluteBottom && drawingTool === 'SELECT' && (
+                      <rect
+                        x={x - slotWidth / 2}
+                        y={padding.top}
+                        width={slotWidth}
+                        height={Math.max(20, height - padding.top - bottomReserved)}
+                        fill="transparent"
+                      />
+                    )}
+                  </g>
+                );
+              })}
 
-            return (
-              <g
-                key={`candle-${i}`}
-                onClick={
-                  onUpdateAbsoluteBottom
-                    ? e => {
-                        if (dragMovedRef.current) return;
-                        e.stopPropagation();
-                        onUpdateAbsoluteBottom({
-                          label: '0 (کف مطلق)',
-                          candleIndex: i,
-                          price: candle.low,
-                          timestamp: candle.timestamp,
-                          isConfirmed: true
-                        });
-                      }
-                    : undefined
+            {/* Technical Indicators Overlay: Bollinger Bands & EMAs */}
+            {showBB &&
+              bbValues.length > 0 &&
+              (() => {
+                const upperPts: string[] = [];
+                const midPts: string[] = [];
+                const lowerPts: string[] = [];
+                for (let i = visStart; i <= visEnd; i++) {
+                  const pt = bbValues[i];
+                  if (!pt) continue;
+                  const x = getX(i).toFixed(1);
+                  upperPts.push(`${x},${getY(pt.upper).toFixed(1)}`);
+                  midPts.push(`${x},${getY(pt.mid).toFixed(1)}`);
+                  lowerPts.push(`${x},${getY(pt.lower).toFixed(1)}`);
                 }
-                className={onUpdateAbsoluteBottom ? 'cursor-pointer' : undefined}
-              >
-                {isStartCandle && (
-                  <rect
-                    x={x - barWidth / 2 - 3}
-                    y={highY - 3}
-                    width={barWidth + 6}
-                    height={Math.max(8, lowY - highY + 6)}
-                    rx="3"
-                    fill="#f59e0b"
-                    fillOpacity="0.16"
-                    stroke="#f59e0b"
-                    strokeWidth="1.2"
-                  />
-                )}
-                <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.15" />
-                <rect x={x - barWidth / 2} y={bodyTop} width={barWidth} height={bodyHeight} fill={bodyColor} rx="0.8" />
-                {onUpdateAbsoluteBottom && (
-                  <rect
-                    x={x - slotWidth / 2}
-                    y={padding.top}
-                    width={slotWidth}
-                    height={Math.max(20, height - padding.top - padding.bottom - volumeHeight)}
-                    fill="transparent"
-                  />
-                )}
-              </g>
-            );
-          })}
+                if (upperPts.length < 2) return null;
+                return (
+                  <g pointerEvents="none" opacity="0.82">
+                    <polyline points={upperPts.join(' ')} fill="none" stroke="#818cf8" strokeWidth="1.1" />
+                    <polyline points={midPts.join(' ')} fill="none" stroke="#6366f1" strokeWidth="1" strokeDasharray="3 3" />
+                    <polyline points={lowerPts.join(' ')} fill="none" stroke="#818cf8" strokeWidth="1.1" />
+                  </g>
+                );
+              })()}
+
+            {showEMA20 &&
+              ema20Values.length > 0 &&
+              (() => {
+                const pts: string[] = [];
+                for (let i = visStart; i <= visEnd; i++) {
+                  const v = ema20Values[i];
+                  if (v !== null && v !== undefined) pts.push(`${getX(i).toFixed(1)},${getY(v).toFixed(1)}`);
+                }
+                if (pts.length < 2) return null;
+                return <polyline points={pts.join(' ')} fill="none" stroke="#fbbf24" strokeWidth="1.4" pointerEvents="none" />;
+              })()}
+
+            {showEMA50 &&
+              ema50Values.length > 0 &&
+              (() => {
+                const pts: string[] = [];
+                for (let i = visStart; i <= visEnd; i++) {
+                  const v = ema50Values[i];
+                  if (v !== null && v !== undefined) pts.push(`${getX(i).toFixed(1)},${getY(v).toFixed(1)}`);
+                }
+                if (pts.length < 2) return null;
+                return <polyline points={pts.join(' ')} fill="none" stroke="#38bdf8" strokeWidth="1.4" pointerEvents="none" />;
+              })()}
+          </g>
 
           {/* Current Price Line */}
-          {lastPriceY >= padding.top && lastPriceY <= height - padding.bottom && (
+          {lastPriceY >= padding.top && lastPriceY <= height - bottomReserved && (
             <g>
               <line
                 x1={padding.left}
@@ -2132,7 +2675,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 fontWeight="bold"
                 fontFamily="JetBrains Mono, monospace"
               >
-                {lastPrice.toLocaleString()}
+                {formatScalePrice(lastPrice, scaleMode, percentBaseline)}
               </text>
             </g>
           )}
@@ -2140,7 +2683,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           {/* Unified Horizontal Overlays (PRZ Bounding Box, Width-Adjustable TMV Target Ribbons, Fib Extension Layers, Targets) with Shared Zero-Overlap Collision Solver */}
           {(() => {
             const plotTop = padding.top;
-            const plotBottom = height - padding.bottom - volumeHeight;
+            const plotBottom = height - bottomReserved;
             const endX = width - padding.right;
             const plotW = Math.max(80, endX - padding.left);
 
@@ -3174,7 +3717,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 x={rx}
                 y={padding.top}
                 width={rw}
-                height={Math.max(0, height - padding.top - padding.bottom - volumeHeight)}
+                height={Math.max(0, height - padding.top - bottomReserved)}
                 fill={scenarioColor}
                 fillOpacity="0.09"
                 stroke={scenarioColor}
@@ -3732,29 +4275,256 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
 
-          {/* Crosshair */}
-          {mousePos && mousePos.x >= padding.left && mousePos.x <= width - padding.right && (
-            <g opacity="0.5" pointerEvents="none">
+          {/* TradingView User Drawings + Live Two-Click Preview */}
+          <g clipPath="url(#chartPlotClip)">
+            {drawings.map(d => {
+              const p1 = d.points[0];
+              const p2 = d.points[1];
+              if (!p1) return null;
+              const x1 = getX(p1.candleIndex);
+              const y1 = getY(p1.price);
+
+              if (d.kind === 'HLINE') {
+                return (
+                  <g key={d.id}>
+                    <line x1={padding.left} y1={y1} x2={width - padding.right} y2={y1} stroke={d.color} strokeWidth="1.4" strokeDasharray="5 3" />
+                  </g>
+                );
+              }
+              if (d.kind === 'VLINE') {
+                return (
+                  <g key={d.id}>
+                    <line x1={x1} y1={padding.top} x2={x1} y2={height - bottomReserved} stroke={d.color} strokeWidth="1.3" strokeDasharray="4 3" />
+                  </g>
+                );
+              }
+              if (d.kind === 'TEXT') {
+                return (
+                  <g key={d.id}>
+                    <circle cx={x1} cy={y1} r="3.5" fill={d.color} />
+                    <rect x={x1 + 6} y={y1 - 11} width="128" height="19" rx="4" fill="#080d1a" stroke={d.color} strokeWidth="1" />
+                    <text x={x1 + 12} y={y1 + 2} fill="#e2e8f0" fontSize="9.5" fontWeight="600">
+                      {d.label || 'یادداشت'}
+                    </text>
+                  </g>
+                );
+              }
+              if (!p2) return null;
+              const x2 = getX(p2.candleIndex);
+              const y2 = getY(p2.price);
+
+              if (d.kind === 'TRENDLINE') {
+                return (
+                  <g key={d.id}>
+                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.8" />
+                    <circle cx={x1} cy={y1} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
+                    <circle cx={x2} cy={y2} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
+                  </g>
+                );
+              }
+              if (d.kind === 'RAY') {
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const endX = width - padding.right;
+                const scale = Math.abs(dx) > 1 ? Math.max(1, (endX - x1) / dx) : 1;
+                const rx2 = x1 + dx * scale;
+                const ry2 = y1 + dy * scale;
+                return (
+                  <g key={d.id}>
+                    <line x1={x1} y1={y1} x2={rx2} y2={ry2} stroke={d.color} strokeWidth="1.7" />
+                    <circle cx={x1} cy={y1} r="3.2" fill={d.color} />
+                    <circle cx={x2} cy={y2} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
+                  </g>
+                );
+              }
+              if (d.kind === 'CHANNEL') {
+                const offY = 38;
+                return (
+                  <g key={d.id}>
+                    <polygon points={`${x1},${y1} ${x2},${y2} ${x2},${y2 + offY} ${x1},${y1 + offY}`} fill={d.color} fillOpacity="0.08" />
+                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.6" />
+                    <line x1={x1} y1={y1 + offY} x2={x2} y2={y2 + offY} stroke={d.color} strokeWidth="1.4" strokeDasharray="4 3" />
+                  </g>
+                );
+              }
+              if (d.kind === 'FIB_RETRACE') {
+                const ratios = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+                const leftX = Math.min(x1, x2);
+                const rightX = Math.max(x1, x2);
+                return (
+                  <g key={d.id}>
+                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.1" strokeDasharray="3 3" opacity="0.7" />
+                    {ratios.map(r => {
+                      const fp = p1.price + (p2.price - p1.price) * r;
+                      const fy = getY(fp);
+                      return (
+                        <g key={r}>
+                          <line x1={leftX} y1={fy} x2={rightX} y2={fy} stroke={d.color} strokeWidth={r === 0.5 || r === 0.618 ? '1.3' : '0.9'} opacity="0.85" />
+                          <text x={rightX + 4} y={fy + 3} fill={d.color} fontSize="8.5" fontFamily="JetBrains Mono, monospace">
+                            {(r * 100).toFixed(1)}% ({formatScalePrice(fp, scaleMode, percentBaseline)})
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              }
+              if (d.kind === 'MEASURE') {
+                const rx = Math.min(x1, x2);
+                const ry = Math.min(y1, y2);
+                const rw = Math.max(24, Math.abs(x2 - x1));
+                const rh = Math.max(18, Math.abs(y2 - y1));
+                const diff = p2.price - p1.price;
+                const pct = p1.price !== 0 ? ((diff / p1.price) * 100).toFixed(2) : '0.00';
+                const bars = Math.abs(p2.candleIndex - p1.candleIndex);
+                const col = diff >= 0 ? '#10b981' : '#f43f5e';
+                return (
+                  <g key={d.id} pointerEvents="none">
+                    <rect x={rx} y={ry} width={rw} height={rh} fill={col} fillOpacity="0.14" stroke={col} strokeWidth="1.2" />
+                    <rect x={rx + rw / 2 - 66} y={ry + rh + 4} width="132" height="19" rx="4" fill="#020617" stroke={col} strokeWidth="1" />
+                    <text x={rx + rw / 2} y={ry + rh + 16.5} textAnchor="middle" fill="#f8fafc" fontSize="9" fontFamily="JetBrains Mono, monospace">
+                      {`${diff >= 0 ? '+' : ''}${pct}% · ${bars} کندل`}
+                    </text>
+                  </g>
+                );
+              }
+              return null;
+            })}
+
+            {pendingDrawPoint && mousePos && (
               <line
-                x1={mousePos.x}
-                y1={padding.top}
+                x1={getX(pendingDrawPoint.candleIndex)}
+                y1={getY(pendingDrawPoint.price)}
                 x2={mousePos.x}
-                y2={height - padding.bottom}
-                stroke="#64748b"
-                strokeWidth="1"
-                strokeDasharray="3 3"
-              />
-              <line
-                x1={padding.left}
-                y1={mousePos.y}
-                x2={width - padding.right}
                 y2={mousePos.y}
-                stroke="#64748b"
-                strokeWidth="1"
-                strokeDasharray="3 3"
+                stroke="#22d3ee"
+                strokeWidth="1.4"
+                strokeDasharray="4 3"
+                pointerEvents="none"
               />
-            </g>
-          )}
+            )}
+          </g>
+
+          {/* RSI (14) Lower Sub-Pane */}
+          {showRSI && rsiValues.length > 0 && (() => {
+            const rsiTop = height - padding.bottom - rsiHeight + 6;
+            const rsiBot = height - padding.bottom - 4;
+            const rsiSpanH = Math.max(16, rsiBot - rsiTop);
+            const yRsi = (val: number) => rsiBot - (Math.max(0, Math.min(100, val)) / 100) * rsiSpanH;
+            const pts: string[] = [];
+            for (let i = visStart; i <= visEnd; i++) {
+              const val = rsiValues[i];
+              if (val !== null && val !== undefined) pts.push(`${getX(i).toFixed(1)},${yRsi(val).toFixed(1)}`);
+            }
+            const latestRsi = rsiValues[visEnd] ?? rsiValues[rsiValues.length - 1];
+            return (
+              <g pointerEvents="none">
+                <line x1={padding.left} y1={rsiTop - 4} x2={width - padding.right} y2={rsiTop - 4} stroke="#1e293b" strokeWidth="1" />
+                <line x1={padding.left} y1={yRsi(70)} x2={width - padding.right} y2={yRsi(70)} stroke="#475569" strokeDasharray="3 3" strokeWidth="0.8" />
+                <line x1={padding.left} y1={yRsi(30)} x2={width - padding.right} y2={yRsi(30)} stroke="#475569" strokeDasharray="3 3" strokeWidth="0.8" />
+                {pts.length >= 2 && <polyline points={pts.join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1.4" />}
+                <text x={padding.left + 6} y={rsiTop + 10} fill="#a78bfa" fontSize="9" fontFamily="JetBrains Mono, monospace">
+                  RSI(14){latestRsi !== null && latestRsi !== undefined ? `: ${latestRsi.toFixed(1)}` : ''}
+                </text>
+              </g>
+            );
+          })()}
+
+          {/* Bottom X-Axis Calendar / Time Ticks */}
+          {displayCandles.length >= 4 && (() => {
+            const tickCount = Math.min(6, Math.max(2, Math.floor((width - padding.left - padding.right) / 135)));
+            const stepIdx = Math.max(1, Math.floor(visSpan / tickCount));
+            const ticks: number[] = [];
+            for (let idx = visStart; idx <= visEnd; idx += stepIdx) {
+              ticks.push(idx);
+            }
+            return (
+              <g pointerEvents="none">
+                <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#1e293b" strokeWidth="1" />
+                {ticks.map(idx => {
+                  const c = displayCandles[idx];
+                  if (!c) return null;
+                  const tx = getX(idx);
+                  return (
+                    <text
+                      key={`xtick-${idx}`}
+                      x={tx}
+                      y={height - 8}
+                      textAnchor="middle"
+                      fill="#64748b"
+                      fontSize="9"
+                      fontFamily="JetBrains Mono, monospace"
+                    >
+                      {formatCandleAxisTime(c.timestamp, timeframe, true)}
+                    </text>
+                  );
+                })}
+              </g>
+            );
+          })()}
+
+          {/* Crosshair + Right Y-Axis Price Pill + Bottom Time Pill */}
+          {mousePos &&
+            mousePos.x >= padding.left &&
+            mousePos.x <= width - padding.right &&
+            mousePos.y >= padding.top &&
+            mousePos.y <= height - bottomReserved && (() => {
+              const chInfo = getIndexAndPriceFromCoords(mousePos.x, mousePos.y, false);
+              const usableH = Math.max(1, height - padding.top - bottomReserved);
+              const normY = (height - bottomReserved - mousePos.y) / usableH;
+              const rawCursorPrice = inverseTransformPrice(sMin + normY * sRange, scaleMode, percentBaseline);
+              const chCandle = displayCandles[chInfo.candleIndex];
+              return (
+                <g pointerEvents="none">
+                  <line
+                    x1={mousePos.x}
+                    y1={padding.top}
+                    x2={mousePos.x}
+                    y2={height - padding.bottom}
+                    stroke="#64748b"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                    opacity="0.65"
+                  />
+                  <line
+                    x1={padding.left}
+                    y1={mousePos.y}
+                    x2={width - padding.right}
+                    y2={mousePos.y}
+                    stroke="#64748b"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                    opacity="0.65"
+                  />
+                  <rect x={width - padding.right + 2} y={mousePos.y - 9} width="80" height="18" rx="4" fill="#1e293b" stroke="#64748b" strokeWidth="0.9" />
+                  <text
+                    x={width - padding.right + 6}
+                    y={mousePos.y + 3.5}
+                    fill="#f8fafc"
+                    fontSize="9.5"
+                    fontWeight="bold"
+                    fontFamily="JetBrains Mono, monospace"
+                  >
+                    {formatScalePrice(rawCursorPrice, scaleMode, percentBaseline)}
+                  </text>
+                  {chCandle && (
+                    <g>
+                      <rect x={Math.max(padding.left, Math.min(width - padding.right - 96, mousePos.x - 48))} y={height - padding.bottom + 2} width="96" height="16" rx="3" fill="#1e293b" stroke="#475569" strokeWidth="0.8" />
+                      <text
+                        x={Math.max(padding.left + 48, Math.min(width - padding.right - 48, mousePos.x))}
+                        y={height - padding.bottom + 13}
+                        textAnchor="middle"
+                        fill="#e2e8f0"
+                        fontSize="8.5"
+                        fontFamily="JetBrains Mono, monospace"
+                      >
+                        {formatCandleAxisTime(chCandle.timestamp, timeframe, true)}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })()}
         </svg>
 
         {/* Glassmorphic Graphical PRZ Containers (Frosted Glass, Luminous Gradients, Neon Borders, Timeframe & Price-Level Synced) */}
@@ -4036,51 +4806,69 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </div>
         )}
 
-        {/* Floating Wave Metrics & Market Trend Regime HUD */}
-        {(hudInfo || candles.length >= 6) && (
-          <div className="absolute top-3 left-3 bg-slate-950/90 border border-slate-800 rounded-lg px-3 py-1.5 text-[11px] flex items-center gap-3 pointer-events-none">
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-500">روند:</span>
-              <strong
-                className={
-                  marketTrend.regime === 'IMPULSE'
-                    ? 'text-emerald-400 font-semibold'
-                    : marketTrend.regime === 'CORRECTION'
-                    ? 'text-amber-300 font-semibold'
-                    : 'text-slate-300 font-semibold'
-                }
-              >
-                {marketTrend.shortLabelFa}
-              </strong>
+        {/* Floating Wave Metrics, Market Trend Regime & Live OHLCV HUD */}
+        {(hudInfo || candles.length >= 6) && (() => {
+          const hoverIdx =
+            mousePos && mousePos.x >= padding.left && mousePos.x <= width - padding.right
+              ? getIndexAndPriceFromCoords(mousePos.x, mousePos.y, false).candleIndex
+              : displayCandles.length - 1;
+          const activeBar = displayCandles[Math.max(0, Math.min(displayCandles.length - 1, hoverIdx))];
+          return (
+            <div className="absolute top-2.5 left-3 flex flex-col gap-1 pointer-events-none z-10">
+              <div className="bg-slate-950/90 border border-slate-800 rounded-lg px-3 py-1.5 text-[11px] flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500">روند:</span>
+                  <strong
+                    className={
+                      marketTrend.regime === 'IMPULSE'
+                        ? 'text-emerald-400 font-semibold'
+                        : marketTrend.regime === 'CORRECTION'
+                        ? 'text-amber-300 font-semibold'
+                        : 'text-slate-300 font-semibold'
+                    }
+                  >
+                    {marketTrend.shortLabelFa}
+                  </strong>
+                </div>
+                {hudInfo && (
+                  <>
+                    <div className="h-3.5 w-px bg-slate-800" />
+                    <div className="flex items-center gap-1.5 text-slate-300">
+                      <span className="text-slate-500">اصلاح موج ۲:</span>
+                      <strong className="text-cyan-400 font-mono tabular-nums">{hudInfo.retrace2Pct}%</strong>
+                    </div>
+                    <div className="h-3.5 w-px bg-slate-800" />
+                    <div className="flex items-center gap-1.5 text-slate-300">
+                      <span className="text-slate-500">موج ۳ / ۱:</span>
+                      <strong className="text-indigo-400 font-mono tabular-nums">{hudInfo.w3Ratio}x</strong>
+                    </div>
+                    <div className="h-3.5 w-px bg-slate-800" />
+                    <div className="flex items-center gap-1">
+                      {hudInfo.hasOverlap ? (
+                        <span className="text-amber-400 font-medium flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> هم‌پوشانی ۴ و ۱
+                        </span>
+                      ) : (
+                        <span className="text-emerald-400 font-medium flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> بدون هم‌پوشانی
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {activeBar && (
+                <div className="hidden md:flex items-center gap-2.5 bg-slate-950/80 border border-slate-800/80 rounded-md px-2.5 py-1 text-[10px] font-mono tabular-nums text-slate-300">
+                  <span>O <strong className="text-white">{activeBar.open.toLocaleString()}</strong></span>
+                  <span>H <strong className="text-emerald-300">{activeBar.high.toLocaleString()}</strong></span>
+                  <span>L <strong className="text-rose-300">{activeBar.low.toLocaleString()}</strong></span>
+                  <span>C <strong className={activeBar.close >= activeBar.open ? 'text-emerald-400' : 'text-rose-400'}>{activeBar.close.toLocaleString()}</strong></span>
+                </div>
+              )}
             </div>
-            {hudInfo && (
-              <>
-                <div className="h-3.5 w-px bg-slate-800" />
-                <div className="flex items-center gap-1.5 text-slate-300">
-                  <span className="text-slate-500">اصلاح موج ۲:</span>
-                  <strong className="text-cyan-400 font-mono tabular-nums">{hudInfo.retrace2Pct}%</strong>
-                </div>
-                <div className="h-3.5 w-px bg-slate-800" />
-                <div className="flex items-center gap-1.5 text-slate-300">
-                  <span className="text-slate-500">موج ۳ / ۱:</span>
-                  <strong className="text-indigo-400 font-mono tabular-nums">{hudInfo.w3Ratio}x</strong>
-                </div>
-                <div className="h-3.5 w-px bg-slate-800" />
-                <div className="flex items-center gap-1">
-                  {hudInfo.hasOverlap ? (
-                    <span className="text-amber-400 font-medium flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" /> هم‌پوشانی ۴ و ۱
-                    </span>
-                  ) : (
-                    <span className="text-emerald-400 font-medium flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> بدون هم‌پوشانی
-                    </span>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {/* Drill-Down Lowest TF Notice Banner */}
         {drillNotice && (
@@ -4201,6 +4989,13 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 </button>
               )}
             </>
+          ) : drawingTool !== 'SELECT' ? (
+            <>
+              <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
+              <span>
+                ابزار ترسیم فعال ({drawingTool}): {pendingDrawPoint ? 'نقطه دوم را روی چارت کلیک کنید' : 'روی چارت کلیک کنید'} · Esc برای خروج
+              </span>
+            </>
           ) : (
             <>
               <Move className="w-3.5 h-3.5 text-indigo-400" />
@@ -4208,10 +5003,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 {activeScenario.isLocked
                   ? 'سناریو قفل است؛ برای تغییر نقاط قفل را باز کنید.'
                   : onDoubleClickWaveLeg && nextLowerValidTF
-                  ? `برای مشاهده داده‌ها و سناریوهای ${nextLowerValidTF} روی هر موج کلیک کنید، یا نقاط را بکشید.`
+                  ? `برای مشاهده داده‌ها و سناریوهای ${nextLowerValidTF} روی هر موج کلیک کنید، اسکرول برای زوم و درگ برای پن.`
                   : onDoubleClickWaveLeg
-                  ? `در پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe}) هستید؛ نقاط را بکشید یا کلیک کنید.`
-                  : 'نقاط پیوت را بکشید یا برای تغییر لیبل و حذف روی هر نقطه کلیک کنید.'}
+                  ? `در پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe}) هستید؛ نقاط را بکشید یا اسکرول کنید.`
+                  : 'نقاط پیوت را بکشید، اسکرول برای زوم و برای تغییر لیبل روی هر نقطه کلیک کنید.'}
               </span>
               {!hideToolbarLockAndReset && isUserModifiedCount && (
                 <button
@@ -4308,6 +5103,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             />
           </div>
         )}
+        </div>
       </div>
     </div>
   );
