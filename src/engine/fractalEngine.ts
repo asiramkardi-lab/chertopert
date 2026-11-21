@@ -1303,11 +1303,13 @@ export interface ZigzagLegObjectInput {
 export type ZigzagLegInput = number | ZigzagLegObjectInput;
 
 export type ZigzagVariant = 'IDEAL' | 'SIMPLE' | 'ANTI' | 'INVALID';
+export type ZigzagCategory = 'IDEAL_5_3_5' | 'SIMPLE_3_3_3' | 'ANTI_3_5_5' | 'INVALID';
 export type ZigzagLengthClass = 'TRUNCATED' | 'NORMAL' | 'EXTENDED' | 'INVALID_SHORT';
 
 export interface ZigzagIdentificationResult {
   isValid: boolean;
   variant: ZigzagVariant;
+  category: ZigzagCategory;
   variantLabelFa: string;
   signature: string;
   direction: 'BULLISH' | 'BEARISH';
@@ -1444,19 +1446,23 @@ export function identifyZigzag(
 
   const sig = `${legA.subwaveCount}-${legB.subwaveCount}-${legC.subwaveCount}`;
   let variant: ZigzagVariant = 'INVALID';
+  let category: ZigzagCategory = 'INVALID';
   let variantLabelFa = `ساختار نامعتبر (${sig})`;
 
   if (sig === '5-3-5') {
     variant = 'IDEAL';
+    category = 'IDEAL_5_3_5';
     variantLabelFa = 'زیگزاگ ایده‌آل (۵-۳-۵)';
   } else if (sig === '3-3-3') {
     variant = 'SIMPLE';
+    category = 'SIMPLE_3_3_3';
     variantLabelFa =
       bOverAPct > 61.8
         ? 'ساختار ۳-۳-۳ با موج B بزرگ (> ۶۱.۸٪ — احتمال الگوی ترکیبی)'
         : 'زیگزاگ سیمپل (۳-۳-۳)';
   } else if (sig === '3-5-5') {
     variant = 'ANTI';
+    category = 'ANTI_3_5_5';
     variantLabelFa = 'زیگزاگ آنتی‌ای (۳-۵-۵)';
   }
 
@@ -1498,6 +1504,7 @@ export function identifyZigzag(
   return {
     isValid,
     variant,
+    category,
     variantLabelFa,
     signature: sig,
     direction,

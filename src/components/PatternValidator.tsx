@@ -960,7 +960,8 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                   <div className="flex items-center justify-between font-semibold text-white">
                     <span>{auditResult.specializedReport.data.variantLabelFa}</span>
                     <span className="font-mono text-amber-300">
-                      موج {auditResult.specializedReport.data.waveLocation} ·{' '}
+                      موج {auditResult.specializedReport.data.waveLocation}
+                      {auditResult.specializedReport.data.isCommonLocation ? '' : ' (نادر)'} ·{' '}
                       {auditResult.specializedReport.data.wave2Covered100 ? 'پوشش ۱۰۰٪ موج ۲ ✓' : 'عدم پوشش ۱۰۰٪ موج ۲'}
                     </span>
                   </div>
@@ -968,6 +969,11 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                     {auditResult.specializedReport.data.correctionTargetRangeFa} ·{' '}
                     {auditResult.specializedReport.data.correctionDepthFa}
                   </p>
+                  {auditResult.specializedReport.data.warnings.length > 0 && (
+                    <p className="text-[10.5px] text-amber-300 leading-relaxed">
+                      {auditResult.specializedReport.data.warnings[0]}
+                    </p>
+                  )}
                 </div>
               )}
 

@@ -138,7 +138,7 @@ describe('Session 9: Diagonal & Anti-Diagonal Rules (§2.1 - §2.14)', () => {
     expect(t912.hasRule3Overlap).toBe(true);
   });
 
-  it('T-9.13..T-9.15: classifies Leading Diagonal when Wave 3 forms a 3-3-3-3-3 Diagonal', () => {
+  it('T-9.13..T-9.15 & T-9.22..T-9.24: classifies Leading Diagonal (Ideal 5-3, Anti 3-5) vs Impulsive (3-3) from Wave 3', () => {
     const t913 = PatternEngines.classifyLeadingDiagonalFromWave3({
       w3SubwaveCounts: [3, 3, 3, 3, 3],
       w1Subwaves: 5,
@@ -151,10 +151,19 @@ describe('Session 9: Diagonal & Anti-Diagonal Rules (§2.1 - §2.14)', () => {
     const t914 = PatternEngines.classifyLeadingDiagonalFromWave3({
       w3SubwaveCounts: [3, 3, 3, 3, 3],
       w1Subwaves: 3,
-      w2Subwaves: 3
+      w2Subwaves: 5
     });
     expect(t914.pattern).toBe('ANTI_LEADING_DIAGONAL');
+    expect(t914.isLeadingDiagonal).toBe(true);
     expect(t914.isAntiLeadingDiagonal).toBe(true);
+
+    const t924 = PatternEngines.classifyLeadingDiagonalFromWave3({
+      w3SubwaveCounts: [3, 3, 3, 3, 3],
+      w1Subwaves: 3,
+      w2Subwaves: 3
+    });
+    expect(t924.pattern).toBe('IMPULSIVE_DIAGONAL');
+    expect(t924.isLeadingDiagonal).toBe(false);
 
     const t915 = PatternEngines.classifyLeadingDiagonalFromWave3({
       w3SubwaveCounts: [5, 3, 5],
@@ -219,6 +228,15 @@ describe('Session 9: Diagonal & Anti-Diagonal Rules (§2.1 - §2.14)', () => {
 
     const repW3 = PatternEngines.analyzeDiagonal(diagScenario, candles, 'موج 3');
     expect(repW3.isCommonLocation).toBe(false);
+
+    const repC = PatternEngines.analyzeDiagonal(diagScenario, candles, 'موج C');
+    expect(repC.isCommonLocation).toBe(true);
+    expect(repC.diagonalVariant).toBe('ENDING');
+
+    const leadScenario = makeScenario('diag-w1', 'LEADING_DIAGONAL', [100, 190, 140, 230, 175, 250], ['0', '1', '2', '3', '4', '5'], 'BULLISH', candles);
+    const repW1 = PatternEngines.analyzeDiagonal(leadScenario, candles, 'موج 1');
+    expect(repW1.isCommonLocation).toBe(true);
+    expect(repW1.diagonalVariant).toBe('LEADING_IDEAL');
 
     // §2.11 Post-diagonal correction
     expect(PatternEngines.evaluatePostDiagonalCorrection(false, 55).classification).toBe('STANDARD');
@@ -753,6 +771,7 @@ describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
     expect(ideal).toMatchObject({
       isValid: true,
       variant: 'IDEAL',
+      category: 'IDEAL_5_3_5',
       signature: '5-3-5',
       cCoversB100: true,
       lengthClass: 'NORMAL',
@@ -768,6 +787,7 @@ describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
     expect(simple).toMatchObject({
       isValid: true,
       variant: 'SIMPLE',
+      category: 'SIMPLE_3_3_3',
       signature: '3-3-3',
       cCoversB100: true,
       lengthClass: 'TRUNCATED'
@@ -791,6 +811,7 @@ describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
     expect(anti).toMatchObject({
       isValid: true,
       variant: 'ANTI',
+      category: 'ANTI_3_5_5',
       signature: '3-5-5',
       direction: 'BEARISH',
       cCoversB100: true,

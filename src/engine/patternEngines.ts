@@ -367,18 +367,19 @@ export class PatternEngines {
   }
 
   /**
-   * Session 9 (§2.5):
+   * Session 9 (§2.5 & §2.8):
    * Leading Diagonal classification when Wave 3 forms as a 3-3-3-3-3 Diagonal:
-   * - W3 = Diagonal (3-3-3-3-3) + W1/W2 = Ideal (5-3) -> LEADING_DIAGONAL
-   * - W3 = Diagonal (3-3-3-3-3) + W1/W2 = Non-Ideal (3-3 / 3-5) -> ANTI_LEADING_DIAGONAL
-   * - W3 = 5-3-5 (or Ideal Cycle) -> NOT Leading Diagonal
+   * - W3 = Diagonal (3-3-3-3-3) + W1=5, W2=3 (Ideal) -> LEADING_DIAGONAL
+   * - W3 = Diagonal (3-3-3-3-3) + W1=3, W2=5 (Anti-Cycle) -> ANTI_LEADING_DIAGONAL
+   * - W3 = Diagonal (3-3-3-3-3) + W1=3, W2=3 (All 3-wave) -> IMPULSIVE_DIAGONAL (not Leading)
+   * - W3 = 5-3-5 (or Ideal Cycle) -> NOT_LEADING_DIAGONAL
    */
   public static classifyLeadingDiagonalFromWave3(params: {
     w3SubwaveCounts: [number, number, number, number, number] | [number, number, number];
     w1Subwaves: 3 | 5;
     w2Subwaves: 3 | 5;
   }): {
-    pattern: 'LEADING_DIAGONAL' | 'ANTI_LEADING_DIAGONAL' | 'NOT_LEADING_DIAGONAL';
+    pattern: 'LEADING_DIAGONAL' | 'ANTI_LEADING_DIAGONAL' | 'IMPULSIVE_DIAGONAL' | 'NOT_LEADING_DIAGONAL';
     isLeadingDiagonal: boolean;
     isAntiLeadingDiagonal: boolean;
     reasonFa: string;
@@ -396,13 +397,21 @@ export class PatternEngines {
       };
     }
 
-    const isW1W2Ideal = w1Subwaves === 5 && w2Subwaves === 3;
-    if (isW1W2Ideal) {
+    if (w1Subwaves === 5 && w2Subwaves === 3) {
       return {
         pattern: 'LEADING_DIAGONAL',
         isLeadingDiagonal: true,
         isAntiLeadingDiagonal: false,
-        reasonFa: 'موج ۳ به‌صورت قطر ۳-۳-۳-۳-۳ و امواج ۱ و ۲ به‌صورت ایده‌آل ۵-۳ است: الگوی قطر پیشرو (Leading Diagonal) تشخیص داده شد.'
+        reasonFa: 'موج ۳ به‌صورت قطر ۳-۳-۳-۳-۳ و امواج ۱ و ۲ به‌صورت ایده‌آل ۵-۳ است: الگوی قطر پیشرو ایده‌آل (Leading Diagonal).'
+      };
+    }
+
+    if (w1Subwaves === 3 && w2Subwaves === 3) {
+      return {
+        pattern: 'IMPULSIVE_DIAGONAL',
+        isLeadingDiagonal: false,
+        isAntiLeadingDiagonal: false,
+        reasonFa: 'امواج ۱ و ۲ نیز همانند موج ۳ سه‌موجی هستند (ساختار تمام‌سه‌موجی): الگوی قطر شتابدار (Impulsive Diagonal)، نه قطر پیشرو.'
       };
     }
 
@@ -410,7 +419,7 @@ export class PatternEngines {
       pattern: 'ANTI_LEADING_DIAGONAL',
       isLeadingDiagonal: true,
       isAntiLeadingDiagonal: true,
-      reasonFa: 'موج ۳ به‌صورت قطر ۳-۳-۳-۳-۳ و امواج ۱ و ۲ غیرایده‌آل است: الگوی قطر پیشرو آنتی (Anti-Leading Diagonal) تشخیص داده شد.'
+      reasonFa: 'موج ۳ به‌صورت قطر ۳-۳-۳-۳-۳ و امواج ۱ و ۲ غیرایده‌آل (آنتی‌سیکل ۳-۵) است: الگوی قطر پیشرو آنتی (Anti-Leading Diagonal).'
     };
   }
 
