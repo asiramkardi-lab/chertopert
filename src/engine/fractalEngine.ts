@@ -1290,6 +1290,16 @@ export class FractalEngine {
   ): ZigzagTargetsResult {
     return calculateZigzagTargets(zigZagPattern);
   }
+
+  /**
+   * Session 9 Diagonal & Anti-Diagonal identification wrapper on FractalEngine.
+   */
+  public static identifyDiagonal(
+    input: DiagonalIdentificationInput,
+    options?: DiagonalIdentificationOptions
+  ): DiagonalIdentificationResult {
+    return identifyDiagonal(input, options);
+  }
 }
 
 export interface ZigzagLegObjectInput {
@@ -1672,6 +1682,407 @@ export function calculateZigzagTargets(
     referenceBase,
     lengthClass,
     summaryFa
+  };
+}
+
+export type DiagonalCategory =
+  | 'IMPULSIVE_DIAGONAL'
+  | 'LEADING_DIAGONAL'
+  | 'ANTI_LEADING_DIAGONAL'
+  | 'ENDING_DIAGONAL'
+  | 'ANTI_DIAGONAL'
+  | 'NOT_DIAGONAL'
+  | 'INVALID';
+
+export interface DiagonalVertexInput {
+  price: number;
+  label?: string;
+  candleIndex?: number;
+  timestamp?: number;
+  isConfirmed?: boolean;
+  subwaveCount?: number;
+  subwaves?: unknown[] | number;
+}
+
+export interface DiagonalIdentificationOptions {
+  waveLocation?: '1' | '3' | '5' | 'A' | 'C';
+  hasRule3Overlap?: boolean;
+  requireRule3Overlap?: boolean;
+  strictStrengthOrder?: boolean;
+  subwaveCounts?: [number, number, number, number, number];
+  direction?: 'BULLISH' | 'BEARISH';
+}
+
+export type DiagonalIdentificationInput =
+  | DiagonalVertexInput[]
+  | ZigzagLegInput[]
+  | {
+      waves?: ZigzagLegInput[];
+      vertices?: DiagonalVertexInput[];
+      subwaveCounts?: [number, number, number, number, number];
+      waveLocation?: '1' | '3' | '5' | 'A' | 'C';
+      hasRule3Overlap?: boolean;
+      requireRule3Overlap?: boolean;
+      strictStrengthOrder?: boolean;
+      direction?: 'BULLISH' | 'BEARISH';
+    };
+
+export interface DiagonalIdentificationResult {
+  isValid: boolean;
+  category: DiagonalCategory;
+  variantLabelFa: string;
+  subwaveSignature: string;
+  isAll3Wave: boolean;
+  wave2Covered100: boolean;
+  w3CoversW2Pct: number;
+  hasRule3Overlap: boolean;
+  strengthPattern: 'INCREASING' | 'DECREASING' | 'MIXED';
+  isBroadeningWedge: boolean;
+  waveLocation: '1' | '3' | '5' | 'A' | 'C';
+  isCommonLocation: boolean;
+  postCorrectionRangePct: [number, number];
+  reasonFa: string;
+}
+
+function isVertexArrayInput(items: unknown[]): items is DiagonalVertexInput[] {
+  if (items.length === 0) return false;
+  const first = items[0];
+  return (
+    typeof first === 'object' &&
+    first !== null &&
+    'price' in first &&
+    typeof (first as { price: unknown }).price === 'number' &&
+    !('startPrice' in first) &&
+    !('endPrice' in first) &&
+    !('length' in first)
+  );
+}
+
+function extractSubwaveCountFromVertex(vertex: DiagonalVertexInput | undefined, fallback: number): number {
+  if (!vertex) return fallback;
+  if (typeof vertex.subwaveCount === 'number') return vertex.subwaveCount;
+  if (typeof vertex.subwaves === 'number') return vertex.subwaves;
+  if (Array.isArray(vertex.subwaves)) return vertex.subwaves.length;
+  return fallback;
+}
+
+/**
+ * Session 9 Diagonal & Anti-Diagonal identifier:
+ * Accepts either WaveVertex[] (6 vertices: 0..5), 5 wave-leg objects, or a structured input object.
+ * Validates 5-wave Diagonal structure (3-3-3-3-3), 100% Wave 2 coverage by Wave 3,
+ * mandatory Rule 3 overlap (Wave 4 entering Wave 1 price range), strength ordering (1>3>5 vs 1<3<5),
+ * and Ending / Leading / Impulsive / Anti-Diagonal categorization.
+ */
+export function identifyDiagonal(
+  input: DiagonalIdentificationInput,
+  options?: DiagonalIdentificationOptions
+): DiagonalIdentificationResult {
+  let rawWaves: ZigzagLegInput[] = [];
+  let vertices: DiagonalVertexInput[] | undefined;
+  let explicitSubwaves = options?.subwaveCounts;
+  let hasExplicitLocation = options?.waveLocation !== undefined;
+  let waveLocation: '1' | '3' | '5' | 'A' | 'C' = options?.waveLocation ?? '5';
+  let directionOpt = options?.direction;
+  let overlapOpt = options?.hasRule3Overlap;
+  let requireOverlapOpt = options?.requireRule3Overlap;
+  let strictStrengthOrder = options?.strictStrengthOrder ?? false;
+
+  if (Array.isArray(input)) {
+    if (isVertexArrayInput(input)) {
+      vertices = input;
+    } else {
+      rawWaves = input as ZigzagLegInput[];
+    }
+  } else {
+    if (Array.isArray(input.waves)) rawWaves = input.waves;
+    if (Array.isArray(input.vertices)) vertices = input.vertices;
+    if (input.subwaveCounts) explicitSubwaves = input.subwaveCounts;
+    if (input.waveLocation) {
+      waveLocation = input.waveLocation;
+      hasExplicitLocation = true;
+    }
+    if (input.direction) directionOpt = input.direction;
+    if (input.hasRule3Overlap !== undefined) overlapOpt = input.hasRule3Overlap;
+    if (input.requireRule3Overlap !== undefined) requireOverlapOpt = input.requireRule3Overlap;
+    if (input.strictStrengthOrder !== undefined) strictStrengthOrder = input.strictStrengthOrder;
+  }
+
+  let lengths: number[] = [];
+  let subwaves: number[] = [];
+  let prices: number[] | null = null;
+  let inferredDirection: 'BULLISH' | 'BEARISH' = directionOpt ?? 'BULLISH';
+
+  if (vertices && vertices.length >= 6) {
+    const vSlice = vertices.slice(0, 6);
+    inferredDirection = directionOpt ?? (vSlice[1].price >= vSlice[0].price ? 'BULLISH' : 'BEARISH');
+    prices = vSlice.map(v => v.price);
+    for (let i = 0; i < 5; i++) {
+      lengths.push(Math.abs(vSlice[i + 1].price - vSlice[i].price));
+    }
+    subwaves = explicitSubwaves
+      ? [...explicitSubwaves]
+      : [1, 2, 3, 4, 5].map(idx => extractSubwaveCountFromVertex(vSlice[idx], 3));
+  } else if (!vertices) {
+    const parsed = rawWaves.slice(0, 5).map(w => parseZigzagLeg(w, 3));
+    lengths = parsed.map(p => p.length);
+    subwaves = explicitSubwaves ? [...explicitSubwaves] : parsed.map(p => p.subwaveCount);
+
+    if (parsed.length >= 2 && parsed[0].startPrice !== undefined && parsed[0].endPrice !== undefined) {
+      inferredDirection = directionOpt ?? (parsed[0].endPrice >= parsed[0].startPrice ? 'BULLISH' : 'BEARISH');
+    }
+    const sign = inferredDirection === 'BULLISH' ? 1 : -1;
+    if (parsed.length === 5) {
+      const hasAllEndpoints = parsed.every(p => p.startPrice !== undefined && p.endPrice !== undefined);
+      if (hasAllEndpoints) {
+        prices = [parsed[0].startPrice as number, ...parsed.map(p => p.endPrice as number)];
+      } else {
+        const p0 = parsed[0]?.startPrice ?? 0;
+        const p1 = parsed[0]?.endPrice ?? p0 + sign * (lengths[0] ?? 0);
+        const p2 = parsed[1]?.endPrice ?? p1 - sign * (lengths[1] ?? 0);
+        const p3 = parsed[2]?.endPrice ?? p2 + sign * (lengths[2] ?? 0);
+        const p4 = parsed[3]?.endPrice ?? p3 - sign * (lengths[3] ?? 0);
+        const p5 = parsed[4]?.endPrice ?? p4 + sign * (lengths[4] ?? 0);
+        prices = [p0, p1, p2, p3, p4, p5];
+      }
+    }
+  }
+
+  const isCommonLocation = waveLocation === '5' || waveLocation === '1' || waveLocation === 'C';
+  const subwaveSignature = subwaves.join('-');
+  const isAll3Wave = subwaves.length === 5 && subwaves.every(c => c === 3);
+
+  const len1 = lengths[0] ?? 0;
+  const len2 = lengths[1] ?? 0;
+  const len3 = lengths[2] ?? 0;
+  const len5 = lengths[4] ?? 0;
+
+  const isBull = inferredDirection === 'BULLISH';
+  const w3CoversW2Pct = len2 > 0 ? Math.round((len3 / len2) * 1000) / 10 : len3 > 0 ? 100 : 0;
+  const wave2Covered100 = prices
+    ? isBull
+      ? prices[3] > prices[1] + 1e-6 && len3 >= len2 - 1e-6
+      : prices[3] < prices[1] - 1e-6 && len3 >= len2 - 1e-6
+    : len3 >= len2 - 1e-6;
+
+  // Rule 3 violation check: Wave 4 must enter Wave 1's price range ([p0, p1])
+  const hasRule3Overlap =
+    overlapOpt !== undefined
+      ? overlapOpt
+      : prices
+      ? isBull
+        ? prices[4] < prices[1] - 1e-6 && prices[4] > prices[0] + 1e-6
+        : prices[4] > prices[1] + 1e-6 && prices[4] < prices[0] - 1e-6
+      : false;
+
+  const wave4ViolatesWave0 =
+    prices !== null &&
+    (isBull ? prices[4] <= prices[0] + 1e-6 : prices[4] >= prices[0] - 1e-6);
+
+  let strengthPattern: 'INCREASING' | 'DECREASING' | 'MIXED' = 'MIXED';
+  let isBroadeningWedge = false;
+  if (lengths.length >= 5) {
+    if (len1 < len3 - 1e-9 && len3 < len5 - 1e-9) {
+      strengthPattern = 'INCREASING';
+      isBroadeningWedge = true;
+    } else if (len1 > len3 + 1e-9 && len3 > len5 + 1e-9) {
+      strengthPattern = 'DECREASING';
+    }
+  }
+
+  if (lengths.length < 5) {
+    return {
+      isValid: false,
+      category: 'INVALID',
+      variantLabelFa: 'داده ناکافی برای تشخیص قطر (۶ رأس یا ۵ موج لازم است)',
+      subwaveSignature,
+      isAll3Wave,
+      wave2Covered100: false,
+      w3CoversW2Pct,
+      hasRule3Overlap,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa: 'برای تشخیص الگوی قطر حداقل ۶ رأس (۰ تا ۵) یا ۵ موج (۱ تا ۵) لازم است.'
+    };
+  }
+
+  // Non-diagonal 5-wave signatures per Session 9 (§2.1)
+  if (subwaveSignature === '5-3-5-3-5') {
+    return {
+      isValid: false,
+      category: 'NOT_DIAGONAL',
+      variantLabelFa: 'سیکل ایده‌آل (۵-۳-۵-۳-۵) — قطر نیست',
+      subwaveSignature,
+      isAll3Wave: false,
+      wave2Covered100,
+      w3CoversW2Pct,
+      hasRule3Overlap,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa: 'ساختار ۵-۳-۵-۳-۵ متعلق به سیکل ایده‌آل است، نه الگوی قطر.'
+    };
+  }
+  if (subwaveSignature === '3-3-5-3-3') {
+    return {
+      isValid: false,
+      category: 'NOT_DIAGONAL',
+      variantLabelFa: 'ساختار اصلاحی فلت (۳-۳-۵-۳-۳) — قطر نیست',
+      subwaveSignature,
+      isAll3Wave: false,
+      wave2Covered100,
+      w3CoversW2Pct,
+      hasRule3Overlap,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa: 'ساختار ۳-۳-۵-۳-۳ متعلق به فلت است، نه الگوی قطر.'
+    };
+  }
+
+  if (!isAll3Wave) {
+    return {
+      isValid: false,
+      category: 'INVALID',
+      variantLabelFa: `ساختار نامعتبر قطر (${subwaveSignature})`,
+      subwaveSignature,
+      isAll3Wave: false,
+      wave2Covered100,
+      w3CoversW2Pct,
+      hasRule3Overlap,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa: `در الگوی قطر تمام ۵ موج باید سه‌موجی (۳-۳-۳-۳-۳) باشند؛ امضای ${subwaveSignature} نامعتبر است.`
+    };
+  }
+
+  if (wave4ViolatesWave0) {
+    return {
+      isValid: false,
+      category: 'INVALID',
+      variantLabelFa: 'نقض مبدأ موج ۱ توسط موج ۴ — قطر نامعتبر',
+      subwaveSignature,
+      isAll3Wave: true,
+      wave2Covered100,
+      w3CoversW2Pct,
+      hasRule3Overlap: false,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa: 'موج ۴ از نقطه شروع موج ۱ (مبدأ ۰) عبور کرده است و ساختار قطر معتبر نیست.'
+    };
+  }
+
+  if (!wave2Covered100) {
+    return {
+      isValid: false,
+      category: 'INVALID',
+      variantLabelFa: 'قطر تاییدنشده: عدم پوشش ۱۰۰٪ موج ۲',
+      subwaveSignature,
+      isAll3Wave: true,
+      wave2Covered100: false,
+      w3CoversW2Pct,
+      hasRule3Overlap,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa: `موج ۳ تنها ${w3CoversW2Pct}% موج ۲ را پوشش داده است؛ تایید قطر نیازمند پوشش کامل موج ۲ است.`
+    };
+  }
+
+  // Mandatory Rule 3 overlap check (Wave 4 entering Wave 1 price range),
+  // unless explicitly evaluating Leading Diagonal in Wave 1/A or requireRule3Overlap === false.
+  const isLeadingSlot = hasExplicitLocation && (waveLocation === '1' || waveLocation === 'A');
+  const rule3Mandatory = requireOverlapOpt ?? !isLeadingSlot;
+  if (rule3Mandatory && !hasRule3Overlap) {
+    return {
+      isValid: false,
+      category: 'NOT_DIAGONAL',
+      variantLabelFa: 'عدم هم‌پوشانی موج ۴ با موج ۱ (قانون ۳ نقض نشده — قطر نیست)',
+      subwaveSignature,
+      isAll3Wave: true,
+      wave2Covered100: true,
+      w3CoversW2Pct,
+      hasRule3Overlap: false,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa:
+        'در الگوی قطر استاندارد، نقض قانون ۳ (ورود موج ۴ به محدوده قیمتی موج ۱) الزامی است؛ موج ۴ وارد حریم موج ۱ نشده است.'
+    };
+  }
+
+  if (strictStrengthOrder && strengthPattern === 'MIXED') {
+    return {
+      isValid: false,
+      category: 'INVALID',
+      variantLabelFa: 'ترتیب قدرت امواج قطر نامعتبر (نه کاهشی و نه افزایشی)',
+      subwaveSignature,
+      isAll3Wave: true,
+      wave2Covered100: true,
+      w3CoversW2Pct,
+      hasRule3Overlap,
+      strengthPattern,
+      isBroadeningWedge,
+      waveLocation,
+      isCommonLocation,
+      postCorrectionRangePct: [50, 61.8],
+      reasonFa: 'قدرت امواج ۱، ۳ و ۵ نه به‌صورت کاهشی (قطر) و نه افزایشی (آنتی‌قطر) مرتب شده است.'
+    };
+  }
+
+  let category: DiagonalCategory = 'IMPULSIVE_DIAGONAL';
+  let variantLabelFa = 'قطر شتابدار (Impulsive Diagonal — ۳-۳-۳-۳-۳)';
+
+  if (isBroadeningWedge) {
+    category = 'ANTI_DIAGONAL';
+    variantLabelFa = 'آنتی‌قطر (Anti-Diagonal قیف بازشونده — ۱ < ۳ < ۵)';
+  } else if (waveLocation === '5' || waveLocation === 'C') {
+    category = 'ENDING_DIAGONAL';
+    variantLabelFa = `قطر پایانی در موج ${waveLocation} (Ending Diagonal)`;
+  } else if (!hasRule3Overlap || waveLocation === '1' || waveLocation === 'A') {
+    category = 'LEADING_DIAGONAL';
+    variantLabelFa = `قطر پیشرو (Leading Diagonal — موج ${waveLocation})`;
+  }
+
+  const postCorrectionRangePct: [number, number] = isBroadeningWedge ? [61.8, 100] : [50, 61.8];
+  const locNote = isCommonLocation ? '' : ` (هشدار: تشکیل قطر در موج ${waveLocation} نادر و پرریسک است)`;
+  const strengthNote =
+    strengthPattern === 'MIXED' ? ' (هشدار: ترتیب طول امواج ۱-۳-۵ غیرمرتب است)' : '';
+  const reasonFa = `${variantLabelFa} معتبر با ساختار ۳-۳-۳-۳-۳ و ${
+    hasRule3Overlap ? 'ورود موج ۴ به محدوده موج ۱ (نقض الزامی قانون ۳)' : 'بدون هم‌پوشانی در موج پیشرو'
+  } و پوشش ${w3CoversW2Pct}% موج ۲${locNote}${strengthNote}.`;
+
+  return {
+    isValid: true,
+    category,
+    variantLabelFa,
+    subwaveSignature,
+    isAll3Wave: true,
+    wave2Covered100: true,
+    w3CoversW2Pct,
+    hasRule3Overlap,
+    strengthPattern,
+    isBroadeningWedge,
+    waveLocation,
+    isCommonLocation,
+    postCorrectionRangePct,
+    reasonFa
   };
 }
 

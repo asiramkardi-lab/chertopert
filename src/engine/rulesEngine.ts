@@ -20,7 +20,7 @@ import {
   ScenarioProjectionReport
 } from '../types/elliott';
 import { PivotDetector, getPivotWindowForTimeframe } from './pivotDetector';
-import { FractalEngine } from './fractalEngine';
+import { FractalEngine, identifyDiagonal, DiagonalVertexInput } from './fractalEngine';
 import { TargetProjectionEngine } from './targetProjectionEngine';
 import {
   evaluateWave2Retracement,
@@ -1093,7 +1093,116 @@ export class RulesEngine {
         }
       }
 
-      // 3b. Table 9: Diagonal Subwave (3-3-3-3-3) & Location (Leading in 1/A, Ending in 5/C) Verification
+      // 3b. Session 9: Identify 3-3-3-3-3 Sequence Structure via identifyDiagonal (Distinct Non-Ideal Pattern Type)
+      if (vertices.length >= 6) {
+        const cleanDiagParentForLoc = parentWaveLabel
+          .replace(/موج/g, '')
+          .replace(/[()VW\s]/g, '')
+          .toUpperCase();
+        const diagTailForLoc = cleanDiagParentForLoc.split('→').pop() || '';
+        const inferredDiagLocation: '1' | '3' | '5' | 'A' | 'C' = ['1', '3', '5', 'A', 'C'].includes(diagTailForLoc)
+          ? (diagTailForLoc as '1' | '3' | '5' | 'A' | 'C')
+          : pattern === 'LEADING_DIAGONAL' || pattern === 'ANTI_LEADING_DIAGONAL'
+          ? '1'
+          : '5';
+
+        const getExplicitVertexSubwaves = (v: WaveVertex): 3 | 5 | null => {
+          const ext = v as WaveVertex & { subwaveCount?: number; subwaves?: unknown[] | number };
+          const raw =
+            typeof ext.subwaveCount === 'number'
+              ? ext.subwaveCount
+              : typeof ext.subwaves === 'number'
+              ? ext.subwaves
+              : Array.isArray(ext.subwaves)
+              ? ext.subwaves.length
+              : null;
+          return raw === 3 || raw === 5 ? raw : null;
+        };
+
+        const detectLegSubwaveFromCandles = (aIdx: number, bIdx: number): 3 | 5 | null => {
+          if (!candles || candles.length < 12) return null;
+          const s = Math.max(0, Math.min(candles.length - 1, Math.min(aIdx, bIdx)));
+          const e = Math.max(s, Math.min(candles.length - 1, Math.max(aIdx, bIdx)));
+          const slice = candles.slice(s, e + 1);
+          if (slice.length < 7) return null;
+          const pivCount = PivotDetector.detectPivots(slice, 1, 1, 0.45).length;
+          if (pivCount >= 4) return 5;
+          if (pivCount >= 2) return 3;
+          return null;
+        };
+
+        const resolvedLegs: Array<3 | 5 | null> = [1, 2, 3, 4, 5].map(
+          idx =>
+            getExplicitVertexSubwaves(vertices[idx]) ??
+            detectLegSubwaveFromCandles(vertices[idx - 1].candleIndex, vertices[idx].candleIndex)
+        );
+        const isDetected33333 = resolvedLegs.every(c => c === 3);
+
+        if (isDetected33333) {
+          const diagVertices: DiagonalVertexInput[] = vertices.slice(0, 6).map((v, idx) => ({
+            ...v,
+            subwaveCount: idx === 0 ? undefined : 3
+          }));
+          const isLeadingPattern = pattern === 'LEADING_DIAGONAL' || pattern === 'ANTI_LEADING_DIAGONAL';
+          const diagEval = identifyDiagonal(diagVertices, {
+            subwaveCounts: [3, 3, 3, 3, 3],
+            waveLocation: inferredDiagLocation,
+            direction,
+            requireRule3Overlap: isLeadingPattern ? false : undefined
+          });
+
+          const suggestedDiagPattern: PatternFamily =
+            diagEval.category === 'ANTI_DIAGONAL'
+              ? 'ANTI_DIAGONAL'
+              : diagEval.category === 'ANTI_LEADING_DIAGONAL'
+              ? 'ANTI_LEADING_DIAGONAL'
+              : diagEval.category === 'LEADING_DIAGONAL'
+              ? 'LEADING_DIAGONAL'
+              : diagEval.hasRule3Overlap
+              ? 'ENDING_DIAGONAL'
+              : 'LEADING_DIAGONAL';
+
+          if (!pattern.includes('DIAGONAL')) {
+            rules.push({
+              ruleId: 'DIAGONAL_33333_PATTERN_FLAG',
+              name: 'Non-Ideal 3-3-3-3-3 Diagonal Pattern Detection (identifyDiagonal)',
+              nameFa: 'هشدار ساختار غیرآیده‌آل ۳-۳-۳-۳-۳: الگوی متمایز قطر شناسایی شد',
+              type: 'STRUCTURE',
+              passed: false,
+              score: diagEval.isValid ? 35 : 48,
+              conceptId: 'C20',
+              details: diagEval.category,
+              messageFa: diagEval.isValid
+                ? `ساختار درونی ۵ موج به صورت ۳-۳-۳-۳-۳ تشخیص داده شد که یک الگوی متمایز غیرایده‌آل (نشانه ضعف روند) است، نه ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← ${diagEval.reasonFa}`
+                : `ساختار درونی ۵ موج به صورت ۳-۳-۳-۳-۳ تشخیص داده شد (احتمال الگوی متمایز غیرایده‌آل قطر / پیشرو به جای ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()}): ${diagEval.reasonFa}`,
+              canBeSolvedByAlternate: suggestedDiagPattern
+            });
+
+            if (pattern === 'IDEAL_CYCLE' || !suggestedAlternative) {
+              suggestedAlternative = suggestedDiagPattern;
+              alternativeReason = `ساختار ۵ موجی دارای ترکیب درونی ۳-۳-۳-۳-۳ است؛ این ساختار یک الگوی متمایز غیرایده‌آل (${PATTERN_LABELS_FA[suggestedDiagPattern].split('(')[0].trim()}) محسوب می‌شود و نباید به‌عنوان سیکل ایده‌آل (۵-۳-۵-۳-۵) یا ترمینال شمارش شود.`;
+            }
+          } else {
+            rules.push({
+              ruleId: 'DIAGONAL_33333_PATTERN_FLAG',
+              name: 'Non-Ideal 3-3-3-3-3 Diagonal Pattern Validation (identifyDiagonal)',
+              nameFa: 'تایید الگوی متمایز غیرایده‌آل ۳-۳-۳-۳-۳ (قطر)',
+              type: 'STRUCTURE',
+              passed: diagEval.isValid || isLeadingPattern,
+              score: diagEval.isValid ? 100 : isLeadingPattern ? 85 : 55,
+              conceptId: 'C20',
+              details: diagEval.category,
+              messageFa: diagEval.reasonFa,
+              canBeSolvedByAlternate:
+                !diagEval.isValid && diagEval.category === 'ANTI_DIAGONAL'
+                  ? 'ANTI_DIAGONAL'
+                  : undefined
+            });
+          }
+        }
+      }
+
+      // 3c. Table 9: Diagonal Subwave (3-3-3-3-3) & Location (Leading in 1/A, Ending in 5/C) Verification
       if (pattern.includes('DIAGONAL') && vertices.length >= 6) {
         let sub1 = 3;
         let sub2 = 3;

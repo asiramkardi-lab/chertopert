@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PatternEngines } from '../src/engine/patternEngines';
 import { RulesEngine, inferWaveRole } from '../src/engine/rulesEngine';
-import { FractalEngine, identifyZigzag, calculateZigzagTargets } from '../src/engine/fractalEngine';
+import { FractalEngine, identifyZigzag, calculateZigzagTargets, identifyDiagonal } from '../src/engine/fractalEngine';
 import { generateRealisticCandles } from '../src/data/sampleMarketData';
 import {
   MOTIVE_PATTERN_FAMILIES,
@@ -879,5 +879,261 @@ describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
     expect(targetsBearExt.target382).toBeCloseTo(60 + 240 * 0.382, 2);
     expect(targetsBearExt.target618).toBeCloseTo(60 + 240 * 0.618, 2);
     expect(targetsBearExt.primaryTargetPct).toBe(23.6);
+  });
+
+  it('identifyDiagonal detects Ending, Leading, Anti-Diagonal (1<3<5) and rejects non-3-3-3-3-3 or uncovered Wave 2', () => {
+    // Ending Diagonal (1 > 3 > 5 contracting, all 3-wave, Wave 4 enters Wave 1, waveLocation='5')
+    const ending = identifyDiagonal(
+      [
+        { startPrice: 100, endPrice: 200, subwaveCount: 3 },
+        { startPrice: 200, endPrice: 140, subwaveCount: 3 },
+        { startPrice: 140, endPrice: 225, subwaveCount: 3 },
+        { startPrice: 225, endPrice: 175, subwaveCount: 3 },
+        { startPrice: 175, endPrice: 245, subwaveCount: 3 }
+      ],
+      { waveLocation: '5' }
+    );
+    expect(ending).toMatchObject({
+      isValid: true,
+      category: 'ENDING_DIAGONAL',
+      subwaveSignature: '3-3-3-3-3',
+      wave2Covered100: true,
+      hasRule3Overlap: true,
+      strengthPattern: 'DECREASING',
+      postCorrectionRangePct: [50, 61.8]
+    });
+
+    // Leading Diagonal in Wave 1
+    const leading = FractalEngine.identifyDiagonal(
+      [
+        { startPrice: 100, endPrice: 190, subwaveCount: 3 },
+        { startPrice: 190, endPrice: 140, subwaveCount: 3 },
+        { startPrice: 140, endPrice: 220, subwaveCount: 3 },
+        { startPrice: 220, endPrice: 192, subwaveCount: 3 },
+        { startPrice: 192, endPrice: 250, subwaveCount: 3 }
+      ],
+      { waveLocation: '1' }
+    );
+    expect(leading).toMatchObject({
+      isValid: true,
+      category: 'LEADING_DIAGONAL',
+      hasRule3Overlap: false,
+      isCommonLocation: true
+    });
+
+    // Anti-Diagonal (broadening 1 < 3 < 5)
+    const anti = identifyDiagonal(
+      [
+        { length: 40, subwaveCount: 3 },
+        { length: 20, subwaveCount: 3 },
+        { length: 80, subwaveCount: 3 },
+        { length: 65, subwaveCount: 3 },
+        { length: 130, subwaveCount: 3 }
+      ],
+      { waveLocation: '5' }
+    );
+    expect(anti).toMatchObject({
+      isValid: true,
+      category: 'ANTI_DIAGONAL',
+      isBroadeningWedge: true,
+      strengthPattern: 'INCREASING',
+      postCorrectionRangePct: [61.8, 100]
+    });
+
+    // Ideal 5-3-5-3-5 -> NOT_DIAGONAL
+    const ideal = identifyDiagonal(
+      [100, 50, 160, 40, 100].map((len, idx) => ({
+        length: len,
+        subwaveCount: idx % 2 === 0 ? 5 : 3
+      }))
+    );
+    expect(ideal).toMatchObject({
+      isValid: false,
+      category: 'NOT_DIAGONAL',
+      subwaveSignature: '5-3-5-3-5'
+    });
+
+    // Wave 3 fails to cover 100% of Wave 2 -> INVALID
+    const uncoveredW2 = identifyDiagonal([
+      { startPrice: 100, endPrice: 180, subwaveCount: 3 },
+      { startPrice: 180, endPrice: 110, subwaveCount: 3 },
+      { startPrice: 110, endPrice: 175, subwaveCount: 3 },
+      { startPrice: 175, endPrice: 130, subwaveCount: 3 },
+      { startPrice: 130, endPrice: 190, subwaveCount: 3 }
+    ]);
+    expect(uncoveredW2).toMatchObject({
+      isValid: false,
+      category: 'INVALID',
+      wave2Covered100: false
+    });
+  });
+
+  it('identifyDiagonal(vertices) accepts WaveVertex[] directly and enforces 3-3-3-3-3 + mandatory Rule 3 overlap', () => {
+    const makeVerts = (prices: number[], subwaves?: number[]): WaveVertex[] =>
+      prices.map((price, idx) => ({
+        label: String(idx),
+        candleIndex: idx * 5,
+        price,
+        timestamp: 1_700_000_000_000 + idx * 3600_000,
+        isConfirmed: true,
+        ...(subwaves && idx > 0 ? { subwaveCount: subwaves[idx - 1] } : {})
+      }));
+
+    // Bullish vertices with 3-3-3-3-3 and Wave 4 (175) entering Wave 1 range [100, 200]
+    const bullishDiagVerts = identifyDiagonal(makeVerts([100, 200, 140, 225, 175, 245]));
+    expect(bullishDiagVerts).toMatchObject({
+      isValid: true,
+      category: 'ENDING_DIAGONAL',
+      subwaveSignature: '3-3-3-3-3',
+      isAll3Wave: true,
+      hasRule3Overlap: true
+    });
+
+    // Bearish vertices with 3-3-3-3-3 and Wave 4 (225) entering Wave 1 range [200, 300]
+    const bearishDiagVerts = FractalEngine.identifyDiagonal(makeVerts([300, 200, 260, 175, 225, 155]));
+    expect(bearishDiagVerts).toMatchObject({
+      isValid: true,
+      category: 'ENDING_DIAGONAL',
+      subwaveSignature: '3-3-3-3-3',
+      hasRule3Overlap: true
+    });
+
+    // Rejects when Wave 4 does NOT enter Wave 1 territory (Rule 3 not violated)
+    const noRule3Overlap = identifyDiagonal(makeVerts([100, 190, 140, 230, 195, 260]));
+    expect(noRule3Overlap).toMatchObject({
+      isValid: false,
+      category: 'NOT_DIAGONAL',
+      hasRule3Overlap: false
+    });
+
+    // Rejects non-3-3-3-3-3 structure (e.g. 5-3-5-3-5)
+    const non33333 = identifyDiagonal(makeVerts([100, 200, 140, 225, 175, 245], [5, 3, 5, 3, 5]));
+    expect(non33333).toMatchObject({
+      isValid: false,
+      category: 'NOT_DIAGONAL',
+      isAll3Wave: false,
+      subwaveSignature: '5-3-5-3-5'
+    });
+
+    // Rejects when Wave 4 breaks Wave 0 start
+    const breaksOrigin = identifyDiagonal(makeVerts([100, 200, 140, 225, 95, 245]));
+    expect(breaksOrigin).toMatchObject({
+      isValid: false,
+      category: 'INVALID',
+      hasRule3Overlap: false
+    });
+  });
+
+  it('RulesEngine.validateStructure uses identifyDiagonal to flag 3-3-3-3-3 sequences as distinct non-ideal Diagonals', () => {
+    // Helper to synthesize candles where each leg between vertices has 2 clear internal pivots (a-b-c = 3-wave)
+    const build3WaveLegCandles = (prices: number[], step = 12): { candles: Candle[]; vertices: WaveVertex[] } => {
+      const candles: Candle[] = [];
+      const vertices: WaveVertex[] = [];
+      const startTs = 1_700_000_000_000;
+      const pushBar = (price: number) => {
+        const idx = candles.length;
+        candles.push({
+          time: new Date(startTs + idx * 3600_000).toISOString(),
+          timestamp: startTs + idx * 3600_000,
+          open: price - 0.5,
+          high: price + 1.5,
+          low: price - 1.5,
+          close: price,
+          volume: 1500
+        });
+      };
+
+      for (let leg = 0; leg < prices.length - 1; leg++) {
+        const pStart = prices[leg];
+        const pEnd = prices[leg + 1];
+        const span = pEnd - pStart;
+        const startIdx = candles.length;
+        vertices.push({
+          label: String(leg),
+          candleIndex: startIdx,
+          price: pStart,
+          timestamp: startTs + startIdx * 3600_000,
+          isConfirmed: true
+        });
+        // Create 3-wave zig-zag inside each leg (a: 60%, b: retrace to 25%, c: to 100%)
+        const pA = pStart + span * 0.6;
+        const pB = pStart + span * 0.25;
+        for (let k = 0; k < step; k++) {
+          const t = k / step;
+          const p =
+            t < 0.35
+              ? pStart + (pA - pStart) * (t / 0.35)
+              : t < 0.68
+              ? pA + (pB - pA) * ((t - 0.35) / 0.33)
+              : pB + (pEnd - pB) * ((t - 0.68) / 0.32);
+          pushBar(p);
+        }
+      }
+      const endIdx = candles.length;
+      pushBar(prices[prices.length - 1]);
+      vertices.push({
+        label: String(prices.length - 1),
+        candleIndex: endIdx,
+        price: prices[prices.length - 1],
+        timestamp: startTs + endIdx * 3600_000,
+        isConfirmed: true
+      });
+      return { candles, vertices };
+    };
+
+    // 1. IDEAL_CYCLE labeled over explicit 3-3-3-3-3 vertices with Rule 3 overlap -> flagged as ENDING_DIAGONAL (not TERMINAL)
+    const explicitVerts: WaveVertex[] = [100, 200, 140, 225, 175, 245].map((price, idx) => ({
+      label: String(idx),
+      candleIndex: idx * 6,
+      price,
+      timestamp: 1_700_000_000_000 + idx * 3600_000,
+      isConfirmed: true,
+      ...(idx > 0 ? { subwaveCount: 3 } : {})
+    }));
+    const idealOverDiag = RulesEngine.validateStructure(
+      'IDEAL_CYCLE',
+      explicitVerts,
+      'BULLISH',
+      'ROOT',
+      'موج 5',
+      makeCandles(48)
+    );
+    const diagFlag = idealOverDiag.rules.find(r => r.ruleId === 'DIAGONAL_33333_PATTERN_FLAG');
+    expect(diagFlag).toBeDefined();
+    expect(diagFlag?.passed).toBe(false);
+    expect(diagFlag?.details).toBe('ENDING_DIAGONAL');
+    expect(diagFlag?.canBeSolvedByAlternate).toBe('ENDING_DIAGONAL');
+    expect(idealOverDiag.suggestedAlternative).toBe('ENDING_DIAGONAL');
+
+    // 2. Real 3-wave candle swings on all 5 legs with broadening 1 < 3 < 5 & Rule 3 overlap -> flagged as ANTI_DIAGONAL
+    const { candles: diagCandles, vertices: candleVerts } = build3WaveLegCandles([100, 140, 120, 200, 135, 265]);
+    const idealOverAnti = RulesEngine.validateStructure(
+      'IDEAL_CYCLE',
+      candleVerts,
+      'BULLISH',
+      'ROOT',
+      'موج 5',
+      diagCandles
+    );
+    const antiFlag = idealOverAnti.rules.find(r => r.ruleId === 'DIAGONAL_33333_PATTERN_FLAG');
+    expect(antiFlag).toBeDefined();
+    expect(antiFlag?.passed).toBe(false);
+    expect(antiFlag?.details).toBe('ANTI_DIAGONAL');
+    expect(antiFlag?.canBeSolvedByAlternate).toBe('ANTI_DIAGONAL');
+    expect(idealOverAnti.suggestedAlternative).toBe('ANTI_DIAGONAL');
+
+    // 3. Validating directly as ENDING_DIAGONAL passes DIAGONAL_33333_PATTERN_FLAG as distinct non-ideal type
+    const validDiag = RulesEngine.validateStructure(
+      'ENDING_DIAGONAL',
+      explicitVerts,
+      'BULLISH',
+      'ROOT',
+      'موج 5',
+      makeCandles(48)
+    );
+    const validDiagFlag = validDiag.rules.find(r => r.ruleId === 'DIAGONAL_33333_PATTERN_FLAG');
+    expect(validDiagFlag?.passed).toBe(true);
+    expect(validDiagFlag?.score).toBe(100);
+    expect(validDiagFlag?.details).toBe('ENDING_DIAGONAL');
   });
 });
