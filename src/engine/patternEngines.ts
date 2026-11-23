@@ -16,6 +16,7 @@ import {
   ComplexPatternReport,
   DiagonalAnalysisReport,
   EntryStepPlan,
+  EntryStrategyOptions,
   EntryStrategyReport,
   ExtensionTmvTrailingReport,
   FlatAnalysisReport,
@@ -45,9 +46,34 @@ const estimateSubwaveCount = (
   const sIdx = Math.max(0, Math.min(candles.length - 1, Math.min(startCandleIdx, endCandleIdx)));
   const eIdx = Math.max(sIdx, Math.min(candles.length - 1, Math.max(startCandleIdx, endCandleIdx)));
   const slice = candles.slice(sIdx, eIdx + 1);
-  if (slice.length < 7) return 3;
+  if (slice.length < 7) return expectedFallback;
   const pivots = PivotDetector.detectPivots(slice, 1, 1, 0.45);
   return pivots.length >= 4 ? 5 : 3;
+};
+
+const resolveVertexSubwave = (
+  vertexEnd: WaveScenario['vertices'][number] | undefined,
+  candles: Candle[],
+  startCandleIdx: number,
+  endCandleIdx: number,
+  expectedFallback: 3 | 5
+): 3 | 5 => {
+  if (vertexEnd) {
+    const ext = vertexEnd as WaveScenario['vertices'][number] & {
+      subwaveCount?: number;
+      subwaves?: unknown[] | number;
+    };
+    const raw =
+      typeof ext.subwaveCount === 'number'
+        ? ext.subwaveCount
+        : typeof ext.subwaves === 'number'
+        ? ext.subwaves
+        : Array.isArray(ext.subwaves)
+        ? ext.subwaves.length
+        : null;
+    if (raw === 3 || raw === 5) return raw;
+  }
+  return estimateSubwaveCount(candles, startCandleIdx, endCandleIdx, expectedFallback);
 };
 
 export class PatternEngines {
@@ -115,11 +141,11 @@ export class PatternEngines {
       strengthPattern = 'DECREASING';
     }
 
-    const w1Subs = estimateSubwaveCount(candles, verts[0].candleIndex, verts[1].candleIndex, 3);
-    const w2Subs = estimateSubwaveCount(candles, verts[1].candleIndex, verts[2].candleIndex, 3);
-    const w3Subs = estimateSubwaveCount(candles, verts[2].candleIndex, verts[3].candleIndex, 3);
-    const w4Subs = estimateSubwaveCount(candles, verts[3].candleIndex, verts[4].candleIndex, 3);
-    const w5Subs = estimateSubwaveCount(candles, verts[4].candleIndex, verts[5].candleIndex, 3);
+    const w1Subs = resolveVertexSubwave(verts[1], candles, verts[0].candleIndex, verts[1].candleIndex, 3);
+    const w2Subs = resolveVertexSubwave(verts[2], candles, verts[1].candleIndex, verts[2].candleIndex, 3);
+    const w3Subs = resolveVertexSubwave(verts[3], candles, verts[2].candleIndex, verts[3].candleIndex, 3);
+    const w4Subs = resolveVertexSubwave(verts[4], candles, verts[3].candleIndex, verts[4].candleIndex, 3);
+    const w5Subs = resolveVertexSubwave(verts[5], candles, verts[4].candleIndex, verts[5].candleIndex, 3);
 
     const diagonalSubwaveErrors: string[] = [];
     if (w3Subs === 5) diagonalSubwaveErrors.push('موج ۳ قطر ساختار ۵موجی نشان می‌دهد (در قطر استاندارد ۳-۳-۳-۳-۳ غیرمجاز)');
@@ -748,9 +774,9 @@ export class PatternEngines {
     const cOverARatioPct = Math.round((lenC / lenA) * 1000) / 10;
     const cCoversB100 = isBull ? verts[3].price >= verts[1].price * 0.999 : verts[3].price <= verts[1].price * 1.001;
 
-    const sa = estimateSubwaveCount(candles, verts[0].candleIndex, verts[1].candleIndex, 5);
-    const sb = estimateSubwaveCount(candles, verts[1].candleIndex, verts[2].candleIndex, 3);
-    const sc = estimateSubwaveCount(candles, verts[2].candleIndex, verts[3].candleIndex, 5);
+    const sa = resolveVertexSubwave(verts[1], candles, verts[0].candleIndex, verts[1].candleIndex, 5);
+    const sb = resolveVertexSubwave(verts[2], candles, verts[1].candleIndex, verts[2].candleIndex, 3);
+    const sc = resolveVertexSubwave(verts[3], candles, verts[2].candleIndex, verts[3].candleIndex, 5);
     const structureLabel = `${sa}-${sb}-${sc}`;
 
     let subType: ZigzagAnalysisReport['subType'] = 'IDEAL';
@@ -1947,12 +1973,235 @@ export class PatternEngines {
   }
 
   /**
-   * Session 11 (010-entry-strategy-engine):
-   * Determines optimal entry zone (Start W3, 61.8%, 78.6% acceleration, 50% pullback fallback),
-   * enforces minimum 50% retracement rule, scores W2 vs Wave A scenario, assesses strong vs weak waves,
-   * and outputs single or multi-step (50%/50%) buy plan.
+   * Session 11 Helper (Concepts 11-9..11-12):
+   * Multi-factor W2 vs Wave A evaluator combining internal subwave signature (5-3-5 / 3-3-3 / 3-5-5 / 3-3-5),
+   * Fibonacci retracement depth (<=38.2%, 50%, 61.8%, 78.6%), and Classic Support/Resistance confluence.
    */
-  public static analyzeEntryStrategy(scenario: WaveScenario, candles: Candle[]): EntryStrategyReport {
+  public static evaluateWave2VsWaveAScenario(params: {
+    retracementPct: number;
+    subwaveSignature: string;
+    hasClassicSR: boolean;
+    validityScore?: number;
+    brokeWave1?: boolean;
+  }): {
+    w2VsAScenario: EntryStrategyReport['w2VsAScenario'];
+    w2ProbabilityPct: number;
+    waveAProbabilityPct: number;
+    scenarioConfidence: number;
+    credibilityTier: EntryStrategyReport['credibilityTier'];
+    credibilityFactorsFa: string[];
+    w2VsALabelFa: string;
+  } {
+    const { retracementPct, subwaveSignature, hasClassicSR, validityScore = 75, brokeWave1 = false } = params;
+    const factors: string[] = [];
+    let w2Score = 0;
+    let aScore = 0;
+
+    // Factor 1: Internal Structure (Section 11-12)
+    if (subwaveSignature === '5-3-5') {
+      w2Score += 44;
+      aScore += 6;
+      factors.push('ساختار ۵-۳-۵: وزن بسیار بالا به نفع موج ۲ (+۴۴)');
+    } else if (subwaveSignature === '3-3-3') {
+      aScore += 44;
+      w2Score += 8;
+      factors.push('ساختار ۳-۳-۳: احتمال بالای موج A یا اصلاح ترکیبی (+۴۴ به A)');
+    } else if (subwaveSignature === '3-5-5') {
+      aScore += 42;
+      w2Score += 8;
+      factors.push('ساختار آنتی ۳-۵-۵: شانس پایین موج ۲');
+    } else if (subwaveSignature === '3-3-5') {
+      w2Score += 16;
+      aScore += 26;
+      factors.push('ساختار ۳-۳-۵ فلت: امکان هر دو سناریوی W2 و A (نیازمند ورود پله‌ای)');
+    } else if (subwaveSignature.startsWith('5')) {
+      w2Score += 30;
+      aScore += 14;
+      factors.push('ساختار شروع ۵موجی: متمایل به موج ۲');
+    } else if (subwaveSignature.startsWith('3')) {
+      aScore += 26;
+      w2Score += 16;
+      factors.push('ساختار شروع ۳موجی: نیازمند تایید بیشتر برای تفکیک W2 از A');
+    } else {
+      w2Score += 18;
+      aScore += 18;
+      factors.push('ساختار نامشخص: دو سناریو متعادل');
+    }
+
+    // Factor 2: Fibonacci Retracement % (Section 11-10)
+    if (retracementPct >= 74) {
+      w2Score += 36;
+      aScore += 4;
+      factors.push(`رتریسمنت ${retracementPct}٪ (تراز ۷۸.۶٪): اعتبار خیلی بالای موج ۲ (شتاب‌گیری)`);
+    } else if (retracementPct >= 58) {
+      w2Score += 32;
+      aScore += 8;
+      factors.push(`رتریسمنت ${retracementPct}٪ (تراز ۶۱.۸٪): اعتبار بالای موج ۲`);
+    } else if (retracementPct >= 48) {
+      w2Score += 19;
+      aScore += 19;
+      factors.push(`رتریسمنت ${retracementPct}٪ (تراز ۵۰٪): اعتبار متوسط و دوگانه W2/A`);
+    } else if (retracementPct <= 42) {
+      aScore += 34;
+      w2Score += 6;
+      factors.push(`رتریسمنت کم‌عمق ${retracementPct}٪ (≤۳۸.۲٪): احتمال بالای موج A`);
+    } else {
+      aScore += 20;
+      w2Score += 14;
+      factors.push(`رتریسمنت ${retracementPct}٪ (بازه ۴۲–۴۸٪): تمایل جزئی به موج A`);
+    }
+
+    // Factor 3: Classic S/R Confluence (Section 11-11)
+    if (hasClassicSR) {
+      w2Score += retracementPct >= 48 ? 14 : 6;
+      factors.push('هم‌پوشانی با حمایت/مقاومت کلاسیک تاریخی: جهش اعتبار سطح');
+    } else {
+      factors.push('بدون هم‌پوشانی حمایت/مقاومت کلاسیک شاخص');
+    }
+
+    if (brokeWave1) {
+      w2Score += 35;
+      factors.push('شکست سقف/کف موج ۱: تایید نهایی سناریوی موج ۲ ← ۳');
+    } else if (validityScore >= 82 && subwaveSignature === '5-3-5') {
+      w2Score += 6;
+    }
+
+    const total = Math.max(1, w2Score + aScore);
+    const w2ProbabilityPct = Math.max(5, Math.min(95, Math.round((w2Score / total) * 100)));
+    const waveAProbabilityPct = 100 - w2ProbabilityPct;
+
+    let w2VsAScenario: EntryStrategyReport['w2VsAScenario'] = 'UNCERTAIN';
+    if (w2ProbabilityPct >= 62) {
+      w2VsAScenario = 'W2';
+    } else if (waveAProbabilityPct >= 62) {
+      w2VsAScenario = 'A';
+    }
+
+    const dominantPct = Math.max(w2ProbabilityPct, waveAProbabilityPct);
+    const scenarioConfidence = Math.min(0.95, Math.max(0.5, Math.round((dominantPct / 100) * 100) / 100));
+
+    // Credibility Tier (Section 11-10 + 11-11 + 11-12)
+    let credibilityTier: EntryStrategyReport['credibilityTier'] = 'MEDIUM';
+    if (
+      brokeWave1 ||
+      (retracementPct >= 74 && w2VsAScenario === 'W2') ||
+      (retracementPct >= 58 && hasClassicSR && (subwaveSignature === '5-3-5' || w2VsAScenario !== 'A'))
+    ) {
+      credibilityTier = 'VERY_HIGH';
+    } else if (retracementPct >= 58 && (subwaveSignature === '5-3-5' || hasClassicSR || w2VsAScenario === 'W2')) {
+      credibilityTier = 'HIGH';
+    } else if (retracementPct <= 42) {
+      credibilityTier = hasClassicSR ? 'MEDIUM' : 'LOW';
+    } else if (retracementPct >= 48 && retracementPct < 58) {
+      credibilityTier = hasClassicSR && subwaveSignature === '5-3-5' ? 'HIGH' : 'MEDIUM';
+    } else {
+      credibilityTier = hasClassicSR ? 'MEDIUM' : 'LOW';
+    }
+
+    const w2VsALabelFa =
+      w2VsAScenario === 'W2'
+        ? 'احتمال غالب: موج ۲ (انتظار شروع موج ۳ پرقدرت)'
+        : w2VsAScenario === 'A'
+        ? 'احتمال غالب: موج A اصلاحی (ریسک ادامه ریزش با موج C)'
+        : 'سناریوی دوگانه (W2 در برابر A) — توصیه به ورود پله‌ای';
+
+    return {
+      w2VsAScenario,
+      w2ProbabilityPct,
+      waveAProbabilityPct,
+      scenarioConfidence,
+      credibilityTier,
+      credibilityFactorsFa: factors,
+      w2VsALabelFa
+    };
+  }
+
+  /**
+   * Session 11 Helper (Concepts 11-5 & 11-14):
+   * Detects Fallback 50% pullback setup when wave turned around ~55% (before 61.8%),
+   * bounced above 50%, and either cleanly pulls back to 50% (valid), stops at 38.2% (wait), or runs without pullback (wait).
+   */
+  public static evaluatePullbackEntry(params: {
+    priorTurnPct?: number;
+    pullbackToPct?: number | null;
+    rawRetracementPct: number;
+    extremeRetracementPct: number;
+    brokeWave1: boolean;
+    hasSignal: boolean;
+  }): {
+    status: 'VALID_50_PULLBACK' | 'SHALLOW_382_WAIT' | 'NO_PULLBACK_WAIT' | 'NONE';
+    isFallback50: boolean;
+    explanationFa: string;
+  } {
+    const { priorTurnPct, pullbackToPct, rawRetracementPct, extremeRetracementPct, brokeWave1, hasSignal } = params;
+    const hasExplicitPullback = pullbackToPct !== undefined;
+    const turned50To618 =
+      (priorTurnPct !== undefined && priorTurnPct >= 50 && priorTurnPct < 61.8) ||
+      (extremeRetracementPct >= 50 && extremeRetracementPct < 61.8);
+
+    if (brokeWave1 || (!turned50To618 && !hasExplicitPullback)) {
+      return { status: 'NONE', isFallback50: false, explanationFa: '' };
+    }
+
+    if (pullbackToPct === null) {
+      return {
+        status: 'NO_PULLBACK_WAIT',
+        isFallback50: false,
+        explanationFa: 'چرخش از محدوده ۵۵٪ و حرکت پرشتاب بدون پول‌بک؛ تا پول‌بک روی ۵۰٪ یا شکست سقف موج ۱ صبر کنید.'
+      };
+    }
+
+    if (pullbackToPct !== undefined) {
+      if (pullbackToPct >= 46 && pullbackToPct <= 54) {
+        return {
+          status: 'VALID_50_PULLBACK',
+          isFallback50: true,
+          explanationFa: hasSignal
+            ? `پول‌بک تاییدشده روی ۵۰٪ پس از چرخش از ${priorTurnPct ?? extremeRetracementPct}٪ (Fallback فعال با سیگنال)`
+            : `رسیدن پول‌بک به ۵۰٪ پس از چرخش ${priorTurnPct ?? extremeRetracementPct}٪ — در انتظار کندل تایید`
+        };
+      }
+      if (pullbackToPct < 46) {
+        return {
+          status: 'SHALLOW_382_WAIT',
+          isFallback50: false,
+          explanationFa: `پول‌بک فقط تا ${pullbackToPct}٪ (حدود ۳۸.۲٪) بوده و به ۵۰٪ نرسیده است؛ صبر برای ۵۰٪ یا شکست موج ۱.`
+        };
+      }
+    }
+
+    // Auto-inferred from raw retracement (e.g. ZIGZAG at ~50%)
+    if (Math.abs(rawRetracementPct - 50) <= 6) {
+      return {
+        status: 'VALID_50_PULLBACK',
+        isFallback50: true,
+        explanationFa: 'ورود جایگزین (Fallback): پول‌بک از ۵۵٪ روی سطح ۵۰٪'
+      };
+    }
+
+    if (rawRetracementPct < 44) {
+      return {
+        status: 'NO_PULLBACK_WAIT',
+        isFallback50: false,
+        explanationFa: 'قیمت بالای ۵۰٪ حرکت کرده اما هنوز پول‌بکی به سطح ۵۰٪ نداده است؛ صبر کنید.'
+      };
+    }
+
+    return { status: 'NONE', isFallback50: false, explanationFa: '' };
+  }
+
+  /**
+   * Session 11 (010-entry-strategy-engine — Concepts 11-1..11-14):
+   * Determines optimal entry zone (Start W3, Subwave 3 of 3, 61.8%, 78.6% acceleration, 50% pullback fallback),
+   * enforces minimum 50% retracement rule with controlled 11-7 structured exception, scores W2 vs Wave A via
+   * 3-factor credibility (5-3-5 structure, Fibonacci %, classic S/R pivots), checks strong vs weak wave (>161.8% vs <100%),
+   * and outputs single-step (definite W2) or two-step 50%/50% (uncertain W2/A) buy plan.
+   */
+  public static analyzeEntryStrategy(
+    scenario: WaveScenario,
+    candles: Candle[],
+    options?: EntryStrategyOptions
+  ): EntryStrategyReport {
     const verts = scenario.vertices;
     const warnings: string[] = [];
     const notes: string[] = [];
@@ -1963,9 +2212,23 @@ export class PatternEngines {
         meetsMin50: false,
         entryZone: 'NONE',
         entryZoneLabelFa: 'داده ناکافی برای تحلیل ستاپ ورود',
+        entryAction: 'DO_NOT_ENTER',
+        entryActionLabelFa: 'عدم ورود — داده ناکافی',
+        wave3ConfirmationStrength: 'NONE',
+        isSubwave3Of3: false,
+        isStructuredException: false,
+        worthRisking: false,
+        priorWaveRatioPct: 0,
         w2VsAScenario: 'UNCERTAIN',
         w2VsALabelFa: 'نامشخص',
         scenarioConfidence: 0.5,
+        w2ProbabilityPct: 50,
+        waveAProbabilityPct: 50,
+        credibilityTier: 'LOW',
+        credibilityFactorsFa: [],
+        classicSrConfluence: false,
+        detectedSubwaveSignature: 'نامشخص',
+        stepMode: 'NO_BUY',
         riskLevel: 'HIGH',
         isFallback50: false,
         accelerationAt786: false,
@@ -1975,6 +2238,7 @@ export class PatternEngines {
         riskRewardRatio: null,
         riskRewardVerdictFa: 'نامشخص — حداقل موج ۱ لازم است',
         stopLossPrice: null,
+        stopLossInvalidationDescFa: 'نامشخص',
         isFomoBlocked: true,
         steps: [],
         warnings: ['حداقل موج ۱ (۲ پیوت) برای استخراج سطوح ورود لازم است.'],
@@ -1984,8 +2248,25 @@ export class PatternEngines {
 
     const isBull = scenario.direction === 'BULLISH';
     const sign = isBull ? 1 : -1;
-    const p0 = verts[0].price;
-    const p1 = verts[1].price;
+
+    const cleanParent = (options?.parentWaveLabel || '').trim();
+    const lastLabel = (verts[verts.length - 1]?.label || '').toUpperCase();
+    const isWave4Context =
+      options?.waveRole === 'W4' ||
+      /(?:^|[.\s])4$/.test(cleanParent) ||
+      (verts.length >= 5 && lastLabel === '4');
+    const waveRole: 'W2' | 'W4' = isWave4Context ? 'W4' : 'W2';
+    const isSubwave3Of3 =
+      options?.isSubwave3Of3 === true || /(?:3\.3|3\/3|iii\s*of\s*3)/i.test(cleanParent);
+
+    // Reference motive wave (Wave 1 for W2 context, or Wave 3 when verts >= 5 in W4 context)
+    const useW3Ref = waveRole === 'W4' && verts.length >= 5;
+    const anchorStartVert = useW3Ref ? verts[2] : verts[0];
+    const anchorEndVert = useW3Ref ? verts[3] : verts[1];
+    const corrEndVert = useW3Ref ? verts[4] : verts.length >= 3 ? verts[2] : undefined;
+
+    const p0 = anchorStartVert.price;
+    const p1 = anchorEndVert.price;
     const len1 = Math.max(0.01, Math.abs(p1 - p0));
     const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : verts[verts.length - 1].price;
 
@@ -2001,199 +2282,422 @@ export class PatternEngines {
       const lowerWick = Math.min(last.open, last.close) - last.low;
       const upperWick = last.high - Math.max(last.open, last.close);
       const isDirClose = isBull ? last.close > last.open : last.close < last.open;
-      const isHammer = isBull ? lowerWick >= body * 1.8 && bodyRatio <= 0.45 : upperWick >= body * 1.8 && bodyRatio <= 0.45;
+      const isHammer = isBull
+        ? lowerWick >= Math.max(body * 1.8, range * 0.48) && upperWick <= range * 0.25 && bodyRatio <= 0.45
+        : upperWick >= Math.max(body * 1.8, range * 0.48) && lowerWick <= range * 0.25 && bodyRatio <= 0.45;
       const isEngulfing =
         isDirClose &&
         Math.abs(last.close - last.open) > Math.abs(prev.close - prev.open) * 1.15 &&
         (isBull ? last.close > Math.max(prev.open, prev.close) : last.close < Math.min(prev.open, prev.close));
 
-      if (bodyRatio <= 0.12) {
-        candleSignal = 'DOJI_WEAK';
-        candleSignalLabelFa = 'سیگنال ضعیف (کندل دوجی — جدول ۱۰.۱۴): صبر تا کندل تأیید';
-      } else if (isHammer || isEngulfing || (isDirClose && bodyRatio >= 0.58)) {
+      if (isHammer || isEngulfing || (isDirClose && bodyRatio >= 0.58)) {
         candleSignal = 'HAMMER_OR_ENGULFING';
         candleSignalLabelFa = isHammer
           ? 'سیگنال قوی چکش/پین‌بار (جدول ۱۰.۱۵): تأیید برگشت در محدوده PRZ'
           : 'کندل مومنتوم/پوشای هم‌جهت: تأیید ورود';
+      } else if (bodyRatio <= 0.12) {
+        candleSignal = 'DOJI_WEAK';
+        candleSignalLabelFa = 'سیگنال ضعیف (کندل دوجی — جدول ۱۰.۱۴): صبر تا کندل تأیید';
       }
     }
 
-    const p2Extreme = verts.length >= 3 ? verts[2].price : currentPrice;
+    const hasSignal =
+      options?.hasSetupSignal !== undefined
+        ? options.hasSetupSignal
+        : candleSignal === 'HAMMER_OR_ENGULFING';
+
+    if (options?.hasSetupSignal === true && candleSignal === 'NEUTRAL') {
+      candleSignalLabelFa = 'ستاپ/کندل تأیید فعال‌شده در نقطه چرخش';
+    } else if (options?.hasSetupSignal === false) {
+      candleSignalLabelFa = 'بدون ستاپ و کندل تأیید — ورود پرریسک است؛ منتظر بمانید';
+    }
+
+    const p2Extreme = corrEndVert ? corrEndVert.price : currentPrice;
     const rawRetracement = isBull ? (p1 - currentPrice) / len1 : (currentPrice - p1) / len1;
     const extremeRetracement = isBull ? (p1 - p2Extreme) / len1 : (p2Extreme - p1) / len1;
+
+    // Scan open corrective candles only when corrEndVert is not yet completed (preserves explicit wave-2 pivots)
+    let candleExtremeRet = extremeRetracement;
+    if (!corrEndVert && candles.length > 0 && anchorEndVert.candleIndex < candles.length - 1) {
+      const scanStart = Math.max(0, Math.min(candles.length - 1, anchorEndVert.candleIndex));
+      for (let i = scanStart; i < candles.length; i++) {
+        const px = isBull ? candles[i].low : candles[i].high;
+        const r = isBull ? (p1 - px) / len1 : (px - p1) / len1;
+        if (r > candleExtremeRet) candleExtremeRet = r;
+      }
+    }
+
     const retracementPct = Math.round(Math.max(0, Math.min(180, rawRetracement * 100)) * 10) / 10;
-    const meetsMin50 = retracementPct >= 50.0 || extremeRetracement >= 0.5;
+    const extremeRetPct = Math.round(Math.max(0, Math.min(180, candleExtremeRet * 100)) * 10) / 10;
+    const effectiveTurnPct = options?.priorTurnPct ?? (extremeRetPct > retracementPct ? extremeRetPct : undefined);
+
+    const meetsMin50 =
+      retracementPct >= 50.0 ||
+      extremeRetracement >= 0.5 ||
+      (options?.priorTurnPct !== undefined && options.priorTurnPct >= 50);
 
     const w2CompleteAndBrokeW1 =
-      verts.length >= 3 && (isBull ? currentPrice > p1 : currentPrice < p1);
+      (verts.length >= 3 || (effectiveTurnPct ?? 0) >= 50) &&
+      (isBull ? currentPrice > p1 : currentPrice < p1);
+
+    const turningUpWithoutBreakingW1 =
+      !w2CompleteAndBrokeW1 &&
+      (extremeRetracement >= 0.5 || (effectiveTurnPct ?? 0) >= 50) &&
+      rawRetracement < Math.max(extremeRetracement, (effectiveTurnPct ?? 0) / 100) - 0.08 &&
+      retracementPct < 45 &&
+      options?.pullbackToPct === undefined;
+
+    const wave3ConfirmationStrength: EntryStrategyReport['wave3ConfirmationStrength'] = w2CompleteAndBrokeW1
+      ? 'STRONG'
+      : turningUpWithoutBreakingW1
+      ? 'WEAK'
+      : 'NONE';
 
     const p500 = roundPrice(p1 - sign * len1 * 0.5);
     const p618 = roundPrice(p1 - sign * len1 * 0.618);
     const p786 = roundPrice(p1 - sign * len1 * 0.786);
 
-    const isFallback50 =
-      extremeRetracement >= 0.5 &&
-      extremeRetracement < 0.618 &&
-      Math.abs(rawRetracement - 0.5) <= 0.06;
+    // Classic S/R Confluence detection from historical pivots before anchorEnd (Section 11-11)
+    let autoClassicSR = false;
+    if (candles.length >= 12 && anchorEndVert.candleIndex > 4) {
+      const histSlice = candles.slice(0, Math.max(6, anchorEndVert.candleIndex));
+      const histPivots = PivotDetector.detectPivots(histSlice, 2, 2, 0.5);
+      const refZones = [currentPrice, p618, p500];
+      autoClassicSR = histPivots.some(pv =>
+        refZones.some(z => Math.abs(pv.price - z) / len1 <= 0.045)
+      );
+    }
+    const classicSrConfluence = options?.hasClassicSR !== undefined ? options.hasClassicSR : autoClassicSR;
 
+    // Resolve internal subwave signature (Section 11-12)
+    const leg1Sub = resolveVertexSubwave(
+      anchorEndVert,
+      candles,
+      anchorStartVert.candleIndex,
+      anchorEndVert.candleIndex,
+      5
+    );
+    let detectedSubwaveSignature = 'نامشخص';
+    if (options?.internalSubwaves) {
+      detectedSubwaveSignature = options.internalSubwaves.join('-');
+    } else if (verts.length >= 4 && scenario.patternType === 'ZIGZAG') {
+      const sA = resolveVertexSubwave(verts[1], candles, verts[0].candleIndex, verts[1].candleIndex, 5);
+      const sB = resolveVertexSubwave(verts[2], candles, verts[1].candleIndex, verts[2].candleIndex, 3);
+      const sC = resolveVertexSubwave(verts[3], candles, verts[2].candleIndex, verts[3].candleIndex, 5);
+      detectedSubwaveSignature = `${sA}-${sB}-${sC}`;
+    } else if (scenario.patternType === 'ZIGZAG') {
+      detectedSubwaveSignature = leg1Sub === 5 ? '5-3-5' : '3-3-3';
+    } else if (scenario.patternType.startsWith('FLAT_')) {
+      detectedSubwaveSignature = '3-3-5';
+    } else if (scenario.patternType === 'ANTI_CYCLE') {
+      detectedSubwaveSignature = '3-5-5';
+    } else if (scenario.validityScore >= 70) {
+      detectedSubwaveSignature = leg1Sub === 5 ? '5-3-5' : '3-3-5';
+    }
+
+    const effectiveEvalRetPct =
+      options?.pullbackToPct !== undefined && options.pullbackToPct !== null
+        ? options.pullbackToPct
+        : retracementPct;
+
+    const scenarioEval = PatternEngines.evaluateWave2VsWaveAScenario({
+      retracementPct: effectiveEvalRetPct,
+      subwaveSignature: detectedSubwaveSignature,
+      hasClassicSR: classicSrConfluence,
+      validityScore: scenario.validityScore,
+      brokeWave1: w2CompleteAndBrokeW1
+    });
+
+    const {
+      w2VsAScenario,
+      w2ProbabilityPct,
+      waveAProbabilityPct,
+      scenarioConfidence,
+      credibilityTier,
+      credibilityFactorsFa,
+      w2VsALabelFa
+    } = scenarioEval;
+
+    const isExplicitCorrectivePattern =
+      scenario.patternType === 'ZIGZAG' || scenario.patternType.startsWith('FLAT_');
+    const isStructuredCorrective =
+      options?.isStructuredCorrective !== undefined
+        ? options.isStructuredCorrective
+        : options?.internalSubwaves !== undefined
+        ? detectedSubwaveSignature === '5-3-5' || detectedSubwaveSignature === '3-3-5'
+        : isExplicitCorrectivePattern &&
+          (detectedSubwaveSignature === '5-3-5' || detectedSubwaveSignature === '3-3-5');
+
+    // Prior wave strength (Section 11-8: >161.8% Strong vs <100% Weak)
+    const priorWaveRatioPct =
+      options?.priorWaveRatioPct !== undefined
+        ? options.priorWaveRatioPct
+        : verts.length >= 4
+        ? Math.round((Math.abs(verts[3].price - verts[2].price) / len1) * 1000) / 10
+        : 120;
+    const waveStrengthClass: EntryStrategyReport['waveStrengthClass'] =
+      priorWaveRatioPct >= 161.8 ? 'STRONG' : priorWaveRatioPct >= 100 ? 'MODERATE' : 'WEAK';
+
+    if (waveStrengthClass === 'WEAK') {
+      warnings.push(
+        `بخش ۱۱-۸: موج مرجع قبلی ضعیف (${priorWaveRatioPct}٪ < ۱۰۰٪) است؛ معامله ارزش ریسک ندارد.`
+      );
+    }
+
+    // Pullback Fallback evaluation (Sections 11-5 & 11-14)
+    const pullbackEval = PatternEngines.evaluatePullbackEntry({
+      priorTurnPct: effectiveTurnPct,
+      pullbackToPct: options?.pullbackToPct,
+      rawRetracementPct: retracementPct,
+      extremeRetracementPct: extremeRetPct,
+      brokeWave1: w2CompleteAndBrokeW1,
+      hasSignal
+    });
+
+    const isFallback50 = pullbackEval.isFallback50;
     const at786 = Math.abs(rawRetracement - 0.786) <= 0.045;
     const at618 = Math.abs(rawRetracement - 0.618) <= 0.045;
-
-    // Score W2 vs Wave A based on structure & retracement
-    let scoreW2 = 0;
-    let scoreA = 0;
-    const leg1Sub = estimateSubwaveCount(candles, verts[0].candleIndex, verts[1].candleIndex, 5);
-    if (leg1Sub === 5) scoreW2 += 0.4;
-    else scoreA += 0.35;
-
-    const effectiveRet = Math.max(rawRetracement, extremeRetracement);
-    if (effectiveRet >= 0.618) scoreW2 += 0.35;
-    else if (effectiveRet >= 0.5) {
-      scoreW2 += 0.15;
-      scoreA += 0.15;
-    } else if (effectiveRet <= 0.382) {
-      scoreA += 0.35;
-    }
-
-    if (scenario.validityScore >= 80) scoreW2 += 0.2;
-
-    let w2VsAScenario: EntryStrategyReport['w2VsAScenario'] = 'UNCERTAIN';
-    let scenarioConfidence = 0.55;
-    if (scoreW2 > scoreA * 1.45) {
-      w2VsAScenario = 'W2';
-      scenarioConfidence = Math.min(0.92, Math.round((scoreW2 / Math.max(0.01, scoreW2 + scoreA)) * 100) / 100 + 0.08);
-    } else if (scoreA > scoreW2 * 1.45) {
-      w2VsAScenario = 'A';
-      scenarioConfidence = Math.min(0.9, Math.round((scoreA / Math.max(0.01, scoreW2 + scoreA)) * 100) / 100 + 0.08);
-    }
-
-    const w2VsALabelFa =
-      w2VsAScenario === 'W2'
-        ? 'احتمال غالب: موج ۲ (انتظار شروع موج ۳ پرقدرت)'
-        : w2VsAScenario === 'A'
-        ? 'احتمال غالب: موج A اصلاحی (ریسک ادامه ریزش با موج C)'
-        : 'سناریوی دوگانه (W2 در برابر A) — توصیه به ورود پله‌ای';
-
-    const is535Correction = leg1Sub === 5 && scenario.patternType === 'ZIGZAG';
-    const is535At50 = is535Correction && Math.abs(rawRetracement - 0.5) <= 0.045;
+    const at50Structured = isStructuredCorrective && Math.abs(retracementPct - 50) <= 4.5;
     const isCrossing618To786 = rawRetracement > 0.65 && rawRetracement < 0.74;
-    const isAmbiguousStructure = w2VsAScenario === 'UNCERTAIN' && scenario.validityScore < 70;
+    const isAmbiguousStructure =
+      !at618 &&
+      !at786 &&
+      (options?.isStructuredCorrective === false ||
+        (!isStructuredCorrective &&
+          options?.internalSubwaves === undefined &&
+          w2VsAScenario === 'UNCERTAIN' &&
+          scenario.validityScore < 70));
 
     let entryZone: EntryStrategyReport['entryZone'] = 'NONE';
     let entryZoneLabelFa = 'عدم ورود (رتریسمنت کمتر از حداقل ۵۰٪ — جلوگیری از FOMO)';
-    let riskLevel: EntryStrategyReport['riskLevel'] = 'HIGH';
+    let entryAction: EntryStrategyReport['entryAction'] = 'DO_NOT_ENTER';
+    let entryActionLabelFa = 'عدم ورود';
+    let riskLevel: EntryStrategyReport['riskLevel'] = waveRole === 'W4' ? 'MEDIUM' : 'HIGH';
+    let isStructuredException = false;
+    let isFomoBlocked = false;
 
-    if (w2CompleteAndBrokeW1) {
-      entryZone = 'START_WAVE_3';
-      entryZoneLabelFa = 'بهترین نقطه ورود: شروع موج ۳ (پس از شکست سقف موج ۱)';
+    if (isSubwave3Of3) {
+      entryZone = 'SUBWAVE_3_OF_3';
+      entryZoneLabelFa = 'بهترین نقطه ورود: ریزموج ۳ از ۳ (کمترین ریسک، بیشترین شتاب و بازده)';
+      entryAction = options?.hasSetupSignal === false ? 'WAIT' : 'ENTER';
+      entryActionLabelFa = entryAction === 'ENTER' ? 'ورود ممتاز (ریزموج ۳ از ۳)' : 'در انتظار کندل تایید در ریزموج ۳ از ۳';
       riskLevel = 'LOW';
-    } else if (!meetsMin50) {
-      entryZoneLabelFa =
-        is535Correction && rawRetracement >= 0.34
-          ? 'رتریسمنت ۳۸.۲–۴۰٪ در ساختار ۵-۳-۵ کافی نیست؛ تا ۵۰٪ یا ۶۱.۸٪ صبر کنید (جدول ۱۳)'
-          : 'عدم ورود (رتریسمنت کمتر از حداقل ۵۰٪ — جلوگیری از FOMO)';
-      warnings.push(`جدول ۱۳ (۱۰.۱ / ۱۰.۱۳): رتریسمنت فعلی (${retracementPct}٪) کمتر از حداقل ۵۰٪ است؛ برای جلوگیری از FOMO ورود نکنید.`);
-    } else if (isAmbiguousStructure) {
+    } else if (w2CompleteAndBrokeW1) {
+      entryZone = 'START_WAVE_3';
+      entryZoneLabelFa = 'بهترین نقطه ورود: شروع موج ۳ (پس از شکست سقف موج ۱ با تایید قوی)';
+      entryAction = options?.hasSetupSignal === false ? 'WAIT' : 'ENTER';
+      entryActionLabelFa = 'ورود تاییدشده در شروع موج ۳ (کمترین ریسک)';
+      riskLevel = 'LOW';
+    } else if (turningUpWithoutBreakingW1) {
       entryZone = 'NONE';
-      entryZoneLabelFa = 'ساختار موجی مبهم است؛ تا رفع ابهام و تأیید کندل معتبر صبر کنید (جدول ۱۳)';
-      warnings.push('جدول ۱۳: ساختار موج نامشخص/مبهم است؛ از ورود پیش‌هنگام خودداری کنید.');
-    } else if (at786) {
-      entryZone = '78.6%';
-      entryZoneLabelFa =
-        candleSignal === 'HAMMER_OR_ENGULFING'
-          ? 'ورود تأییدشده در ۷۸.۶٪ (همراه با شتاب‌گیری موج ۳)'
-          : 'محدوده طلایی ۷۸.۶٪ (همراه با پتانسیل شتاب‌گیری موج ۳ — منتظر کندل تأیید)';
-      riskLevel = 'MEDIUM';
+      entryZoneLabelFa = 'برگشت قیمت بدون شکست سقف موج ۱ — تایید ضعیف (احتمال موج B)';
+      entryAction = 'WAIT';
+      entryActionLabelFa = 'صبر تا شکست سقف موج ۱ یا پول‌بک معتبر روی ۵۰٪';
+      riskLevel = waveRole === 'W4' ? 'MEDIUM' : 'HIGH';
+      isFomoBlocked = true;
+      warnings.push('بخش ۱۱-۲: موج ۱ هنوز شکسته نشده است؛ حرکت صعودی ممکن است فقط موج B باشد.');
+    } else if (
+      pullbackEval.status === 'SHALLOW_382_WAIT' ||
+      pullbackEval.status === 'NO_PULLBACK_WAIT'
+    ) {
+      entryZone = 'NONE';
+      entryZoneLabelFa = pullbackEval.explanationFa;
+      entryAction = 'WAIT';
+      entryActionLabelFa = 'صبر تا رسیدن پول‌بک به ۵۰٪ یا شکست سقف موج ۱';
+      riskLevel = waveRole === 'W4' ? 'MEDIUM' : 'HIGH';
+      isFomoBlocked = true;
+      notes.push(pullbackEval.explanationFa);
+    } else if (
+      pullbackEval.status === 'VALID_50_PULLBACK' &&
+      (options?.priorTurnPct !== undefined || options?.pullbackToPct !== undefined)
+    ) {
+      entryZone = '50%_PULLBACK';
+      entryZoneLabelFa = pullbackEval.explanationFa;
+      const okToEnter = hasSignal || (options?.hasSetupSignal === undefined && candleSignal !== 'DOJI_WEAK');
+      entryAction = okToEnter ? 'ENTER' : 'WAIT';
+      entryActionLabelFa = okToEnter ? 'ورود Fallback روی پول‌بک ۵۰٪' : 'صبر تا کندل تایید روی پول‌بک ۵۰٪';
+      riskLevel = waveRole === 'W4' ? 'MEDIUM' : hasSignal ? 'LOW' : 'MEDIUM';
+      isFomoBlocked = !okToEnter;
     } else if (isCrossing618To786) {
       entryZone = '78.6%';
       entryZoneLabelFa = 'عبور قیمت از ۶۱.۸٪ به سمت ۷۸.۶٪ — صبر تا رسیدن به ۷۸.۶٪ و تأیید کندل (جدول ۱۳)';
-      warnings.push('جدول ۱۳: تراز ۶۱.۸٪ شکسته شده و قیمت در مسیر ۷۸.۶٪ است؛ تا رسیدن به ۷۸.۶٪ وارد نشوید.');
+      entryAction = 'WAIT_786';
+      entryActionLabelFa = 'انتظار تا رسیدن به تراز ۷۸.۶٪';
       riskLevel = 'MEDIUM';
+      isFomoBlocked = true;
+      warnings.push('جدول ۱۳ (۱۱-۴): تراز ۶۱.۸٪ شکسته شده و قیمت در مسیر ۷۸.۶٪ است؛ تا رسیدن به ۷۸.۶٪ وارد نشوید.');
+    } else if (!meetsMin50) {
+      // Section 11-7 Controlled Structured Exception (42%..49.9% + clear structure + setup signal)
+      if (isStructuredCorrective && retracementPct >= 42 && retracementPct < 50) {
+        if (hasSignal) {
+          isStructuredException = true;
+          entryZone = '50%_PULLBACK';
+          entryZoneLabelFa = `استثنای موج ساختارمند در ${retracementPct}٪ (پیش از PRZ کامل — همراه با سیگنال ستاپ)`;
+          entryAction = 'ENTER_RISKY_STRUCTURED';
+          entryActionLabelFa = 'ورود کنترل‌شده پرریسک (ساختار شفاف + ستاپ تاییدشده)';
+          riskLevel = 'MEDIUM';
+          isFomoBlocked = false;
+          warnings.push('بخش ۱۱-۷: قیمت به PRZ کامل (۶۱.۸٪) نرسیده اما به دلیل ساختار شفاف و ستاپ تاییدشده ورود کنترل‌شده با استاپ اکید مجاز است.');
+        } else {
+          entryZone = 'NONE';
+          entryZoneLabelFa = `اصلاح ساختارمند ${retracementPct}٪ بدون ستاپ تایید — منتظر سیگنال یا ۵۰–۶۱.۸٪ بمانید`;
+          entryAction = 'WAIT';
+          entryActionLabelFa = 'صبر تا تایید ستاپ یا رسیدن به ۵۰٪';
+          riskLevel = waveRole === 'W4' ? 'MEDIUM' : 'HIGH';
+          isFomoBlocked = true;
+        }
+      } else {
+        entryZone = 'NONE';
+        entryZoneLabelFa =
+          isStructuredCorrective && retracementPct >= 34
+            ? `رتریسمنت ${retracementPct}٪ در ساختار ${detectedSubwaveSignature} کافی نیست؛ تا ۵۰٪ یا ۶۱.۸٪ صبر کنید (۱۱-۶)`
+            : 'عدم ورود (رتریسمنت کمتر از حداقل ۵۰٪ — جلوگیری از FOMO)';
+        entryAction = isStructuredCorrective && retracementPct >= 34 ? 'WAIT' : 'DO_NOT_ENTER';
+        entryActionLabelFa = entryAction === 'WAIT' ? 'صبر برای اصلاح ۵۰٪+' : 'عدم ورود (منع FOMO < ۵۰٪)';
+        riskLevel = waveRole === 'W4' ? 'MEDIUM' : 'HIGH';
+        isFomoBlocked = true;
+        warnings.push(`جدول ۱۳ (۱۱-۳): رتریسمنت فعلی (${retracementPct}٪) کمتر از حداقل ۵۰٪ است؛ برای جلوگیری از FOMO ورود نکنید.`);
+      }
+    } else if (isAmbiguousStructure) {
+      entryZone = 'NONE';
+      entryZoneLabelFa = 'ساختار موجی مبهم است؛ تا رفع ابهام و تأیید کندل معتبر صبر کنید (جدول ۱۳)';
+      entryAction = 'WAIT';
+      entryActionLabelFa = 'صبر تا شفاف‌شدن ساختار';
+      riskLevel = 'HIGH';
+      isFomoBlocked = true;
+      warnings.push('جدول ۱۳ (۱۱-۶): ساختار موج نامشخص/مبهم است؛ از ورود پیش‌هنگام خودداری کنید.');
+    } else if (at786) {
+      entryZone = '78.6%';
+      const okEnter = hasSignal;
+      entryZoneLabelFa = okEnter
+        ? 'ورود تأییدشده در ۷۸.۶٪ (همراه با شتاب‌گیری موج ۳)'
+        : 'محدوده طلایی ۷۸.۶٪ (همراه با پتانسیل شتاب‌گیری موج ۳ — منتظر کندل تأیید)';
+      entryAction = okEnter ? 'ENTER' : 'WAIT';
+      entryActionLabelFa = okEnter ? 'ورود در ۷۸.۶٪ (شتاب‌گیری)' : 'انتظار برای کندل تایید در ۷۸.۶٪';
+      riskLevel = waveRole === 'W4' ? 'MEDIUM' : okEnter ? 'LOW' : 'HIGH';
+      isFomoBlocked = candleSignal === 'DOJI_WEAK';
     } else if (at618) {
       entryZone = '61.8%';
-      entryZoneLabelFa =
-        candleSignal === 'HAMMER_OR_ENGULFING'
-          ? 'ورود تأییدشده در ۶۱.۸٪ با کندل چکش/پوشا (جدول ۱۳)'
-          : candleSignal === 'DOJI_WEAK'
-          ? 'تراز ۶۱.۸٪ روی دوجی — صبر تا کندل تأیید چکش/پوشا (جدول ۱۳.۶)'
-          : 'تراز ۶۱.۸٪ بدون سیگنال کندلی — منتظر کندل تأیید بمانید (جدول ۱۳)';
-      riskLevel = candleSignal === 'HAMMER_OR_ENGULFING' ? 'LOW' : 'MEDIUM';
-    } else if (is535At50) {
+      entryZoneLabelFa = hasSignal
+        ? 'ورود تأییدشده در ۶۱.۸٪ با کندل چکش/پوشا (جدول ۱۳)'
+        : candleSignal === 'DOJI_WEAK'
+        ? 'تراز ۶۱.۸٪ روی دوجی — صبر تا کندل تأیید چکش/پوشا (جدول ۱۳.۶)'
+        : 'تراز ۶۱.۸٪ بدون سیگنال کندلی — منتظر کندل تأیید بمانید (جدول ۱۳)';
+      entryAction = hasSignal ? 'ENTER' : 'WAIT';
+      entryActionLabelFa = hasSignal ? 'ورود تاییدشده در ۶۱.۸٪' : 'صبر تا سیگنال/کندل تایید در ۶۱.۸٪';
+      riskLevel = waveRole === 'W4' ? 'MEDIUM' : hasSignal ? 'LOW' : 'HIGH';
+      isFomoBlocked = candleSignal === 'DOJI_WEAK';
+    } else if (at50Structured) {
       entryZone = '50%_PULLBACK';
-      entryZoneLabelFa = 'ورود مجاز در ۵۰٪ (ساختار واضح ۵-۳-۵ پیش از ۶۱.۸٪ — جدول ۱۳)';
-      riskLevel = 'MEDIUM';
-      notes.push('جدول ۱۳: به دلیل وضوح ساختار ۵-۳-۵، ورود در اصلاح ۵۰٪ حتی پیش از ۶۱.۸٪ مجاز ارزیابی شد.');
+      const okEnter = hasSignal || (options?.hasSetupSignal === undefined && candleSignal !== 'DOJI_WEAK');
+      entryZoneLabelFa = okEnter
+        ? `ورود مجاز در ۵۰٪ (ساختار واضح ${detectedSubwaveSignature} پیش از ۶۱.۸٪ — جدول ۱۳)`
+        : `تراز ۵۰٪ روی ساختار ${detectedSubwaveSignature} — منتظر کندل تایید بمانید`;
+      entryAction = okEnter ? 'ENTER' : 'WAIT';
+      entryActionLabelFa = okEnter ? 'ورود در ۵۰٪ (ساختار معتبر)' : 'صبر برای تایید در ۵۰٪';
+      riskLevel = waveRole === 'W4' ? 'MEDIUM' : hasSignal ? 'LOW' : 'MEDIUM';
+      isFomoBlocked = !okEnter;
+      notes.push(`جدول ۱۳ (۱۱-۶): به دلیل وضوح ساختار ${detectedSubwaveSignature}، ناحیه ۵۰٪ به‌عنوان محدوده ورود ارزیابی شد.`);
     } else if (isFallback50) {
       entryZone = '50%_PULLBACK';
+      const okEnter = hasSignal || (options?.hasSetupSignal === undefined && candleSignal !== 'DOJI_WEAK');
       entryZoneLabelFa = 'ورود جایگزین (Fallback): پول‌بک از ۵۵٪ روی سطح ۵۰٪';
+      entryAction = okEnter ? 'ENTER' : 'WAIT';
+      entryActionLabelFa = okEnter ? 'ورود Fallback روی ۵۰٪' : 'صبر برای تایید روی ۵۰٪';
       riskLevel = 'MEDIUM';
+      isFomoBlocked = !okEnter;
     } else {
       entryZone = '61.8%';
       entryZoneLabelFa = `انتظار در محدوده طلایی ۶۱.۸٪ (${p618.toLocaleString()}) و ۷۸.۶٪`;
-      riskLevel = 'MEDIUM';
+      entryAction = 'WAIT';
+      entryActionLabelFa = 'صبر تا رسیدن به محدوده ۶۱.۸٪ / ۷۸.۶٪';
+      riskLevel = waveRole === 'W4' ? 'MEDIUM' : 'HIGH';
     }
 
-    const isFomoBlocked =
-      (!meetsMin50 && !w2CompleteAndBrokeW1) ||
-      isCrossing618To786 ||
-      isAmbiguousStructure ||
-      (candleSignal === 'DOJI_WEAK' && !w2CompleteAndBrokeW1) ||
-      w2VsAScenario === 'A';
+    // Weak prior wave blocks risking (Section 11-8)
+    if (waveStrengthClass === 'WEAK' && !isSubwave3Of3) {
+      entryAction = 'DO_NOT_ENTER';
+      entryActionLabelFa = 'عدم ورود — موج قبلی ضعیف (< ۱۰۰٪) و فاقد ارزش ریسک';
+      isFomoBlocked = true;
+      riskLevel = 'HIGH';
+    }
+
+    // Definite Wave A scenario in non-W4 context blocks bullish buy plan
+    if (w2VsAScenario === 'A' && waveRole !== 'W4' && !w2CompleteAndBrokeW1 && !isSubwave3Of3) {
+      isFomoBlocked = true;
+      if (entryAction === 'ENTER') {
+        entryAction = 'DO_NOT_ENTER';
+        entryActionLabelFa = 'عدم خرید — سناریوی غالب موج A اصلاحی است';
+      }
+    }
 
     if (candleSignal === 'DOJI_WEAK' && meetsMin50 && !w2CompleteAndBrokeW1) {
       warnings.push('جدول ۱۰.۱۴: آخرین کندل دوجی (سیگنال ضعیف) است؛ تا بسته‌شدن کندل تایید چکش صبر کنید.');
     }
 
-    const lenPrev = verts.length >= 4 ? Math.abs(verts[3].price - verts[2].price) : len1 * 1.2;
-    const strengthRatio = lenPrev / len1;
-    const waveStrengthClass: EntryStrategyReport['waveStrengthClass'] =
-      strengthRatio >= 1.618 ? 'STRONG' : strengthRatio >= 1.0 ? 'MODERATE' : 'WEAK';
+    const worthRisking =
+      waveStrengthClass !== 'WEAK' &&
+      !(w2VsAScenario === 'A' && waveRole !== 'W4' && !w2CompleteAndBrokeW1) &&
+      entryAction !== 'DO_NOT_ENTER';
 
-    const steps: EntryStepPlan[] =
-      w2VsAScenario === 'A'
-        ? []
-        : isFallback50
-        ? [
-            {
-              stepNumber: 1,
-              labelFa: 'ورود Fallback در پول‌بک ۵۰٪',
-              price: p500,
-              sizePct: 100,
-              reasonFa: 'اصلاح ۵۵٪ بدون رسیدن به ۶۱.۸٪ و پول‌بک روی ۵۰٪ (استاپ زیر ۵۰٪)'
-            }
-          ]
-        : w2VsAScenario === 'W2'
-        ? [
-            {
-              stepNumber: 1,
-              labelFa: 'ورود تک‌پله‌ای متمرکز (۶۱.۸٪ یا شروع W3)',
-              price: w2CompleteAndBrokeW1 ? roundPrice(p1) : p618,
-              sizePct: 100,
-              reasonFa: 'برتری قطعی سناریوی W2 بر موج A با ساختار ۵ موجی'
-            }
-          ]
-        : [
-            {
-              stepNumber: 1,
-              labelFa: 'پله اول — تراز ۶۱.۸٪ رتریسمنت',
-              price: p618,
-              sizePct: 50,
-              reasonFa: 'شروع مومنتوم خرید در تراز طلایی با تایید کندلی'
-            },
-            {
-              stepNumber: 2,
-              labelFa: 'پله دوم — تراز ۷۸.۶٪ (حد ابطال زیر مبدأ ۱)',
-              price: p786,
-              sizePct: 50,
-              reasonFa: 'میانگین‌سازی کنترل‌شده روی سنگر نهایی پیش از موج ۳'
-            }
-          ];
+    // Stepped Buying Plan (Section 11-13)
+    let stepMode: EntryStrategyReport['stepMode'] = 'TWO_STEP';
+    let steps: EntryStepPlan[] = [];
+    if (w2VsAScenario === 'A' && waveRole !== 'W4' && !w2CompleteAndBrokeW1) {
+      stepMode = 'NO_BUY';
+      steps = [];
+    } else if (isFallback50) {
+      stepMode = 'SINGLE_STEP';
+      steps = [
+        {
+          stepNumber: 1,
+          labelFa: 'ورود Fallback در پول‌بک ۵۰٪',
+          price: p500,
+          sizePct: 100,
+          reasonFa: 'اصلاح ۵۵٪ بدون رسیدن به ۶۱.۸٪ و پول‌بک روی ۵۰٪ (استاپ زیر ۵۰٪)'
+        }
+      ];
+    } else if (w2VsAScenario === 'W2' || w2CompleteAndBrokeW1 || isSubwave3Of3) {
+      stepMode = 'SINGLE_STEP';
+      steps = [
+        {
+          stepNumber: 1,
+          labelFa: isSubwave3Of3
+            ? 'ورود تک‌پله‌ای متمرکز (ریزموج ۳ از ۳)'
+            : 'ورود تک‌پله‌ای متمرکز (۶۱.۸٪ یا شروع W3)',
+          price: w2CompleteAndBrokeW1 || isSubwave3Of3 ? roundPrice(p1) : p618,
+          sizePct: 100,
+          reasonFa: 'برتری قطعی سناریوی W2 بر موج A — خرید یک‌مرحله‌ای مجاز است'
+        }
+      ];
+    } else {
+      stepMode = 'TWO_STEP';
+      steps = [
+        {
+          stepNumber: 1,
+          labelFa: 'پله اول — تراز ۶۱.۸٪ رتریسمنت',
+          price: p618,
+          sizePct: 50,
+          reasonFa: 'شروع خرید پله‌ای ۵۰٪ در تراز طلایی با تایید کندلی'
+        },
+        {
+          stepNumber: 2,
+          labelFa: 'پله دوم — تراز ۷۸.۶٪ (حد ابطال زیر ۱۰۰٪ موج ۱)',
+          price: p786,
+          sizePct: 50,
+          reasonFa: 'پله دوم ۵۰٪ در سنگر نهایی پیش از موج ۳ با مدیریت ریسک دقیق'
+        }
+      ];
+    }
 
     // Table 14 Rules 11.12 & 11.13: Risk/Reward ratio evaluation
     const plannedEntry = steps[0]?.price ?? (isFallback50 ? p500 : p618);
     const stopAnchor = isFallback50 ? p500 - sign * len1 * 0.04 : p0;
     const stopLossPrice = roundPrice(stopAnchor);
-    const tmvIdealTarget = (verts[2]?.price ?? p618) + sign * len1 * 1.0;
+    const stopLossInvalidationDescFa = isFallback50
+      ? `استاپ زیر محدوده پول‌بک ۵۰٪ (${stopLossPrice.toLocaleString()})`
+      : `حد ابطال زیر ۱۰۰٪ مبدأ موج ۱ (${stopLossPrice.toLocaleString()})`;
+    const tmvIdealTarget = (corrEndVert?.price ?? p618) + sign * len1 * 1.0;
     const riskDist = Math.abs(plannedEntry - stopLossPrice);
     const rewardDist = isBull ? tmvIdealTarget - plannedEntry : plannedEntry - tmvIdealTarget;
     const riskRewardRatio =
@@ -2227,9 +2731,25 @@ export class PatternEngines {
       meetsMin50,
       entryZone,
       entryZoneLabelFa,
+      entryAction,
+      entryActionLabelFa,
+      wave3ConfirmationStrength,
+      isSubwave3Of3,
+      isStructuredException,
+      worthRisking,
+      priorWaveRatioPct,
       w2VsAScenario,
       w2VsALabelFa,
       scenarioConfidence,
+      w2ProbabilityPct,
+      waveAProbabilityPct,
+      credibilityTier,
+      credibilityFactorsFa,
+      classicSrConfluence,
+      detectedSubwaveSignature,
+      priorTurnPct: effectiveTurnPct,
+      pullbackDetectedPct: options?.pullbackToPct,
+      stepMode,
       riskLevel,
       isFallback50,
       accelerationAt786: at786,
@@ -2239,6 +2759,7 @@ export class PatternEngines {
       riskRewardRatio,
       riskRewardVerdictFa,
       stopLossPrice,
+      stopLossInvalidationDescFa,
       isFomoBlocked,
       steps,
       warnings,

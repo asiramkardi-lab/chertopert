@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -166,6 +166,32 @@ export const SddAndCodeViewer: React.FC = () => {
 - [۷-۲] ممنوعیت رتریسمنت برای موج ۵: اهداف موج ۵ تنها با اکستنشن و سطوح TMV محاسبه می‌شوند.
 - [۸-۱] چهار سطح TMV (Prime، Short 0.618، Ideal 1.000، Alternate 1.618) و اثر کاهش ضرایب در کشیدگی موج ۳.
 - [۸-۲] سنجش هم‌پوشانی TMV و PRZ: دسته‌بندی تلاقی به FULL / PARTIAL / NONE همراه با درصد اطمینان.
+`;
+
+  const session11Markdown = `# استخراج و تشریح کامل جلسه ۱۱ + سند SDD (010-entry-strategy-engine)
+
+## ۱. جدول ۱۴ مفهوم استخراج‌شده (۱۱-۱ تا ۱۱-۱۴)
+- [۱۱-۱] ورود در موج اصلاحی (W2 بدون تایید = ریسک بالا | W4 = ریسک متوسط) در برابر شروع موج ۳ (تاییدشده = ریسک کم، سود بالا).
+- [۱۱-۲] بهترین ورود: شروع موج ۳ با شکست سقف موج ۱ (تایید قوی) در برابر برگشت بدون شکست موج ۱ (تایید ضعیف / احتمال B) و ریزموج ۳ از ۳ (بهترین ستاپ).
+- [۱۱-۳] قانون حداقل ۵۰٪ رتریسمنت: زیر ۵۰٪ ورود ممنوع (منع FOMO)، ۵۰٪ مرزی، ۶۱.۸٪ ایده‌آل و ۷۸.۶٪ شتاب‌گیری.
+- [۱۱-۴] ستاپ تراز ۶۱.۸٪ و ۷۸.۶٪: در ۶۱.۸٪ فقط با کندل/ستاپ تایید ورود مجاز است؛ در عبور ۶۱.۸ به سمت ۷۸.۶٪ صبر تا ۷۸.۶٪ الزامی است.
+- [۱۱-۵ & ۱۱-۱۴] پول‌بک بالای ۵۰٪ (Fallback): در چرخش از ~۵۵٪ (نرسیده به ۶۱.۸٪) و صعود بالای ۵۰٪، پول‌بک روی ۵۰٪ (+ ستاپ) مجوز ورود دارد؛ پول‌بک ۳۸.۲٪ یا بدون پول‌بک = صبر.
+- [۱۱-۶] اعتماد به الگوهای ساختارمند (۵-۳-۵ / ۳-۳-۵): ورود ۵۰٪ روی ساختار شفاف مجاز است؛ ۳۸.۲٪ یا ساختار مبهم = صبر.
+- [۱۱-۷] استثنای ورود در اصلاح ساختارمند پیش از PRZ: در بازه ۴۲–۴۹.۹٪ (~۴۵٪) با ساختار شفاف و ستاپ تایید، ورود کنترل‌شده پرریسک (ENTER_RISKY_STRUCTURED) مجاز است؛ در ۳۰٪ اکیداً ممنوع.
+- [۱۱-۸] قدرت موج قبلی (کشیدگی): >۱۶۱.۸٪ = STRONG (ارزش ریسک بالا)؛ ۱۰۰–۱۶۱.۸٪ = MODERATE؛ <۱۰۰٪ = WEAK (عدم ارزش ریسک و توقف معامله).
+- [۱۱-۹] تشخیص موج ۲ از موج A: اولویت‌بندی سناریو W2 / A / UNCERTAIN.
+- [۱۱-۱۰] اعتباردهی با درصد فیبوناچی: ۶۱.۸٪ و ۷۸.۶٪ (اعتبار W2 بالا)، ۵۰٪ (متوسط/دوسویه)، ≤۳۸.۲٪ (احتمال بالای A).
+- [۱۱-۱۱] اعتباردهی با حمایت/مقاومت کلاسیک: هم‌پوشانی پیوت تاریخی با محدوده PRZ اعتبار سطح را جهش می‌دهد (۶۱.۸٪ + S/R = VERY_HIGH؛ ۳۸.۲٪ + S/R = MEDIUM).
+- [۱۱-۱۲] اعتباردهی با ساختار: ۵-۳-۵ (نفع شدید W2)، ۳-۳-۳ (نفع شدید A)، ۳-۵-۵ آنتی (شانس پایین W2)، نامشخص (هر دو محتمل).
+- [۱۱-۱۳] خرید پله‌ای: W2 قطعی ← تک‌پله‌ای ۱۰۰٪ (SINGLE_STEP)؛ نامشخص ← دوپله‌ای ۵۰٪ @ ۶۱.۸٪ + ۵۰٪ @ ۷۸.۶٪ با استاپ زیر ۱۰۰٪ (TWO_STEP)؛ A قطعی ← عدم خرید (NO_BUY).
+
+## ۲. درخت تصمیم موتور قطعی (PatternEngines.analyzeEntryStrategy)
+1. محاسبه اصلاح فعلی (retracementPct) و بیشینه چرخش تاریخی در کندل‌ها (priorTurnPct) و بررسی عبور از موج ۱.
+2. استخراج امضای ریزموج (5-3-5 / 3-3-3 / 3-5-5 / 3-3-5) و اسکن پیوت‌های کلاسیک (S/R) پیش از مبدأ اصلاح.
+3. فراخوانی evaluateWave2VsWaveAScenario برای محاسبه w2ProbabilityPct، waveAProbabilityPct و credibilityTier (VERY_HIGH / HIGH / MEDIUM / LOW).
+4. بررسی قدرت موج مرجع (STRONG / MODERATE / WEAK) و مسدودسازی ورود در امواج ضعیف (<۱۰۰٪).
+5. ارزیابی استراتژی Fallback 50% در evaluatePullbackEntry و استثنای کنترل‌شده ۱۱-۷ در بازه ۴۲–۴۹.۹٪ با ستاپ تایید.
+6. تولید خروجی برنامه پله‌ای (SINGLE_STEP / TWO_STEP / NO_BUY) همراه با R/R و حد ابطال دقیق (T-11.1 تا T-11.40).
 `;
 
   const sessions9to19Markdown = `# مفاهیم استخراج‌شده جلسات ۹ تا ۱۹، شاخه‌های SDD (008..018) و پایپ‌لاین گام ۰ تا ۱۱
@@ -805,6 +831,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION11')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION11'
+                ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg shadow-amber-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۱ (010)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -862,6 +900,8 @@ const runAnalysis = async () => {
               ? session2Markdown
               : activeTab === 'SESSIONS_3_8'
               ? sessions3to8Markdown
+              : activeTab === 'SESSION11'
+              ? session11Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -884,6 +924,7 @@ const runAnalysis = async () => {
           activeTab === 'CATALOG' ||
           activeTab === 'SESSION2' ||
           activeTab === 'SESSIONS_3_8' ||
+          activeTab === 'SESSION11' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -893,6 +934,7 @@ const runAnalysis = async () => {
         {activeTab === 'CATALOG' && catalogMarkdown}
         {activeTab === 'SESSION2' && session2Markdown}
         {activeTab === 'SESSIONS_3_8' && sessions3to8Markdown}
+        {activeTab === 'SESSION11' && session11Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

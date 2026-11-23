@@ -1730,6 +1730,8 @@ export type DiagonalIdentificationInput =
 export interface DiagonalIdentificationResult {
   isValid: boolean;
   category: DiagonalCategory;
+  macroCategory: 'DIAGONAL' | 'ANTI_DIAGONAL' | 'NOT_DIAGONAL' | 'INVALID';
+  isNonIdealPattern: boolean;
   variantLabelFa: string;
   subwaveSignature: string;
   isAll3Wave: boolean;
@@ -1893,6 +1895,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'INVALID',
+      macroCategory: 'INVALID',
+      isNonIdealPattern: false,
       variantLabelFa: 'داده ناکافی برای تشخیص قطر (۶ رأس یا ۵ موج لازم است)',
       subwaveSignature,
       isAll3Wave,
@@ -1913,6 +1917,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'NOT_DIAGONAL',
+      macroCategory: 'NOT_DIAGONAL',
+      isNonIdealPattern: false,
       variantLabelFa: 'سیکل ایده‌آل (۵-۳-۵-۳-۵) — قطر نیست',
       subwaveSignature,
       isAll3Wave: false,
@@ -1931,6 +1937,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'NOT_DIAGONAL',
+      macroCategory: 'NOT_DIAGONAL',
+      isNonIdealPattern: false,
       variantLabelFa: 'ساختار اصلاحی فلت (۳-۳-۵-۳-۳) — قطر نیست',
       subwaveSignature,
       isAll3Wave: false,
@@ -1950,6 +1958,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'INVALID',
+      macroCategory: 'INVALID',
+      isNonIdealPattern: false,
       variantLabelFa: `ساختار نامعتبر قطر (${subwaveSignature})`,
       subwaveSignature,
       isAll3Wave: false,
@@ -1969,6 +1979,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'INVALID',
+      macroCategory: 'INVALID',
+      isNonIdealPattern: false,
       variantLabelFa: 'نقض مبدأ موج ۱ توسط موج ۴ — قطر نامعتبر',
       subwaveSignature,
       isAll3Wave: true,
@@ -1988,6 +2000,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'INVALID',
+      macroCategory: 'INVALID',
+      isNonIdealPattern: false,
       variantLabelFa: 'قطر تاییدنشده: عدم پوشش ۱۰۰٪ موج ۲',
       subwaveSignature,
       isAll3Wave: true,
@@ -2011,6 +2025,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'NOT_DIAGONAL',
+      macroCategory: 'NOT_DIAGONAL',
+      isNonIdealPattern: false,
       variantLabelFa: 'عدم هم‌پوشانی موج ۴ با موج ۱ (قانون ۳ نقض نشده — قطر نیست)',
       subwaveSignature,
       isAll3Wave: true,
@@ -2031,6 +2047,8 @@ export function identifyDiagonal(
     return {
       isValid: false,
       category: 'INVALID',
+      macroCategory: 'INVALID',
+      isNonIdealPattern: false,
       variantLabelFa: 'ترتیب قدرت امواج قطر نامعتبر (نه کاهشی و نه افزایشی)',
       subwaveSignature,
       isAll3Wave: true,
@@ -2060,6 +2078,10 @@ export function identifyDiagonal(
     variantLabelFa = `قطر پیشرو (Leading Diagonal — موج ${waveLocation})`;
   }
 
+  const macroCategory: 'DIAGONAL' | 'ANTI_DIAGONAL' = isBroadeningWedge
+    ? 'ANTI_DIAGONAL'
+    : 'DIAGONAL';
+
   const postCorrectionRangePct: [number, number] = isBroadeningWedge ? [61.8, 100] : [50, 61.8];
   const locNote = isCommonLocation ? '' : ` (هشدار: تشکیل قطر در موج ${waveLocation} نادر و پرریسک است)`;
   const strengthNote =
@@ -2071,6 +2093,8 @@ export function identifyDiagonal(
   return {
     isValid: true,
     category,
+    macroCategory,
+    isNonIdealPattern: true,
     variantLabelFa,
     subwaveSignature,
     isAll3Wave: true,

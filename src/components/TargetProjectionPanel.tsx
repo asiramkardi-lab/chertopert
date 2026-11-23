@@ -28,9 +28,9 @@ import {
   GitBranch,
   ArrowUpLeft,
   ShieldCheck,
-  Zap,
-  Crosshair
+  Zap
 } from 'lucide-react';
+import { EntryStrategyPanel } from './EntryStrategyPanel';
 
 export interface TargetProjectionBranchItem {
   id: string;
@@ -206,7 +206,6 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
             report.tmvSummary?.alternate1618,
             item.parentWaveLabel
           );
-          const entryPlan = PatternEngines.analyzeEntryStrategy(scenario, item.candlesForBranch);
           const isDiagonalPattern =
             scenario.patternType === 'LEADING_DIAGONAL' ||
             scenario.patternType === 'ANTI_LEADING_DIAGONAL' ||
@@ -609,64 +608,12 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                 </div>
               )}
 
-              {/* Session 11 & Tables 13-14: Multi-Step Entry Strategy, Candle Confirmation & R/R */}
-              <div className="p-2.5 rounded-lg bg-slate-950/85 border border-slate-800 space-y-1.5 text-[10.5px]">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="font-bold text-indigo-300 flex items-center gap-1.5">
-                    <Crosshair className="w-3.5 h-3.5 shrink-0" />
-                    <span>استراتژی ورود و تفکیک W2 از A (جلسه ۱۱)</span>
-                  </span>
-                  <span className="font-mono tabular-nums text-[10px] text-cyan-300">
-                    {entryPlan.w2VsALabelFa} ({Math.round(entryPlan.scenarioConfidence * 100)}%)
-                  </span>
-                </div>
-                <div className="text-[10px] text-slate-300">
-                  ناحیه: <strong className="text-white">{entryPlan.entryZoneLabelFa}</strong> · اصلاح فعلی:{' '}
-                  <span className="font-mono tabular-nums">{entryPlan.retracementPct}%</span> · حداقل ۵۰٪:{' '}
-                  <span className={entryPlan.meetsMin50 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                    {entryPlan.meetsMin50 ? 'محقق ✓' : 'ناکافی ✕'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2 flex-wrap text-[10px] pt-0.5">
-                  <span
-                    className={
-                      entryPlan.candleSignal === 'HAMMER_OR_ENGULFING'
-                        ? 'text-emerald-300 font-semibold'
-                        : entryPlan.candleSignal === 'DOJI_WEAK'
-                        ? 'text-amber-300 font-semibold'
-                        : 'text-slate-400'
-                    }
-                  >
-                    کندل اخیر: {entryPlan.candleSignalLabelFa}
-                  </span>
-                  <span
-                    className={`font-mono tabular-nums font-bold ${
-                      entryPlan.riskRewardRatio !== null && entryPlan.riskRewardRatio >= 2
-                        ? 'text-emerald-400'
-                        : entryPlan.riskRewardRatio !== null && entryPlan.riskRewardRatio < 1
-                        ? 'text-rose-400'
-                        : 'text-amber-300'
-                    }`}
-                  >
-                    {entryPlan.riskRewardVerdictFa}
-                  </span>
-                </div>
-                {entryPlan.steps.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
-                    {entryPlan.steps.map(st => (
-                      <div key={st.stepNumber} className="p-1.5 rounded bg-slate-900 border border-slate-800 text-[10px]">
-                        <div className="flex items-center justify-between font-bold text-white">
-                          <span>{st.labelFa}</span>
-                          <span className="font-mono tabular-nums text-emerald-300">
-                            {st.sizePct}% @ {st.price.toLocaleString()}
-                          </span>
-                        </div>
-                        <div className="text-slate-400 truncate mt-0.5">{st.reasonFa}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Session 11 & Tables 13-14: Entry Strategy, W2 vs A Scoring & Stepped Buying */}
+              <EntryStrategyPanel
+                scenario={scenario}
+                candles={item.candlesForBranch}
+                parentWaveLabel={item.parentWaveLabel}
+              />
 
               {/* Sessions 9 & 10: Post-Diagonal & Post-Zigzag Target Context */}
               {(diagonalInfo || zigzagInfo) && (

@@ -7,15 +7,17 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Candle, RuleValidationItem, WaveRole, WaveScenario } from '../types/elliott';
+import { Candle, PatternFamily, RuleValidationItem, WaveRole, WaveScenario } from '../types/elliott';
 import { PATTERN_LABELS_FA, RulesEngine } from '../engine/rulesEngine';
-import { ShieldCheck, ShieldAlert, AlertTriangle, BarChart3, Radar } from 'lucide-react';
+import { UnifiedPatternDetectionSummary } from './UnifiedPatternDetectionSummary';
+import { ShieldCheck, ShieldAlert, AlertTriangle, BarChart3, Radar, Sparkles } from 'lucide-react';
 
 interface RulesEngineComplianceCardProps {
   scenario: WaveScenario;
   candles: Candle[];
   parentRole?: WaveRole;
   parentWaveLabel?: string;
+  onApplyPattern?: (pattern: PatternFamily) => void;
 }
 
 interface RadarAxis {
@@ -29,9 +31,10 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
   scenario,
   candles,
   parentRole = 'ROOT',
-  parentWaveLabel = ''
+  parentWaveLabel = '',
+  onApplyPattern
 }) => {
-  const [viewMode, setViewMode] = useState<'RADAR_BARS' | 'RULE_BREAKDOWN'>('RADAR_BARS');
+  const [viewMode, setViewMode] = useState<'RADAR_BARS' | 'RULE_BREAKDOWN' | 'AUTO_DETECT'>('RADAR_BARS');
 
   const evaluation = useMemo(() => {
     const summary = RulesEngine.validateStructure(
@@ -244,11 +247,33 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
             <BarChart3 className="w-3 h-3" />
             <span>قوانین</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('AUTO_DETECT')}
+            title="خلاصه تشخیص یکپارچه الگوها و امواج اصلاحی"
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-semibold whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+              viewMode === 'AUTO_DETECT'
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            <span>تشخیص</span>
+          </button>
         </div>
       </div>
 
       {/* Main Visualization Body */}
-      {viewMode === 'RADAR_BARS' ? (
+      {viewMode === 'AUTO_DETECT' && summary.unifiedDetection ? (
+        <div className="p-2.5 max-h-72 overflow-y-auto">
+          <UnifiedPatternDetectionSummary
+            report={summary.unifiedDetection}
+            isLocked={scenario.isLocked}
+            variant="compact"
+            onApplyPattern={onApplyPattern}
+          />
+        </div>
+      ) : viewMode === 'RADAR_BARS' ? (
         <div className="p-3.5 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
           {/* 5-Axis SVG Compliance Radar Chart */}
           <div className="sm:col-span-5 flex flex-col items-center justify-center">
@@ -447,6 +472,40 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
             <div className="flex items-start gap-1.5">
               <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
               <span>موج ۵ کوتاه‌تر از موج ۳ ← احتمال کوتاه‌شدگی (Truncation) یا ترمینال</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Compact Always-Visible Unified Auto-Detection & Corrective Wave Readout */}
+      {summary.unifiedDetection && (
+        <div className="px-3.5 py-2 border-t border-slate-800/80 bg-slate-950/45 space-y-1 text-[10.5px]">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-slate-400">
+              تشخیص خودکار:{' '}
+              <strong
+                className={
+                  summary.unifiedDetection.idealness === 'IDEAL' ? 'text-emerald-300' : 'text-amber-300'
+                }
+              >
+                {summary.unifiedDetection.primaryPatternLabelFa.split('(')[0].trim()}
+              </strong>
+              <span className="text-slate-600 mx-1">·</span>
+              <span className="text-slate-300">
+                {summary.unifiedDetection.idealness === 'IDEAL' ? 'ایده‌آل' : 'غیرایده‌آل'}
+              </span>
+            </span>
+            <span className="font-mono tabular-nums text-cyan-300">
+              {summary.unifiedDetection.subwaveSignature}
+            </span>
+          </div>
+          {summary.unifiedDetection.correctiveWaves.length > 0 && (
+            <div className="text-[10px] text-slate-300 truncate">
+              موج اصلاحی / رسم‌شده:{' '}
+              <span className="text-cyan-200 font-medium">
+                {summary.unifiedDetection.drawnCorrectiveTypeLabelFa ||
+                  summary.unifiedDetection.correctiveWaves.map(c => `${c.labelFa}: ${c.typeLabelFa}`).join(' · ')}
+              </span>
             </div>
           )}
         </div>

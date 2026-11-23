@@ -196,6 +196,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               candles={candles}
               parentRole={drillContext?.role || 'ROOT'}
               parentWaveLabel={drillContext?.waveLabel || ''}
+              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
             />
 
             {/* Quick Shortcuts to Angle Radar & Fibonacci Confluence Zones */}

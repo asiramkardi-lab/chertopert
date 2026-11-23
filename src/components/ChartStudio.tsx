@@ -65,7 +65,8 @@ import {
   CandlestickChart,
   SlidersHorizontal,
   Undo2,
-  Columns2
+  Columns2,
+  Sparkles
 } from 'lucide-react';
 
 export type ChartInteractionMode = 'EDIT' | 'ADD_VERTEX' | 'DRAW_SCRATCH' | 'PICK_BOTTOM';
@@ -541,6 +542,28 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
   const activeHardFailsCount = activeScenario.rulesResults.filter(r => r.type === 'HARD' && !r.passed).length;
   const isUserModifiedCount = activeScenario.source === 'USER_EDITED' || activeScenario.source === 'MANUAL_DRAW';
+
+  const liveValidationForHud = useMemo(
+    () =>
+      RulesEngine.validateStructure(
+        activeScenario.patternType,
+        activeScenario.vertices,
+        activeScenario.direction,
+        parentRole,
+        parentWaveLabel,
+        candles
+      ),
+    [
+      activeScenario.patternType,
+      activeScenario.vertices,
+      activeScenario.direction,
+      parentRole,
+      parentWaveLabel,
+      candles
+    ]
+  );
+  const liveNonIdealFlag = liveValidationForHud.nonIdealPatternFlag;
+  const liveUnified = liveValidationForHud.unifiedDetection;
 
   // Compute next valid lower timeframe for Fractal Drill-Down
   const nextLowerValidTF = useMemo(() => {
@@ -1729,6 +1752,50 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 ));
               })()}
             </select>
+            {liveNonIdealFlag?.isNonIdeal ? (
+              <button
+                type="button"
+                onClick={evaluateCurrentCount}
+                title={liveNonIdealFlag.reasonFa}
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap ${
+                  liveNonIdealFlag.category === 'ANTI_DIAGONAL'
+                    ? 'bg-fuchsia-950/60 hover:bg-fuchsia-900/60 border-fuchsia-500/50 text-fuchsia-200'
+                    : liveNonIdealFlag.category === 'DIAGONAL'
+                    ? 'bg-amber-950/60 hover:bg-amber-900/60 border-amber-500/50 text-amber-200'
+                    : 'bg-orange-950/55 hover:bg-orange-900/55 border-orange-500/45 text-orange-200'
+                }`}
+              >
+                <AlertTriangle className="w-3 h-3 shrink-0" />
+                <span>
+                  {liveNonIdealFlag.isDetected33333Diagonal && !activeScenario.patternType.includes('DIAGONAL')
+                    ? `هشدار ۳-۳-۳-۳-۳: ${liveNonIdealFlag.category === 'ANTI_DIAGONAL' ? 'آنتی‌قطر' : 'قطر'}`
+                    : liveNonIdealFlag.category === 'ANTI_DIAGONAL'
+                    ? 'غیرایده‌آل · آنتی‌قطر'
+                    : liveNonIdealFlag.category === 'DIAGONAL'
+                    ? 'غیرایده‌آل · قطر'
+                    : 'الگوی غیرآیده‌آل'}
+                </span>
+              </button>
+            ) : liveUnified && activeScenario.vertices.length >= 3 ? (
+              <button
+                type="button"
+                onClick={evaluateCurrentCount}
+                title={`${liveUnified.primaryPatternLabelFa} — ${liveUnified.primarySubtypeLabelFa}${liveUnified.drawnCorrectiveTypeLabelFa ? ` | ${liveUnified.drawnCorrectiveTypeLabelFa}` : ''}`}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10.5px] font-semibold transition-colors whitespace-nowrap ${
+                  !liveUnified.matchesSelectedPattern && liveUnified.selectedPatternStatus === 'INVALID'
+                    ? 'bg-amber-950/55 hover:bg-amber-900/55 border-amber-500/45 text-amber-200'
+                    : liveUnified.idealness === 'IDEAL'
+                    ? 'bg-emerald-950/45 hover:bg-emerald-900/45 border-emerald-500/40 text-emerald-200'
+                    : 'bg-amber-950/45 hover:bg-amber-900/45 border-amber-500/40 text-amber-200'
+                }`}
+              >
+                <Sparkles className="w-3 h-3 shrink-0" />
+                <span>
+                  خودکار: {liveUnified.primaryPatternLabelFa.split('(')[0].trim()} ·{' '}
+                  {liveUnified.idealness === 'IDEAL' ? 'ایده‌آل' : 'غیرایده‌آل'}
+                </span>
+              </button>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-0.5">

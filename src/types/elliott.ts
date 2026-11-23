@@ -287,14 +287,58 @@ export interface EntryStepPlan {
   reasonFa: string;
 }
 
+export interface EntryStrategyOptions {
+  /** Whether analysis targets Wave 2 vs Wave 4 corrective entry or Start of Wave 3 */
+  waveRole?: 'W2' | 'W4';
+  /** Explicitly flag Subwave 3 of 3 context (Section 11-2) */
+  isSubwave3Of3?: boolean;
+  /** Override/provide internal 3-part corrective signature (e.g. [5,3,5], [3,3,3], [3,5,5], [3,3,5]) */
+  internalSubwaves?: [3 | 5, 3 | 5, 3 | 5];
+  /** Override whether corrective pattern structure is clear & trustworthy (5-3-5 / 3-3-5) */
+  isStructuredCorrective?: boolean;
+  /** Explicit setup/candle confirmation signal override for interactive simulation or unit tests */
+  hasSetupSignal?: boolean;
+  /** Explicit Classic Support/Resistance confluence at entry zone (Section 11-11) */
+  hasClassicSR?: boolean;
+  /** Earlier extreme retracement % before bounce (e.g. 55% for Fallback 50% detection, Sections 11-5 & 11-14) */
+  priorTurnPct?: number;
+  /** Pullback depth % after bouncing above 50% (e.g. 50% or 38.2%; null = bounced without pullback) */
+  pullbackToPct?: number | null;
+  /** Prior motive wave size as % of reference wave (>161.8% Strong, 100-161.8% Moderate, <100% Weak) */
+  priorWaveRatioPct?: number;
+  /** Parent wave degree/label context (e.g. '3.3', '4', '2') */
+  parentWaveLabel?: string;
+}
+
 export interface EntryStrategyReport {
   retracementPct: number;
   meetsMin50: boolean;
-  entryZone: 'START_WAVE_3' | '61.8%' | '78.6%' | '50%_PULLBACK' | 'NONE';
+  entryZone: 'START_WAVE_3' | 'SUBWAVE_3_OF_3' | '61.8%' | '78.6%' | '50%_PULLBACK' | 'NONE';
   entryZoneLabelFa: string;
+  /** Concrete execution action derived from Session 11 decision tree */
+  entryAction: 'ENTER' | 'ENTER_RISKY_STRUCTURED' | 'WAIT' | 'WAIT_786' | 'DO_NOT_ENTER';
+  entryActionLabelFa: string;
+  /** W1 breakout confirmation strength upon Start of Wave 3 (Section 11-2) */
+  wave3ConfirmationStrength: 'STRONG' | 'WEAK' | 'NONE';
+  isSubwave3Of3: boolean;
+  /** Controlled entry in structured corrective wave ~45% before reaching full PRZ (Section 11-7) */
+  isStructuredException: boolean;
+  /** False when prior impulse is weak (<100%) or setup violates capital preservation (Section 11-8) */
+  worthRisking: boolean;
+  priorWaveRatioPct: number;
   w2VsAScenario: 'W2' | 'A' | 'UNCERTAIN';
   w2VsALabelFa: string;
   scenarioConfidence: number;
+  w2ProbabilityPct: number;
+  waveAProbabilityPct: number;
+  /** Multi-factor credibility score combining %, classic S/R, and 5-3-5 structure (11-10..11-12) */
+  credibilityTier: 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'LOW';
+  credibilityFactorsFa: string[];
+  classicSrConfluence: boolean;
+  detectedSubwaveSignature: string;
+  priorTurnPct?: number;
+  pullbackDetectedPct?: number | null;
+  stepMode: 'SINGLE_STEP' | 'TWO_STEP' | 'NO_BUY';
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   isFallback50: boolean;
   accelerationAt786: boolean;
@@ -304,6 +348,7 @@ export interface EntryStrategyReport {
   riskRewardRatio: number | null;
   riskRewardVerdictFa: string;
   stopLossPrice: number | null;
+  stopLossInvalidationDescFa: string;
   isFomoBlocked: boolean;
   steps: EntryStepPlan[];
   warnings: string[];
@@ -709,4 +754,69 @@ export interface PatternHypothesisEvaluation {
   isCurrent: boolean;
   isBestFit: boolean;
 }
+
+export type PatternIdealnessClass = 'IDEAL' | 'NON_IDEAL';
+
+export type DrawnWaveStructureKind =
+  | 'MOTIVE_5_WAVE'
+  | 'DIAGONAL_33333'
+  | 'CORRECTIVE_3_WAVE'
+  | 'TRIANGLE_5_LEG'
+  | 'COMPLEX_MULTI_LEG'
+  | 'COMPLETE_8_WAVE_CYCLE'
+  | 'DEVELOPING_PARTIAL';
+
+export interface CorrectiveWaveLegInspection {
+  legId: 'DRAWN_CORRECTIVE' | 'WAVE_2' | 'WAVE_4' | 'POST_CYCLE_ABC';
+  labelFa: string;
+  detectedType: PatternFamily | 'SIMPLE_ZIGZAG' | 'ANTI_ZIGZAG' | 'IMPULSIVE_OR_SINGLE' | 'DEVELOPING';
+  typeLabelFa: string;
+  idealness: PatternIdealnessClass;
+  subwaveSignature: string;
+  retracementPct: number | null;
+  candleSpan: number;
+  detailsFa: string;
+  warningsFa: string[];
+  suggestedPattern?: PatternFamily;
+}
+
+export interface UnifiedPatternCandidateSummary {
+  patternType: PatternFamily;
+  shortLabelFa: string;
+  idealness: PatternIdealnessClass;
+  subtypeLabelFa: string;
+  status: 'VALID' | 'WARNING' | 'INVALID';
+  validityScore: number;
+  confidenceScore: number;
+  primaryReasonFa: string;
+}
+
+export interface UnifiedPatternDetectionReport {
+  drawnWaveKind: DrawnWaveStructureKind;
+  drawnWaveKindLabelFa: string;
+  primaryDetectedPattern: PatternFamily;
+  primaryPatternLabelFa: string;
+  primarySubtypeLabelFa: string;
+  idealness: PatternIdealnessClass;
+  idealnessReasonFa: string;
+  subwaveSignature: string;
+  detectedExtension: 'WAVE_1' | 'WAVE_3' | 'WAVE_5' | null;
+  matchesSelectedPattern: boolean;
+  selectedPattern: PatternFamily;
+  selectedPatternStatus: 'VALID' | 'WARNING' | 'INVALID';
+  confidenceScore: number;
+  validityScore: number;
+  fullDetailsFa: string[];
+  warningsFa: string[];
+  correctiveWaves: CorrectiveWaveLegInspection[];
+  drawnCorrectiveTypeLabelFa: string | null;
+  idealMatches: UnifiedPatternCandidateSummary[];
+  nonIdealMatches: UnifiedPatternCandidateSummary[];
+  diagonalDetails?: DiagonalAnalysisReport | null;
+  zigzagDetails?: ZigzagAnalysisReport | null;
+  flatDetails?: FlatAnalysisReport | null;
+  triangleDetails?: TriangleAnalysisReport | null;
+  complexDetails?: ComplexPatternReport | null;
+}
+
 

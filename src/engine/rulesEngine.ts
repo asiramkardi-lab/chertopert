@@ -17,10 +17,27 @@ import {
   WaveScenario,
   WaveDegree,
   WaveRole,
-  ScenarioProjectionReport
+  ScenarioProjectionReport,
+  PatternIdealnessClass,
+  DrawnWaveStructureKind,
+  CorrectiveWaveLegInspection,
+  UnifiedPatternCandidateSummary,
+  UnifiedPatternDetectionReport,
+  DiagonalAnalysisReport,
+  ZigzagAnalysisReport,
+  FlatAnalysisReport,
+  TriangleAnalysisReport,
+  ComplexPatternReport
 } from '../types/elliott';
 import { PivotDetector, getPivotWindowForTimeframe } from './pivotDetector';
-import { FractalEngine, identifyDiagonal, DiagonalVertexInput } from './fractalEngine';
+import {
+  FractalEngine,
+  identifyDiagonal,
+  identifyZigzag,
+  calculateZigzagTargets,
+  DiagonalVertexInput
+} from './fractalEngine';
+import { PatternEngines } from './patternEngines';
 import { TargetProjectionEngine } from './targetProjectionEngine';
 import {
   evaluateWave2Retracement,
@@ -41,6 +58,16 @@ export interface AbsoluteBottomEvaluation {
   validLowIdx: number | null;
   validLowInvalidated: boolean;
   boundaryIssuesFa?: string[];
+  reasonFa: string;
+}
+
+export interface NonIdealPatternFlag {
+  isNonIdeal: boolean;
+  category: 'DIAGONAL' | 'ANTI_DIAGONAL' | 'TERMINAL' | 'ANTI_TERMINAL' | 'ANTI_CYCLE';
+  subCategory?: string;
+  isDetected33333Diagonal: boolean;
+  suggestedPattern?: PatternFamily;
+  labelFa: string;
   reasonFa: string;
 }
 
@@ -66,6 +93,8 @@ export interface ValidationSummary {
   wave1ExtensionProbable?: boolean;
   wave4ComplexCorrectionProbable?: boolean;
   wave5TruncationOrTerminalHint?: boolean;
+  nonIdealPatternFlag?: NonIdealPatternFlag;
+  unifiedDetection?: UnifiedPatternDetectionReport;
 }
 
 export type MarketTrendRegime = 'IMPULSE' | 'CORRECTION' | 'SIDE';
@@ -255,11 +284,13 @@ export class RulesEngine {
     direction: WaveDirection = 'BULLISH',
     parentRole: WaveRole = 'ROOT',
     parentWaveLabel: string = '',
-    candles?: Candle[]
+    candles?: Candle[],
+    options?: { skipUnifiedDetection?: boolean }
   ): ValidationSummary {
     const rules: RuleValidationItem[] = [];
     let suggestedAlternative: PatternFamily | undefined;
     let alternativeReason: string | undefined;
+    let nonIdealPatternFlag: NonIdealPatternFlag | undefined;
 
     if (vertices.length < 2) {
       return {
@@ -642,7 +673,7 @@ export class RulesEngine {
           const bPct = bRatio * 100;
           const lenC = isBull ? p3 - p2 : p2 - p3;
           const cPctOfB = (Math.max(0, lenC) / retrace2) * 100;
-          const cCoversB = isBull ? p3 > p1 : p3 < p1;
+          const cCoversB = isBull ? p3 >= p1 - 1e-6 : p3 <= p1 + 1e-6;
           const subtypeMatch =
             pattern === 'FLAT_REGULAR'
               ? bPct >= 80 && bPct <= 102 && cPctOfB >= 80
@@ -750,14 +781,19 @@ export class RulesEngine {
           const triHeight = Math.max(0.01, upperA - lowerB);
           const upperFlat = Math.abs(upperC - upperA) / triHeight <= 0.08;
           const lowerFlat = Math.abs(lowerD - lowerB) / triHeight <= 0.08;
+          const isMonotonicTrending = isBull
+            ? p3 > p1 * 1.03 && p4 > p2 * 1.03 && (vertices.length < 6 || p5 > p3 * 1.01)
+            : p3 < p1 * 0.97 && p4 < p2 * 0.97 && (vertices.length < 6 || p5 < p3 * 0.99);
           const isConvergingSides =
-            (upperC < upperA && !upperFlat && (lowerD > lowerB || lowerFlat)) ||
-            (upperFlat && lowerD > lowerB && !lowerFlat) ||
-            legC < legA;
+            !isMonotonicTrending &&
+            ((upperC < upperA && !upperFlat && (lowerD > lowerB || lowerFlat)) ||
+              (upperFlat && lowerD > lowerB && !lowerFlat) ||
+              legC < legA);
           const isDivergingSides =
-            (upperC > upperA && !upperFlat && (lowerD < lowerB || lowerFlat)) ||
-            (upperFlat && lowerD < lowerB && !lowerFlat) ||
-            legC > legA;
+            !isMonotonicTrending &&
+            ((upperC > upperA && !upperFlat && (lowerD < lowerB || lowerFlat)) ||
+              (upperFlat && lowerD < lowerB && !lowerFlat) ||
+              legC > legA);
           const ok = pattern === 'TRIANGLE_CONVERGING' ? isConvergingSides : isDivergingSides;
           rules.push({
             ruleId: 'TRIANGLE_GEOMETRY',
@@ -765,10 +801,12 @@ export class RulesEngine {
             nameFa: 'هندسه خطوط همگرا/صعودی/نزولی/واگرا در مثلث (A-B-C-D-E)',
             type: 'STRUCTURE',
             passed: ok,
-            score: ok ? 100 : 40,
+            score: ok ? 100 : isMonotonicTrending ? 20 : 40,
             conceptId: 'C24',
             messageFa: ok
               ? 'نسبت طول و شیب خطوط مثلث با هندسه انتخاب‌شده هم‌خوانی دارد.'
+              : isMonotonicTrending
+              ? 'ساختار دارای روند پله‌ای هم‌جهت (Impulse/Diagonal) است و هندسه مثلث جانبی/اصلاحی را ندارد.'
               : 'هندسه موج‌های مثلث با نوع همگرا/واگرا مطابقت ندارد.'
           });
 
@@ -1173,7 +1211,7 @@ export class RulesEngine {
               conceptId: 'C20',
               details: diagEval.category,
               messageFa: diagEval.isValid
-                ? `ساختار درونی ۵ موج به صورت ۳-۳-۳-۳-۳ تشخیص داده شد که یک الگوی متمایز غیرایده‌آل (نشانه ضعف روند) است، نه ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← ${diagEval.reasonFa}`
+                ? `ساختار درونی ۵ موج به صورت ۳-۳-۳-۳-۳ تشخیص داده شد که یک الگوی متمایز غیرایده‌آل (${diagEval.macroCategory === 'ANTI_DIAGONAL' ? 'آنتی‌قطر' : 'قطر'} — نشانه ضعف روند) است، نه ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← ${diagEval.reasonFa}`
                 : `ساختار درونی ۵ موج به صورت ۳-۳-۳-۳-۳ تشخیص داده شد (احتمال الگوی متمایز غیرایده‌آل قطر / پیشرو به جای ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()}): ${diagEval.reasonFa}`,
               canBeSolvedByAlternate: suggestedDiagPattern
             });
@@ -1182,6 +1220,19 @@ export class RulesEngine {
               suggestedAlternative = suggestedDiagPattern;
               alternativeReason = `ساختار ۵ موجی دارای ترکیب درونی ۳-۳-۳-۳-۳ است؛ این ساختار یک الگوی متمایز غیرایده‌آل (${PATTERN_LABELS_FA[suggestedDiagPattern].split('(')[0].trim()}) محسوب می‌شود و نباید به‌عنوان سیکل ایده‌آل (۵-۳-۵-۳-۵) یا ترمینال شمارش شود.`;
             }
+
+            nonIdealPatternFlag = {
+              isNonIdeal: true,
+              category: diagEval.macroCategory === 'ANTI_DIAGONAL' ? 'ANTI_DIAGONAL' : 'DIAGONAL',
+              subCategory: diagEval.category,
+              isDetected33333Diagonal: true,
+              suggestedPattern: suggestedDiagPattern,
+              labelFa:
+                diagEval.macroCategory === 'ANTI_DIAGONAL'
+                  ? 'الگوی غیرآیده‌آل شناسایی‌شده: آنتی‌قطر (۳-۳-۳-۳-۳)'
+                  : 'الگوی غیرآیده‌آل شناسایی‌شده: قطر (۳-۳-۳-۳-۳)',
+              reasonFa: diagEval.reasonFa
+            };
           } else {
             rules.push({
               ruleId: 'DIAGONAL_33333_PATTERN_FLAG',
@@ -1198,7 +1249,49 @@ export class RulesEngine {
                   ? 'ANTI_DIAGONAL'
                   : undefined
             });
+
+            nonIdealPatternFlag = {
+              isNonIdeal: true,
+              category:
+                diagEval.macroCategory === 'ANTI_DIAGONAL' || pattern.includes('ANTI')
+                  ? 'ANTI_DIAGONAL'
+                  : 'DIAGONAL',
+              subCategory: diagEval.category,
+              isDetected33333Diagonal: true,
+              suggestedPattern:
+                !diagEval.isValid && diagEval.category === 'ANTI_DIAGONAL'
+                  ? 'ANTI_DIAGONAL'
+                  : undefined,
+              labelFa:
+                diagEval.macroCategory === 'ANTI_DIAGONAL' || pattern.includes('ANTI')
+                  ? 'الگوی غیرآیده‌آل فعال: آنتی‌قطر (۳-۳-۳-۳-۳)'
+                  : 'الگوی غیرآیده‌آل فعال: قطر (۳-۳-۳-۳-۳)',
+              reasonFa: diagEval.reasonFa
+            };
           }
+        } else if (pattern.includes('DIAGONAL')) {
+          const isLeadingPattern = pattern === 'LEADING_DIAGONAL' || pattern === 'ANTI_LEADING_DIAGONAL';
+          const diagEval = identifyDiagonal(vertices.slice(0, 6), {
+            subwaveCounts: [3, 3, 3, 3, 3],
+            waveLocation: inferredDiagLocation,
+            direction,
+            requireRule3Overlap: isLeadingPattern ? false : undefined
+          });
+          const diagCat: 'DIAGONAL' | 'ANTI_DIAGONAL' =
+            pattern === 'ANTI_DIAGONAL' || pattern === 'ANTI_LEADING_DIAGONAL' || diagEval.macroCategory === 'ANTI_DIAGONAL'
+              ? 'ANTI_DIAGONAL'
+              : 'DIAGONAL';
+          nonIdealPatternFlag = {
+            isNonIdeal: true,
+            category: diagCat,
+            subCategory: diagEval.category,
+            isDetected33333Diagonal: false,
+            labelFa:
+              diagCat === 'ANTI_DIAGONAL'
+                ? 'الگوی غیرآیده‌آل: آنتی‌قطر (نشانه ضعف روند)'
+                : 'الگوی غیرآیده‌آل: قطر (نشانه ضعف روند)',
+            reasonFa: diagEval.reasonFa
+          };
         }
       }
 
@@ -1755,6 +1848,64 @@ export class RulesEngine {
       });
     }
 
+    let unifiedDetection: UnifiedPatternDetectionReport | undefined;
+    if (!options?.skipUnifiedDetection && vertices.length >= 3) {
+      const prelimHardPassed = rules.filter(r => r.type === 'HARD').every(r => r.passed);
+      unifiedDetection = this.detectUnifiedPatternsAndCorrectiveWaves(
+        vertices,
+        direction,
+        parentRole,
+        parentWaveLabel,
+        candles,
+        pattern,
+        prelimHardPassed
+      );
+
+      // Add Corrective / Drawn Wave Type inspection rule for "ارزیابی قوانین"
+      const cwList = unifiedDetection.correctiveWaves;
+      const cwHasSevereWarning = cwList.some(c =>
+        c.warningsFa.some(w => w.includes('نقض') || w.includes('منسوخ') || w.includes('پرریسک'))
+      );
+      const cwSummaryParts = cwList.map(c => `${c.labelFa}: ${c.typeLabelFa}`);
+      rules.push({
+        ruleId: 'CORRECTIVE_DRAWN_WAVE_TYPE',
+        name: 'Corrective & Drawn Wave Type Inspection',
+        nameFa: 'بررسی نوع موج اصلاحی و ساختار موج رسم‌شده',
+        type: 'STRUCTURE',
+        passed: true,
+        score: cwHasSevereWarning ? 84 : 100,
+        conceptId: 'C22',
+        details: unifiedDetection.drawnWaveKind,
+        messageFa:
+          cwSummaryParts.length > 0
+            ? `ساختار رسم‌شده (${unifiedDetection.drawnWaveKindLabelFa}) — ${cwSummaryParts.join(' | ')}`
+            : `ساختار موج رسم‌شده: ${unifiedDetection.drawnWaveKindLabelFa} (${unifiedDetection.primaryPatternLabelFa})`,
+        canBeSolvedByAlternate:
+          cwList.find(c => c.legId === 'DRAWN_CORRECTIVE' && c.suggestedPattern && c.suggestedPattern !== pattern)
+            ?.suggestedPattern
+      });
+
+      const autoMatchesOrValid =
+        unifiedDetection.matchesSelectedPattern || unifiedDetection.selectedPatternStatus !== 'INVALID';
+      rules.push({
+        ruleId: 'AUTO_UNIFIED_PATTERN_MATCH',
+        name: 'Unified Automatic Ideal / Non-Ideal Pattern Detection',
+        nameFa: 'تشخیص یکپارچه و خودکار الگوهای ایده‌آل و غیرایده‌آل',
+        type: 'STRUCTURE',
+        passed: autoMatchesOrValid,
+        score: unifiedDetection.matchesSelectedPattern ? 100 : autoMatchesOrValid ? 90 : 62,
+        conceptId: 'C08',
+        details: unifiedDetection.primaryDetectedPattern,
+        messageFa: autoMatchesOrValid
+          ? `تشخیص خودکار (${unifiedDetection.idealness === 'IDEAL' ? 'الگوی ایده‌آل' : 'الگوی غیرایده‌آل'}): ${unifiedDetection.primaryPatternLabelFa} — ${unifiedDetection.primarySubtypeLabelFa} · ساختار ${unifiedDetection.subwaveSignature} (اطمینان ${unifiedDetection.confidenceScore}٪).`
+          : `الگوی انتخابی با ساختار رسم‌شده منطبق نیست؛ تشخیص خودکار (${unifiedDetection.idealness === 'IDEAL' ? 'ایده‌آل' : 'غیرایده‌آل'}): ${unifiedDetection.primaryPatternLabelFa} — ${unifiedDetection.primarySubtypeLabelFa} (امضای ${unifiedDetection.subwaveSignature}).`,
+        canBeSolvedByAlternate:
+          !unifiedDetection.matchesSelectedPattern && unifiedDetection.selectedPatternStatus === 'INVALID'
+            ? unifiedDetection.primaryDetectedPattern
+            : undefined
+      });
+    }
+
     // Score calculation: Hard rules cannot be compensated by soft guidelines (C08)
     const hardRules = rules.filter(r => r.type === 'HARD');
     const allHardPassed = hardRules.every(r => r.passed);
@@ -2046,6 +2197,32 @@ export class RulesEngine {
       }
     }
 
+    if (!nonIdealPatternFlag) {
+      if (pattern === 'TERMINAL' || pattern === 'ANTI_TERMINAL' || pattern === 'ANTI_CYCLE') {
+        nonIdealPatternFlag = {
+          isNonIdeal: true,
+          category: pattern,
+          isDetected33333Diagonal: false,
+          labelFa: `الگوی غیرآیده‌آل: ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()}`,
+          reasonFa: 'این الگو از ساختار سیکل ایده‌آل (۵-۳-۵-۳-۵ بدون هم‌پوشانی) تبعیت نمی‌کند و رفتار غیرایده‌آل دارد.'
+        };
+      } else if (pattern.includes('DIAGONAL')) {
+        const diagCat: 'DIAGONAL' | 'ANTI_DIAGONAL' = pattern.includes('ANTI')
+          ? 'ANTI_DIAGONAL'
+          : 'DIAGONAL';
+        nonIdealPatternFlag = {
+          isNonIdeal: true,
+          category: diagCat,
+          isDetected33333Diagonal: false,
+          labelFa:
+            diagCat === 'ANTI_DIAGONAL'
+              ? 'الگوی غیرآیده‌آل: آنتی‌قطر'
+              : 'الگوی غیرآیده‌آل: قطر',
+          reasonFa: 'الگوی قطر با ساختار سه‌موجی و ضعف روند (نسبت به سیکل ایده‌آل) شناخته می‌شود.'
+        };
+      }
+    }
+
     return {
       patternType: pattern,
       direction,
@@ -2067,7 +2244,9 @@ export class RulesEngine {
       wave5TerminalSignalStrength,
       wave1ExtensionProbable,
       wave4ComplexCorrectionProbable,
-      wave5TruncationOrTerminalHint
+      wave5TruncationOrTerminalHint,
+      nonIdealPatternFlag,
+      unifiedDetection
     };
   }
 
@@ -2755,12 +2934,30 @@ export class RulesEngine {
     parentRole: WaveRole = 'ROOT',
     parentWaveLabel: string = ''
   ): WaveFixSuggestion[] {
-    const summary = this.validateStructure(pattern, vertices, direction, parentRole, parentWaveLabel);
+    const summary = this.validateStructure(pattern, vertices, direction, parentRole, parentWaveLabel, candles);
     const suggestions: WaveFixSuggestion[] = [];
     const failedIds = new Set(summary.rules.filter(r => !r.passed).map(r => r.ruleId));
 
     if (vertices.length < 2 || candles.length === 0) {
       return suggestions;
+    }
+
+    // 0. Non-ideal 3-3-3-3-3 Diagonal pattern detected inside IDEAL_CYCLE / non-diagonal
+    if (failedIds.has('DIAGONAL_33333_PATTERN_FLAG') && !pattern.includes('DIAGONAL')) {
+      const diagRule = summary.rules.find(r => r.ruleId === 'DIAGONAL_33333_PATTERN_FLAG');
+      const targetDiag =
+        summary.nonIdealPatternFlag?.suggestedPattern || diagRule?.canBeSolvedByAlternate || 'ENDING_DIAGONAL';
+      suggestions.push({
+        id: 'fix_diagonal_33333_morph',
+        ruleId: 'DIAGONAL_33333_PATTERN_FLAG',
+        kind: 'MORPH_PATTERN',
+        titleFa: `تبدیل الگوی غیرآیده‌آل ۳-۳-۳-۳-۳ به ${PATTERN_LABELS_FA[targetDiag].split('(')[0].trim()}`,
+        descriptionFa:
+          'ساختار ۵ موج دارای ریزموج‌های سه‌موجی (۳-۳-۳-۳-۳) است که نشانگر الگوی متمایز غیرایده‌آل قطر/آنتی‌قطر (جلسه ۹) است، نه سیکل ایده‌آل.',
+        previewDiffFa: `الگو: ${PATTERN_LABELS_FA[pattern].split('(')[0].trim()} ← ${PATTERN_LABELS_FA[targetDiag].split('(')[0].trim()}`,
+        impactBadgeFa: 'تشخیص قطر ۳-۳-۳-۳-۳',
+        targetPattern: targetDiag
+      });
     }
 
     const isBull = direction === 'BULLISH';
@@ -3434,7 +3631,8 @@ export class RulesEngine {
         direction,
         parentRole,
         parentWaveLabel,
-        candles
+        candles,
+        { skipUnifiedDetection: true }
       );
       const hardRules = summary.rules.filter(r => r.type === 'HARD');
       const hardPassCount = hardRules.filter(r => r.passed).length;
@@ -3480,15 +3678,134 @@ export class RulesEngine {
         rules: summary.rules,
         isCurrent: meta.patternType === currentPattern,
         isBestFit: false,
-        _priority: meta.priorityOrder
+        _priority: meta.priorityOrder,
+        _nonIdealFlag: summary.nonIdealPatternFlag
       };
     });
 
-    // Pick single highest-fit pattern deterministically
+    // Context-aware ranking across 3-leg corrective, 5-leg triangle, 5-wave 3-3-3-3-3 diagonal, and 5-wave ideal/terminal
+    const joinedLabels = vertices
+      .map(v => normalizeLabelAscii(v.label || ''))
+      .join(' ');
+    const hasCorrectiveLabels = /\b[ABCDEWXYZ]\b/.test(joinedLabels);
+    const hasTriangleLabels = /\b[DE]\b/.test(joinedLabels);
+    const hasComplexLabels = /\b[WXY]\b/.test(joinedLabels);
+    const is3WaveCount = vertices.length === 4;
+    const isBullDir = direction === 'BULLISH';
+    const p0v = vertices[0]?.price ?? 0;
+    const p1v = vertices[1]?.price ?? 0;
+    const p2v = vertices[2]?.price ?? 0;
+    const p3v = vertices[3]?.price ?? 0;
+    const p4v = vertices[4]?.price ?? 0;
+    const p5v = vertices[5]?.price ?? 0;
+    const len1Abs = Math.abs(p1v - p0v);
+    const len3Abs = Math.abs(p3v - p2v);
+    const len5Abs = Math.abs(p5v - p4v);
+    const hasRule3OverlapShape =
+      vertices.length >= 5 && len1Abs > 0 && evaluateWave4Overlap(p1v, p4v, len1Abs, isBullDir).hasOverlap;
+    const isExpandingFunnel = vertices.length >= 6 && len5Abs > len3Abs * 1.05 && len3Abs >= len1Abs * 0.98;
+    const isConvergingWedge = vertices.length >= 6 && len5Abs < len3Abs * 0.98;
+    const detectedDiag33333 = evaluations.some(
+      e => e._nonIdealFlag?.isDetected33333Diagonal && e.rules.some(r => r.ruleId === 'DIAGONAL_33333_PATTERN_FLAG')
+    );
+    const hasValid5WaveMotive = evaluations.some(
+      e =>
+        ['IDEAL_CYCLE', 'TERMINAL', 'ANTI_TERMINAL', 'LEADING_DIAGONAL', 'ANTI_LEADING_DIAGONAL', 'ENDING_DIAGONAL', 'ANTI_DIAGONAL'].includes(
+          e.patternType
+        ) && e.status !== 'INVALID'
+    );
+    const hasValidSimpler3Wave = evaluations.some(
+      e => ['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING'].includes(e.patternType) && e.status !== 'INVALID'
+    );
+
+    const fitnessAdjustment = (item: (typeof evaluations)[number]): number => {
+      let bonus = 0;
+      const p = item.patternType;
+      const is3WaveCorr = ['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING'].includes(p);
+      const isTri = p === 'TRIANGLE_CONVERGING' || p === 'TRIANGLE_EXPANDING';
+      const isDiag = p.includes('DIAGONAL');
+      const isMotive5 = ['IDEAL_CYCLE', 'TERMINAL', 'ANTI_TERMINAL'].includes(p);
+      const w2ExceedsW1 =
+        vertices.length >= 3 &&
+        len1Abs > 0 &&
+        (isBullDir ? p2v <= p0v + 1e-6 : p2v >= p0v - 1e-6);
+
+      if (is3WaveCount) {
+        if (is3WaveCorr || p === 'ANTI_CYCLE') {
+          bonus += hasCorrectiveLabels || parentRole === 'CORRECTIVE' ? 18 : 10;
+        }
+        if (p.startsWith('FLAT_') && item.rules.find(r => r.ruleId === 'FLAT_VARIANT_FIT')?.passed) {
+          if (hasCorrectiveLabels || parentRole === 'CORRECTIVE' || !w2ExceedsW1) {
+            bonus += 12;
+          }
+        }
+        if (p === 'ANTI_CYCLE' && !hasCorrectiveLabels && parentRole !== 'CORRECTIVE' && w2ExceedsW1) {
+          bonus += 16;
+        }
+        if (p === 'COMPLEX_COMBINATION') {
+          if (hasComplexLabels) bonus += 28;
+          else if (hasValidSimpler3Wave) bonus -= 28;
+        }
+        if (['TERMINAL', 'ANTI_TERMINAL', 'ENDING_DIAGONAL', 'ANTI_DIAGONAL'].includes(p)) {
+          bonus -= 18;
+        }
+        if (p === 'IDEAL_CYCLE' && (hasCorrectiveLabels || parentRole === 'CORRECTIVE')) {
+          bonus -= 20;
+        }
+      } else {
+        if (hasComplexLabels && p === 'COMPLEX_COMBINATION') {
+          bonus += 24;
+        } else if (p === 'COMPLEX_COMBINATION' && (hasValid5WaveMotive || hasValidSimpler3Wave)) {
+          bonus -= 26;
+        }
+      }
+
+      // When >= 6 vertices represent a 5-wave (or 8-wave) cycle, 3-wave patterns must not hijack the 5-wave count
+      if (vertices.length >= 6 && !hasTriangleLabels && !hasComplexLabels && hasValid5WaveMotive) {
+        if (is3WaveCorr) bonus -= 30;
+        if (isMotive5 || isDiag) bonus += 10;
+      }
+
+      if (vertices.length >= 5 && isTri) {
+        const geoPassed = item.rules.find(r => r.ruleId === 'TRIANGLE_GEOMETRY')?.passed;
+        if (geoPassed && (hasTriangleLabels || parentRole === 'CORRECTIVE' || !hasValid5WaveMotive)) {
+          bonus += 16;
+        } else if (!geoPassed) {
+          bonus -= 24;
+        }
+      }
+
+      if (vertices.length >= 6 && detectedDiag33333) {
+        if (isDiag) bonus += 24;
+        else if (isMotive5) bonus -= 16;
+
+        if (isExpandingFunnel && hasRule3OverlapShape) {
+          if (p === 'ANTI_DIAGONAL') bonus += 14;
+          if (p === 'ANTI_LEADING_DIAGONAL') bonus -= 8;
+        } else if (isConvergingWedge && hasRule3OverlapShape) {
+          if (p === 'ENDING_DIAGONAL') bonus += 8;
+        }
+      } else if (vertices.length >= 6 && !detectedDiag33333 && hasRule3OverlapShape) {
+        if (p === 'TERMINAL' && len5Abs < len3Abs) bonus += 14;
+        if (p === 'ANTI_TERMINAL' && len5Abs > len3Abs) bonus += 14;
+      }
+
+      if (p === 'IDEAL_CYCLE' && item.status === 'VALID' && !detectedDiag33333 && vertices.length >= 6 && !hasTriangleLabels) {
+        bonus += 12;
+      }
+
+      return bonus;
+    };
+
     const ranked = [...evaluations].sort((a, b) => {
       const aValid = a.status !== 'INVALID' ? 1 : 0;
       const bValid = b.status !== 'INVALID' ? 1 : 0;
       if (aValid !== bValid) return bValid - aValid;
+
+      const aFit = a.confidenceScore + fitnessAdjustment(a);
+      const bFit = b.confidenceScore + fitnessAdjustment(b);
+      if (Math.abs(bFit - aFit) >= 3) return bFit - aFit;
+
       if (a.status !== b.status) {
         const rank = { VALID: 2, WARNING: 1, INVALID: 0 };
         return rank[b.status] - rank[a.status];
@@ -3499,12 +3816,946 @@ export class RulesEngine {
 
     const bestPattern = ranked[0]?.patternType;
 
-    return evaluations.map(({ _priority, ...item }) => {
+    return evaluations.map(({ _priority, _nonIdealFlag, ...item }) => {
       void _priority;
+      void _nonIdealFlag;
       return {
         ...item,
         isBestFit: item.patternType === bestPattern
       };
     });
+  }
+
+  /**
+   * Inspects BOTH the overall drawn wave structure (when corrective / multi-leg)
+   * AND individual internal corrective waves (Wave 2, Wave 4, and post-cycle A-B-C)
+   * to classify exact Bahari corrective pattern types (Zigzag Ideal/Simple/Anti, 8 Flat subtypes,
+   * Triangles, Anti-Cycle, or Complex Combination).
+   */
+  public static inspectCorrectiveAndDrawnWaves(
+    vertices: WaveVertex[],
+    direction: WaveDirection = 'BULLISH',
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = '',
+    candles?: Candle[],
+    selectedPattern?: PatternFamily
+  ): {
+    correctiveWaves: CorrectiveWaveLegInspection[];
+    drawnCorrectiveTypeLabelFa: string | null;
+  } {
+    const correctiveWaves: CorrectiveWaveLegInspection[] = [];
+    if (vertices.length < 3) {
+      return { correctiveWaves, drawnCorrectiveTypeLabelFa: null };
+    }
+
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+    const isBull = direction === 'BULLISH';
+
+    const resolveLegSubwave = (vStart: WaveVertex, vEnd: WaveVertex, fallback: 3 | 5): 3 | 5 => {
+      const ext = vEnd as WaveVertex & { subwaveCount?: number; subwaves?: unknown[] | number };
+      const raw =
+        typeof ext.subwaveCount === 'number'
+          ? ext.subwaveCount
+          : typeof ext.subwaves === 'number'
+          ? ext.subwaves
+          : Array.isArray(ext.subwaves)
+          ? ext.subwaves.length
+          : null;
+      if (raw === 3 || raw === 5) return raw;
+      if (candles && candles.length >= 12) {
+        const s = Math.max(0, Math.min(candles.length - 1, Math.min(vStart.candleIndex, vEnd.candleIndex)));
+        const e = Math.max(s, Math.min(candles.length - 1, Math.max(vStart.candleIndex, vEnd.candleIndex)));
+        const slice = candles.slice(s, e + 1);
+        if (slice.length >= 7) {
+          const pivCount = PivotDetector.detectPivots(slice, 1, 1, 0.45).length;
+          if (pivCount >= 4) return 5;
+          if (pivCount >= 2) return 3;
+        }
+      }
+      return fallback;
+    };
+
+    const inspectThreeWaveLeg = (
+      v0: WaveVertex,
+      v1: WaveVertex,
+      v2: WaveVertex,
+      v3: WaveVertex,
+      legId: CorrectiveWaveLegInspection['legId'],
+      labelFa: string,
+      retracementVsPriorPct: number | null
+    ): CorrectiveWaveLegInspection => {
+      const lenA = Math.abs(v1.price - v0.price);
+      const lenB = Math.abs(v2.price - v1.price);
+      const lenC = Math.abs(v3.price - v2.price);
+      const segBull = v1.price >= v0.price;
+      const bPctOfA = lenA > 0 ? round1((lenB / lenA) * 100) : 0;
+      const cPctOfA = lenA > 0 ? round1((lenC / lenA) * 100) : 0;
+      const cPctOfB = lenB > 0 ? round1((lenC / lenB) * 100) : 0;
+      const cCoversB = segBull ? v3.price >= v1.price - 1e-6 : v3.price <= v1.price + 1e-6;
+      const span = Math.max(1, Math.abs(v3.candleIndex - v0.candleIndex));
+
+      const defaultSub: [3 | 5, 3 | 5, 3 | 5] = bPctOfA > 61.8 ? [3, 3, 5] : [5, 3, 5];
+      const subA = resolveLegSubwave(v0, v1, defaultSub[0]);
+      const subB = resolveLegSubwave(v1, v2, defaultSub[1]);
+      const subC = resolveLegSubwave(v2, v3, defaultSub[2]);
+      const sig = `${subA}-${subB}-${subC}`;
+
+      const zzEval = identifyZigzag(
+        { length: lenA, startPrice: v0.price, endPrice: v1.price, subwaveCount: subA },
+        { length: lenB, startPrice: v1.price, endPrice: v2.price, subwaveCount: subB },
+        { length: lenC, startPrice: v2.price, endPrice: v3.price, subwaveCount: subC }
+      );
+      const zzTargets = calculateZigzagTargets(zzEval);
+
+      const tempFlatScenario: WaveScenario = {
+        id: `inspect_flat_${legId}`,
+        name: labelFa,
+        color: '#38bdf8',
+        isPrimary: false,
+        isLocked: false,
+        isSelectedForTree: false,
+        patternType: bPctOfA > 100.1 ? (cPctOfB < 61.8 ? 'FLAT_RUNNING' : 'FLAT_EXPANDED') : 'FLAT_REGULAR',
+        degree: 'INTERMEDIATE',
+        direction: segBull ? 'BULLISH' : 'BEARISH',
+        vertices: [v0, v1, v2, v3],
+        currentWave: 'C',
+        completionPercentage: 100,
+        validityScore: 85,
+        idealnessScore: 85,
+        confidenceScore: 85,
+        invalidationPrice: v0.price,
+        targets: [],
+        rulesResults: [],
+        source: 'AI',
+        timeframe: '1D'
+      };
+      const flatReport = PatternEngines.analyzeFlat(tempFlatScenario, candles || []);
+
+      // Check Anti-Cycle 3-5 with B > 100% A
+      if (bPctOfA > 100.1 && subA === 3 && subB === 5) {
+        return {
+          legId,
+          labelFa,
+          detectedType: 'ANTI_CYCLE',
+          typeLabelFa: 'آنتی‌سیکل ۳-۵ گسترده (پوشش >۱۰۰٪ موج اول)',
+          idealness: 'NON_IDEAL',
+          subwaveSignature: `${subA}-${subB}-${subC}`,
+          retracementPct: retracementVsPriorPct ?? bPctOfA,
+          candleSpan: span,
+          detailsFa: `موج B برابر ${bPctOfA}٪ موج A (>۱۰۰٪) با ساختار درونی ۳-۵؛ رفتار آنتی‌سیکل غیرایده‌آل تشخیص داده شد.`,
+          warningsFa: ['آنتی‌سیکل غیرایده‌آل است؛ برای ورود یا ادامه حرکت، تکمیل فاز ۵موجی را تایید کنید.'],
+          suggestedPattern: 'ANTI_CYCLE'
+        };
+      }
+
+      // Check 3-3-3 with large B (>61.8%) -> Complex combination
+      if (sig === '3-3-3' && bPctOfA > 61.8 + 1e-4) {
+        return {
+          legId,
+          labelFa,
+          detectedType: 'COMPLEX_COMBINATION',
+          typeLabelFa: 'ساختار ترکیبی ۳-۳-۳ با موج B بزرگ (احتمال W-X-Y)',
+          idealness: 'NON_IDEAL',
+          subwaveSignature: sig,
+          retracementPct: retracementVsPriorPct ?? bPctOfA,
+          candleSpan: span,
+          detailsFa: `هر سه بخش سه‌موجی (۳-۳-۳) و موج B برابر ${bPctOfA}٪ (> ۶۱.۸٪ موج A) است؛ نشانه ترکیب اصلاحی (W-X-Y) به‌جای زیگزاگ خالص.`,
+          warningsFa: ['ساختار ترکیبی معمولاً در انتهای روند زمان‌بر است و معامله درون موج X پرریسک می‌باشد.'],
+          suggestedPattern: 'COMPLEX_COMBINATION'
+        };
+      }
+
+      // Flat zone: B > 61.8% A (or explicit 3-3-5 with C < 61.8% A)
+      if (bPctOfA > 61.8 + 1e-4 || (subA === 3 && subB === 3 && !cCoversB && cPctOfA < 61.8)) {
+        const isIdealFlat = flatReport.subtype === 'REGULAR';
+        const flatPattern: PatternFamily =
+          flatReport.subtype === 'RUNNING_DEPRECATED'
+            ? 'FLAT_RUNNING'
+            : bPctOfA > 100.1 ||
+              flatReport.subtype === 'IRREGULAR' ||
+              flatReport.subtype === 'IRREGULAR_DEFICIENT' ||
+              flatReport.subtype === 'IRREGULAR_EXTENDED'
+            ? 'FLAT_EXPANDED'
+            : 'FLAT_REGULAR';
+        return {
+          legId,
+          labelFa,
+          detectedType: flatPattern,
+          typeLabelFa: `${flatReport.subtypeLabelFa} (۳-۳-۵)`,
+          idealness: isIdealFlat ? 'IDEAL' : 'NON_IDEAL',
+          subwaveSignature: '3-3-5',
+          retracementPct: retracementVsPriorPct ?? bPctOfA,
+          candleSpan: span,
+          detailsFa: `اصلاح B/A برابر ${bPctOfA}٪ و نسبت C/B برابر ${cPctOfB}٪ (${cCoversB ? 'پوشش کامل موج B' : 'عدم پوشش کامل موج B'}). ${flatReport.vsSimpleZigzagFa}`,
+          warningsFa: flatReport.warnings,
+          suggestedPattern: flatPattern
+        };
+      }
+
+      // Zigzag zone (B <= 61.8% A)
+      if (zzEval.lengthClass === 'INVALID_SHORT' && !cCoversB) {
+        return {
+          legId,
+          labelFa,
+          detectedType: 'FLAT_REGULAR',
+          typeLabelFa: 'اصلاح ناقص موج C (کمتر از ۶۱.۸٪ A — احتمال فلت یا زیگزاگ در حال تکمیل)',
+          idealness: 'NON_IDEAL',
+          subwaveSignature: sig,
+          retracementPct: retracementVsPriorPct ?? bPctOfA,
+          candleSpan: span,
+          detailsFa: `موج B برابر ${bPctOfA}٪ موج A است اما موج C تنها ${cPctOfA}٪ موج A پیشرفت کرده و هنوز موج B را پوشش نداده است.`,
+          warningsFa: ['تا عبور موج C از انتهای موج A یا تثبیت ۳-۳-۵، ساختار زیگزاگ کامل نشده است.'],
+          suggestedPattern: 'FLAT_REGULAR'
+        };
+      }
+
+      const lenLabelFa =
+        zzEval.lengthClass === 'TRUNCATED'
+          ? 'کوتاه‌شده (Truncated)'
+          : zzEval.lengthClass === 'EXTENDED'
+          ? 'کشیده (Extended)'
+          : 'معمولی (Normal)';
+
+      const zzType: CorrectiveWaveLegInspection['detectedType'] =
+        zzEval.category === 'SIMPLE_3_3_3'
+          ? 'SIMPLE_ZIGZAG'
+          : zzEval.category === 'ANTI_3_5_5'
+          ? 'ANTI_ZIGZAG'
+          : 'ZIGZAG';
+
+      const zzLabelFa =
+        zzEval.category === 'SIMPLE_3_3_3'
+          ? `زیگزاگ سیمپل (۳-۳-۳) · ${lenLabelFa}`
+          : zzEval.category === 'ANTI_3_5_5'
+          ? `زیگزاگ آنتی‌ای (۳-۵-۵) · ${lenLabelFa}`
+          : `زیگزاگ ایده‌آل (۵-۳-۵) · ${lenLabelFa}${zzEval.isAbCd ? ' · الگوی AB=CD' : ''}`;
+
+      const zzWarnings: string[] = [];
+      if (zzEval.category === 'ANTI_3_5_5') {
+        zzWarnings.push('زیگزاگ آنتی‌ای (۳-۵-۵) الگوی غیرایده‌آل با موج B ۵موجی است؛ با احتیاط معامله شود.');
+      }
+      if (!zzEval.cCoversB100) {
+        zzWarnings.push(`موج C (${zzEval.cCoversB100Pct}٪ موج B) هنوز ۱۰۰٪ موج B را پوشش نداده است.`);
+      }
+
+      return {
+        legId,
+        labelFa,
+        detectedType: zzType,
+        typeLabelFa: zzLabelFa,
+        idealness: zzEval.category === 'ANTI_3_5_5' ? 'NON_IDEAL' : 'IDEAL',
+        subwaveSignature: zzEval.signature,
+        retracementPct: retracementVsPriorPct ?? bPctOfA,
+        candleSpan: span,
+        detailsFa: `B/A: ${bPctOfA}٪ · C/A: ${cPctOfA}٪ · پوشش C/B: ${zzEval.cCoversB100Pct}٪ | ${zzTargets.summaryFa}`,
+        warningsFa: zzWarnings,
+        suggestedPattern: 'ZIGZAG'
+      };
+    };
+
+    const labelsAscii = vertices.map(v => normalizeLabelAscii(v.label || ''));
+    const hasCorrLabels = labelsAscii.some(l => ['A', 'B', 'C', 'D', 'E', 'W', 'X', 'Y', 'Z'].includes(l));
+    const hasTriLabels = labelsAscii.some(l => ['D', 'E'].includes(l));
+    const hasComplexLabels = labelsAscii.some(l => ['W', 'X', 'Y', 'Z'].includes(l));
+
+    const isSelectedCorrective = Boolean(
+      selectedPattern &&
+        [
+          'ZIGZAG',
+          'FLAT_REGULAR',
+          'FLAT_EXPANDED',
+          'FLAT_RUNNING',
+          'TRIANGLE_CONVERGING',
+          'TRIANGLE_EXPANDING',
+          'COMPLEX_COMBINATION',
+          'ANTI_CYCLE'
+        ].includes(selectedPattern)
+    );
+
+    // Check if the overall drawn structure IS a corrective pattern
+    const p0 = vertices[0]?.price ?? 0;
+    const p1 = vertices[1]?.price ?? 0;
+    const p2 = vertices[2]?.price ?? 0;
+    const p3 = vertices[3]?.price ?? 0;
+    const p4 = vertices[4]?.price ?? 0;
+    const p5 = vertices[5]?.price ?? 0;
+    const isTrending5 =
+      vertices.length >= 6 &&
+      (isBull ? p3 > p1 * 1.03 && p4 > p2 * 1.03 && p5 > p3 * 1.01 : p3 < p1 * 0.97 && p4 < p2 * 0.97 && p5 < p3 * 0.99);
+
+    const drawnIs3WaveCorrective =
+      vertices.length === 4 && (hasCorrLabels || parentRole === 'CORRECTIVE' || isSelectedCorrective);
+    const drawnIs5LegTriangle =
+      vertices.length >= 5 &&
+      vertices.length <= 6 &&
+      !isTrending5 &&
+      (hasTriLabels ||
+        selectedPattern === 'TRIANGLE_CONVERGING' ||
+        selectedPattern === 'TRIANGLE_EXPANDING' ||
+        parentRole === 'CORRECTIVE');
+
+    let drawnCorrectiveTypeLabelFa: string | null = null;
+
+    if (hasComplexLabels || selectedPattern === 'COMPLEX_COMBINATION') {
+      const tempComp: WaveScenario = {
+        id: 'inspect_complex',
+        name: 'ساختار ترکیبی',
+        color: '#a855f7',
+        isPrimary: false,
+        isLocked: false,
+        isSelectedForTree: false,
+        patternType: 'COMPLEX_COMBINATION',
+        degree: 'INTERMEDIATE',
+        direction,
+        vertices,
+        currentWave: 'Y',
+        completionPercentage: 100,
+        validityScore: 80,
+        idealnessScore: 75,
+        confidenceScore: 80,
+        invalidationPrice: p0,
+        targets: [],
+        rulesResults: [],
+        source: 'AI',
+        timeframe: '1D'
+      };
+      const compRep = PatternEngines.analyzeComplexPattern(tempComp, candles || []);
+      const label = `${compRep.priorityLabelFa} (${compRep.patternSignature})`;
+      drawnCorrectiveTypeLabelFa = label;
+      correctiveWaves.push({
+        legId: 'DRAWN_CORRECTIVE',
+        labelFa: 'موج اصلاحی / ترکیبی رسم‌شده',
+        detectedType: 'COMPLEX_COMBINATION',
+        typeLabelFa: label,
+        idealness: 'NON_IDEAL',
+        subwaveSignature: compRep.patternSignature,
+        retracementPct: null,
+        candleSpan: Math.max(1, Math.abs(vertices[vertices.length - 1].candleIndex - vertices[0].candleIndex)),
+        detailsFa: `${compRep.recommendFa} | طول موج رابط X: ${compRep.xWaveCandleCount} کندل (${compRep.xWaveType}).`,
+        warningsFa: compRep.warnings,
+        suggestedPattern: 'COMPLEX_COMBINATION'
+      });
+    } else if (drawnIs5LegTriangle && vertices.length >= 5) {
+      const triVerts = vertices.slice(0, 6);
+      const tempTri: WaveScenario = {
+        id: 'inspect_tri',
+        name: 'مثلث',
+        color: '#10b981',
+        isPrimary: false,
+        isLocked: false,
+        isSelectedForTree: false,
+        patternType: selectedPattern === 'TRIANGLE_EXPANDING' ? 'TRIANGLE_EXPANDING' : 'TRIANGLE_CONVERGING',
+        degree: 'INTERMEDIATE',
+        direction,
+        vertices: triVerts,
+        currentWave: 'E',
+        completionPercentage: 100,
+        validityScore: 85,
+        idealnessScore: 85,
+        confidenceScore: 85,
+        invalidationPrice: p0,
+        targets: [],
+        rulesResults: [],
+        source: 'AI',
+        timeframe: '1D'
+      };
+      const triRep = PatternEngines.analyzeTriangle(tempTri, candles || [], parentRole, parentWaveLabel);
+      const triPat: PatternFamily =
+        triRep.triangleType === 'EXPANDING' ? 'TRIANGLE_EXPANDING' : 'TRIANGLE_CONVERGING';
+      const triIdeal: PatternIdealnessClass =
+        triRep.triangleType === 'CONTRACTING' && triRep.idealRetracement50 && !triRep.isParallelRectangle
+          ? 'IDEAL'
+          : 'NON_IDEAL';
+      drawnCorrectiveTypeLabelFa = triRep.triangleTypeLabelFa;
+      correctiveWaves.push({
+        legId: 'DRAWN_CORRECTIVE',
+        labelFa: 'موج اصلاحی / مثلث رسم‌شده',
+        detectedType: triPat,
+        typeLabelFa: triRep.triangleTypeLabelFa,
+        idealness: triIdeal,
+        subwaveSignature: (triRep.subwaveCounts || [3, 3, 3, 3, 3]).join('-'),
+        retracementPct: null,
+        candleSpan: Math.max(1, Math.abs(triVerts[triVerts.length - 1].candleIndex - triVerts[0].candleIndex)),
+        detailsFa: `${triRep.positionSlotLabelFa} · ${triRep.continuationLabelFa} | ${triRep.tradingApproachFa}`,
+        warningsFa: triRep.warnings,
+        suggestedPattern: triPat
+      });
+    } else if (drawnIs3WaveCorrective || (vertices.length === 4 && !hasCorrLabels && selectedPattern === 'ZIGZAG')) {
+      const drawn3 = inspectThreeWaveLeg(
+        vertices[0],
+        vertices[1],
+        vertices[2],
+        vertices[3],
+        'DRAWN_CORRECTIVE',
+        'موج اصلاحی رسم‌شده (A-B-C)',
+        null
+      );
+      drawnCorrectiveTypeLabelFa = drawn3.typeLabelFa;
+      correctiveWaves.push(drawn3);
+    } else if (vertices.length === 4 && !hasCorrLabels && parentRole === 'ROOT') {
+      // Unlabeled 4-vertex count: check if geometry fits a 3-wave A-B-C better than partial 1-2-3
+      const l1 = Math.abs(p1 - p0);
+      const l2 = Math.abs(p2 - p1);
+      const l3 = Math.abs(p3 - p2);
+      const bRatio = l1 > 0 ? l2 / l1 : 0;
+      const cRatio = l1 > 0 ? l3 / l1 : 0;
+      if (bRatio >= 0.5 || cRatio <= 1.382) {
+        const drawn3 = inspectThreeWaveLeg(
+          vertices[0],
+          vertices[1],
+          vertices[2],
+          vertices[3],
+          'DRAWN_CORRECTIVE',
+          'تحلیل اصلاحی احتمالی ساختار رسم‌شده (A-B-C)',
+          null
+        );
+        drawnCorrectiveTypeLabelFa = drawn3.typeLabelFa;
+        correctiveWaves.push(drawn3);
+      }
+    }
+
+    // Internal corrective leg inspection helper (for Wave 2, Wave 4 inside Motive/Diagonal/8-wave counts)
+    const inspectInternalMotiveCorrection = (
+      legStart: WaveVertex,
+      legEnd: WaveVertex,
+      priorLen: number,
+      legId: 'WAVE_2' | 'WAVE_4',
+      labelFa: string,
+      compareSpan?: number
+    ) => {
+      const legLen = Math.abs(legEnd.price - legStart.price);
+      const retPct = priorLen > 0 ? round1((legLen / priorLen) * 100) : 0;
+      const candleSpan = Math.max(1, Math.abs(legEnd.candleIndex - legStart.candleIndex));
+      const corrIsDown = legEnd.price < legStart.price;
+
+      // Try drilling into candle slice of this corrective wave for internal A-B-C or A-B-C-D-E pivots
+      if (candles && candles.length >= 12) {
+        const s = Math.max(0, Math.min(candles.length - 1, Math.min(legStart.candleIndex, legEnd.candleIndex)));
+        const e = Math.max(s, Math.min(candles.length - 1, Math.max(legStart.candleIndex, legEnd.candleIndex)));
+        const slice = candles.slice(s, e + 1);
+        if (slice.length >= 9) {
+          const rawPivots = PivotDetector.detectPivots(slice, 1, 1, 0.35);
+          const expectedFirstType = corrIsDown ? 'LOW' : 'HIGH';
+          const altPivots: typeof rawPivots = [];
+          for (const pv of rawPivots) {
+            if (pv.index <= 0 || pv.index >= slice.length - 1) continue;
+            if (altPivots.length === 0) {
+              if (pv.type === expectedFirstType) altPivots.push(pv);
+            } else {
+              const prev = altPivots[altPivots.length - 1];
+              if (pv.type !== prev.type) {
+                altPivots.push(pv);
+              } else if (
+                (pv.type === 'HIGH' && pv.price > prev.price) ||
+                (pv.type === 'LOW' && pv.price < prev.price)
+              ) {
+                altPivots[altPivots.length - 1] = pv;
+              }
+            }
+          }
+
+          if (legId === 'WAVE_4' && altPivots.length >= 4) {
+            const triVerts: WaveVertex[] = [
+              { ...legStart, label: '0' },
+              { label: 'A', candleIndex: s + altPivots[0].index, price: altPivots[0].price, timestamp: altPivots[0].timestamp, isConfirmed: true },
+              { label: 'B', candleIndex: s + altPivots[1].index, price: altPivots[1].price, timestamp: altPivots[1].timestamp, isConfirmed: true },
+              { label: 'C', candleIndex: s + altPivots[2].index, price: altPivots[2].price, timestamp: altPivots[2].timestamp, isConfirmed: true },
+              { label: 'D', candleIndex: s + altPivots[3].index, price: altPivots[3].price, timestamp: altPivots[3].timestamp, isConfirmed: true },
+              { ...legEnd, label: 'E' }
+            ];
+            const triScenario: WaveScenario = {
+              id: 'inspect_w4_tri',
+              name: 'مثلث موج ۴',
+              color: '#10b981',
+              isPrimary: false,
+              isLocked: false,
+              isSelectedForTree: false,
+              patternType: 'TRIANGLE_CONVERGING',
+              degree: 'INTERMEDIATE',
+              direction: corrIsDown ? 'BEARISH' : 'BULLISH',
+              vertices: triVerts,
+              currentWave: 'E',
+              completionPercentage: 100,
+              validityScore: 85,
+              idealnessScore: 85,
+              confidenceScore: 85,
+              invalidationPrice: legStart.price,
+              targets: [],
+              rulesResults: [],
+              source: 'AI',
+              timeframe: '1D'
+            };
+            const triRep = PatternEngines.analyzeTriangle(triScenario, candles, 'CORRECTIVE', 'موج 4');
+            if (triRep.detected && !triRep.isMixedTrendlines) {
+              correctiveWaves.push({
+                legId,
+                labelFa,
+                detectedType: triRep.triangleType === 'EXPANDING' ? 'TRIANGLE_EXPANDING' : 'TRIANGLE_CONVERGING',
+                typeLabelFa: triRep.triangleTypeLabelFa,
+                idealness: triRep.triangleType === 'CONTRACTING' ? 'IDEAL' : 'NON_IDEAL',
+                subwaveSignature: '3-3-3-3-3',
+                retracementPct: retPct,
+                candleSpan,
+                detailsFa: `اصلاح ${retPct}٪ موج ۳ با ساختار درونی مثلث (${candleSpan} کندل) — ${triRep.continuationLabelFa}`,
+                warningsFa: triRep.warnings
+              });
+              return;
+            }
+          }
+
+          if (altPivots.length >= 2) {
+            const pA: WaveVertex = {
+              label: 'A',
+              candleIndex: s + altPivots[0].index,
+              price: altPivots[0].price,
+              timestamp: altPivots[0].timestamp,
+              isConfirmed: true
+            };
+            const pB: WaveVertex = {
+              label: 'B',
+              candleIndex: s + altPivots[1].index,
+              price: altPivots[1].price,
+              timestamp: altPivots[1].timestamp,
+              isConfirmed: true
+            };
+            correctiveWaves.push(
+              inspectThreeWaveLeg(legStart, pA, pB, legEnd, legId, labelFa, retPct)
+            );
+            return;
+          }
+        }
+      }
+
+      // Fallback heuristic classification when internal leg candles are too short for sub-pivots
+      const w4OverlapsW1 =
+        legId === 'WAVE_4' &&
+        (isBull ? legEnd.price < p1 - 1e-6 : legEnd.price > p1 + 1e-6);
+
+      if (legId === 'WAVE_2') {
+        if (retPct >= 100) {
+          correctiveWaves.push({
+            legId,
+            labelFa,
+            detectedType: 'ANTI_CYCLE',
+            typeLabelFa: 'اصلاح ≥۱۰۰٪ (آنتی‌سیکل یا نقض قانون ۱)',
+            idealness: 'NON_IDEAL',
+            subwaveSignature: '3-5 / 100%+',
+            retracementPct: retPct,
+            candleSpan,
+            detailsFa: `موج ۲ برابر ${retPct}٪ موج ۱ اصلاح کرده و از مبدأ موج ۱ عبور کرده است.`,
+            warningsFa: ['پوشش ۱۰۰٪ مبدأ در سیکل ایده‌آل مجاز نیست؛ شمارش را به آنتی‌سیکل یا A-B بازبینی کنید.'],
+            suggestedPattern: 'ANTI_CYCLE'
+          });
+        } else if (retPct <= 24.2) {
+          correctiveWaves.push({
+            legId,
+            labelFa,
+            detectedType: 'ZIGZAG',
+            typeLabelFa: 'اصلاح کم‌عمق و تیز موج ۲ (احتمال کشیدگی موج ۱)',
+            idealness: 'IDEAL',
+            subwaveSignature: '3 / 5-3-5',
+            retracementPct: retPct,
+            candleSpan,
+            detailsFa: `موج ۲ تنها ${retPct}٪ موج ۱ را در ${candleSpan} کندل اصلاح کرده است (نشانه قدرت روند یا کشیدگی موج ۱).`,
+            warningsFa: []
+          });
+        } else if (retPct <= 65) {
+          correctiveWaves.push({
+            legId,
+            labelFa,
+            detectedType: 'ZIGZAG',
+            typeLabelFa: 'اصلاح تیز زیگزاگی متعارف (Zigzag)',
+            idealness: 'IDEAL',
+            subwaveSignature: '5-3-5',
+            retracementPct: retPct,
+            candleSpan,
+            detailsFa: `اصلاح ${retPct}٪ در محدوده ایده‌آل بهاری (۳۸.۲٪ تا ۶۱.۸٪) طی ${candleSpan} کندل با الگوی غالب زیگزاگ.`,
+            warningsFa: []
+          });
+        } else {
+          correctiveWaves.push({
+            legId,
+            labelFa,
+            detectedType: 'FLAT_REGULAR',
+            typeLabelFa: retPct >= 76 ? 'اصلاح عمیق موج ۲ (فلت یا ۷۸.۶٪ شتاب‌دار)' : 'اصلاح عمیق فلت متعارف / زیگزاگ عمیق',
+            idealness: retPct > 85 ? 'NON_IDEAL' : 'IDEAL',
+            subwaveSignature: '3-3-5',
+            retracementPct: retPct,
+            candleSpan,
+            detailsFa: `موج ۲ به میزان ${retPct}٪ موج ۱ را در ${candleSpan} کندل اصلاح کرده است (حداکثر سنگر ۷۸.۶٪ پیش از ابطال).`,
+            warningsFa: retPct > 85 ? ['نزدیکی به مبدأ موج ۱ — ریسک نقض قانون ۱ در صورت ادامه اصلاح.'] : []
+          });
+        }
+      } else {
+        // WAVE_4
+        const longerThanW2 = compareSpan !== undefined && candleSpan >= compareSpan * 1.15;
+        const triSuspect = !w4OverlapsW1 && (retPct <= 38.2 || longerThanW2) && candleSpan >= 6;
+        const warnings: string[] = [];
+        if (w4OverlapsW1) {
+          warnings.push('ورود موج ۴ به محدوده قیمتی موج ۱ (ترمینال / قطر / کشیدگی موج ۱).');
+        }
+        if (compareSpan !== undefined && candleSpan < compareSpan * 0.55) {
+          warnings.push(`موج ۴ (${candleSpan} کندل) کوتاه‌تر از موج ۲ (${compareSpan} کندل) است؛ احتمال تکمیل‌نشدن موج ۴.`);
+        }
+
+        correctiveWaves.push({
+          legId,
+          labelFa,
+          detectedType: w4OverlapsW1
+            ? 'FLAT_EXPANDED'
+            : retPct > 50 || longerThanW2
+            ? triSuspect
+              ? 'TRIANGLE_CONVERGING'
+              : 'FLAT_REGULAR'
+            : 'FLAT_REGULAR',
+          typeLabelFa: w4OverlapsW1
+            ? 'اصلاح هم‌پوشان با موج ۱ (غیرایده‌آل · ترمینال / قطر)'
+            : retPct > 50
+            ? 'اصلاح عمیق جانبی موج ۴ (فلت / مثلث محتمل)'
+            : longerThanW2
+            ? 'اصلاح جانبی زمان‌بر موج ۴ (فلت متعارف / مثلث — اصل تناوب)'
+            : 'اصلاح متعارف موج ۴ (فلت ۳-۳-۵ یا مثلث)',
+          idealness: w4OverlapsW1 || retPct > 50 ? 'NON_IDEAL' : 'IDEAL',
+          subwaveSignature: longerThanW2 ? '3-3-5 / 3-3-3-3-3' : '3-3-5',
+          retracementPct: retPct,
+          candleSpan,
+          detailsFa: `اصلاح ${retPct}٪ موج ۳ طی ${candleSpan} کندل${
+            compareSpan ? ` (در مقایسه با ${compareSpan} کندل موج ۲)` : ''
+          }.`,
+          warningsFa: warnings
+        });
+      }
+    };
+
+    // Inspect internal corrective waves when structure is a 5-wave / 8-wave cycle (or not solely a 4-vertex corrective wave)
+    if (!drawnIs3WaveCorrective && !drawnIs5LegTriangle && !hasComplexLabels) {
+      const len1Abs = Math.abs(p1 - p0);
+      const len3Abs = Math.abs(p3 - p2);
+      const w2Span = Math.max(1, Math.abs(vertices[2].candleIndex - vertices[1].candleIndex));
+      if (vertices.length >= 3 && len1Abs > 0) {
+        inspectInternalMotiveCorrection(vertices[1], vertices[2], len1Abs, 'WAVE_2', 'موج اصلاحی ۲ (درون سیکل)');
+      }
+      if (vertices.length >= 5 && len3Abs > 0) {
+        inspectInternalMotiveCorrection(vertices[3], vertices[4], len3Abs, 'WAVE_4', 'موج اصلاحی ۴ (درون سیکل)', w2Span);
+      }
+      // Post-Wave-5 A-B-C when 8-wave cycle vertices (6..8) exist
+      if (vertices.length >= 9) {
+        const postAbc = inspectThreeWaveLeg(
+          vertices[5],
+          vertices[6],
+          vertices[7],
+          vertices[8],
+          'POST_CYCLE_ABC',
+          'فاز اصلاحی پسا-سیکل (موج A-B-C)',
+          null
+        );
+        correctiveWaves.push(postAbc);
+      }
+    }
+
+    return { correctiveWaves, drawnCorrectiveTypeLabelFa };
+  }
+
+  /**
+   * Unified Automatic Pattern Detector across ALL Ideal & Non-Ideal Bahari patterns:
+   * Combines all-pattern hypothesis scoring, Session 9-18 deep analyzers (Diagonal 3-3-3-3-3,
+   * Zigzag 5-3-5/3-3-3/3-5-5, 8 Flat subtypes, Triangles, Complex, Extension, Anti-Cycle),
+   * and Corrective/Drawn wave inspection into a single cohesive report.
+   */
+  public static detectUnifiedPatternsAndCorrectiveWaves(
+    vertices: WaveVertex[],
+    direction: WaveDirection = 'BULLISH',
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = '',
+    candles?: Candle[],
+    selectedPattern: PatternFamily = 'IDEAL_CYCLE',
+    selectedHardPassed?: boolean
+  ): UnifiedPatternDetectionReport {
+    const evaluations = this.evaluateAllPatterns(
+      vertices,
+      direction,
+      parentRole,
+      parentWaveLabel,
+      candles,
+      selectedPattern
+    );
+
+    const bestFit = evaluations.find(e => e.isBestFit) || evaluations[0];
+    const primaryDetectedPattern = bestFit?.patternType || selectedPattern;
+    const selectedEval = evaluations.find(e => e.patternType === selectedPattern);
+
+    const isPatternNonIdeal = (pf: PatternFamily, status?: string, diagDetected33333?: boolean): PatternIdealnessClass => {
+      if (diagDetected33333) return 'NON_IDEAL';
+      if (
+        [
+          'TERMINAL',
+          'ANTI_TERMINAL',
+          'LEADING_DIAGONAL',
+          'ANTI_LEADING_DIAGONAL',
+          'ENDING_DIAGONAL',
+          'ANTI_DIAGONAL',
+          'ANTI_CYCLE',
+          'FLAT_EXPANDED',
+          'FLAT_RUNNING',
+          'TRIANGLE_EXPANDING',
+          'COMPLEX_COMBINATION'
+        ].includes(pf)
+      ) {
+        return 'NON_IDEAL';
+      }
+      if (status === 'WARNING') return 'NON_IDEAL';
+      return 'IDEAL';
+    };
+
+    const diagDetected33333 = evaluations.some(e =>
+      e.rules.some(
+        r =>
+          r.ruleId === 'DIAGONAL_33333_PATTERN_FLAG' &&
+          (r.nameFa.includes('۳-۳-۳-۳-۳') || r.messageFa.includes('۳-۳-۳-۳-۳'))
+      )
+    );
+
+    // Inspect drawn / corrective waves
+    const { correctiveWaves, drawnCorrectiveTypeLabelFa } = this.inspectCorrectiveAndDrawnWaves(
+      vertices,
+      direction,
+      parentRole,
+      parentWaveLabel,
+      candles,
+      primaryDetectedPattern
+    );
+
+    // Run deep specialized analyzer matching primaryDetectedPattern (or vertices shape)
+    const tempScenario: WaveScenario = {
+      id: 'unified_probe',
+      name: PATTERN_LABELS_FA[primaryDetectedPattern],
+      color: '#38bdf8',
+      isPrimary: true,
+      isLocked: false,
+      isSelectedForTree: true,
+      patternType: primaryDetectedPattern,
+      degree: 'INTERMEDIATE',
+      direction,
+      vertices,
+      currentWave: vertices[vertices.length - 1]?.label || '',
+      completionPercentage: vertices.length >= 6 ? 100 : Math.round((vertices.length / 6) * 100),
+      validityScore: bestFit?.validityScore ?? 75,
+      idealnessScore: bestFit?.idealnessScore ?? 75,
+      confidenceScore: bestFit?.confidenceScore ?? 75,
+      invalidationPrice: vertices[0]?.price ?? 0,
+      targets: [],
+      rulesResults: bestFit?.rules ?? [],
+      source: 'AI',
+      timeframe: '1D'
+    };
+
+    let diagonalDetails: DiagonalAnalysisReport | null = null;
+    let zigzagDetails: ZigzagAnalysisReport | null = null;
+    let flatDetails: FlatAnalysisReport | null = null;
+    let triangleDetails: TriangleAnalysisReport | null = null;
+    let complexDetails: ComplexPatternReport | null = null;
+
+    if (primaryDetectedPattern.includes('DIAGONAL') && vertices.length >= 3) {
+      diagonalDetails = PatternEngines.analyzeDiagonal(tempScenario, candles || [], parentWaveLabel);
+    } else if (primaryDetectedPattern === 'ZIGZAG' && vertices.length >= 4) {
+      zigzagDetails = PatternEngines.analyzeZigzag(tempScenario, candles || []);
+    } else if (primaryDetectedPattern.startsWith('FLAT_') && vertices.length >= 4) {
+      flatDetails = PatternEngines.analyzeFlat(tempScenario, candles || []);
+    } else if (primaryDetectedPattern.startsWith('TRIANGLE_') && vertices.length >= 5) {
+      triangleDetails = PatternEngines.analyzeTriangle(tempScenario, candles || [], parentRole, parentWaveLabel);
+    } else if (primaryDetectedPattern === 'COMPLEX_COMBINATION' && vertices.length >= 4) {
+      complexDetails = PatternEngines.analyzeComplexPattern(tempScenario, candles || []);
+    }
+
+    const detectedExtension = this.detectWaveExtension(vertices, direction);
+
+    // Determine drawn wave structural kind
+    const joinedLabels = vertices.map(v => normalizeLabelAscii(v.label || '')).join(' ');
+    const hasComplexLabels = /\b[WXY]\b/.test(joinedLabels);
+    let drawnWaveKind: DrawnWaveStructureKind = 'DEVELOPING_PARTIAL';
+    let drawnWaveKindLabelFa = 'ساختار در حال شکل‌گیری (ناقص)';
+
+    if (vertices.length >= 9) {
+      drawnWaveKind = 'COMPLETE_8_WAVE_CYCLE';
+      drawnWaveKindLabelFa = 'سیکل کامل ۸ موجی (۵ پیشرو + ۳ اصلاحی)';
+    } else if (hasComplexLabels || primaryDetectedPattern === 'COMPLEX_COMBINATION') {
+      drawnWaveKind = 'COMPLEX_MULTI_LEG';
+      drawnWaveKindLabelFa = 'ساختار اصلاحی ترکیبی (W-X-Y)';
+    } else if (primaryDetectedPattern.startsWith('TRIANGLE_')) {
+      drawnWaveKind = 'TRIANGLE_5_LEG';
+      drawnWaveKindLabelFa = 'مثلث ۵ ضلعی (A-B-C-D-E)';
+    } else if (diagDetected33333 || primaryDetectedPattern.includes('DIAGONAL')) {
+      drawnWaveKind = 'DIAGONAL_33333';
+      drawnWaveKindLabelFa = 'ساختار ۵ موجی قطری (۳-۳-۳-۳-۳)';
+    } else if (
+      vertices.length === 4 &&
+      (['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING', 'ANTI_CYCLE'].includes(primaryDetectedPattern) ||
+        drawnCorrectiveTypeLabelFa !== null)
+    ) {
+      drawnWaveKind = 'CORRECTIVE_3_WAVE';
+      drawnWaveKindLabelFa = 'ساختار اصلاحی ۳ موجی (A-B-C)';
+    } else if (vertices.length >= 6) {
+      drawnWaveKind = 'MOTIVE_5_WAVE';
+      drawnWaveKindLabelFa = 'ساختار ۵ موجی پیشرو / شتابدار';
+    } else {
+      drawnWaveKind = 'DEVELOPING_PARTIAL';
+      drawnWaveKindLabelFa = `ساختار در حال توسعه (${vertices.length - 1} گام رسم‌شده)`;
+    }
+
+    // Build subtype label & structural subwave signature
+    let primarySubtypeLabelFa = bestFit?.statusLabelFa || 'ارزیابی استاندارد';
+    let subwaveSignature = '5-3-5-3-5';
+    const fullDetailsFa: string[] = [];
+    const warningsFa: string[] = [];
+
+    if (diagonalDetails) {
+      primarySubtypeLabelFa = diagonalDetails.variantLabelFa;
+      subwaveSignature = diagDetected33333 ? '3-3-3-3-3' : '3-3-3-3-3 / ۵-۳';
+      fullDetailsFa.push(
+        `نوع قطر: ${diagonalDetails.variantLabelFa} در جایگاه موج ${diagonalDetails.waveLocation}`,
+        `پوشش ۱۰۰٪ موج ۲ توسط ۳: ${diagonalDetails.wave2Covered100 ? 'تاییدشده ✓' : 'تکمیل‌نشده'} | هدف اصلاح پساالگو: ${diagonalDetails.correctionTargetRangeFa}`
+      );
+      warningsFa.push(...diagonalDetails.warnings);
+    } else if (zigzagDetails) {
+      primarySubtypeLabelFa = `${zigzagDetails.subTypeLabelFa} (${zigzagDetails.waveCClassFa})`;
+      subwaveSignature = zigzagDetails.structureLabel || '5-3-5';
+      fullDetailsFa.push(
+        `نسبت‌ها: B/A=${zigzagDetails.bOverARatioPct}٪ · C/A=${zigzagDetails.cOverARatioPct}٪ · پوشش موج B: ${zigzagDetails.cCoversB100 ? 'تایید ۱۰۰٪ ✓' : 'ناقص'}`,
+        `هدف پساالگویی (${zigzagDetails.postPatternBasisFa}): ${zigzagDetails.postPatternTargetPrice.toLocaleString()}${zigzagDetails.isAbCd ? ' · هم‌راستا با AB=CD' : ''}`
+      );
+      warningsFa.push(...zigzagDetails.warnings);
+    } else if (flatDetails) {
+      primarySubtypeLabelFa = flatDetails.subtypeLabelFa;
+      subwaveSignature = '3-3-5';
+      fullDetailsFa.push(
+        `نسبت‌ها: B/A=${flatDetails.bPctOfA}٪ · C/B=${flatDetails.cPctOfB}٪ · ${flatDetails.cPctOfB >= 99.9 ? 'پوشش ۱۰۰٪ B ✓' : 'عدم پوشش ۱۰۰٪ B'}`,
+        flatDetails.vsSimpleZigzagFa
+      );
+      warningsFa.push(...flatDetails.warnings);
+    } else if (triangleDetails) {
+      primarySubtypeLabelFa = triangleDetails.triangleTypeLabelFa;
+      subwaveSignature = (triangleDetails.subwaveCounts || [3, 3, 3, 3, 3]).join('-');
+      fullDetailsFa.push(
+        `${triangleDetails.positionSlotLabelFa} (فراوانی ${triangleDetails.frequencyPct}) · دامنه ${triangleDetails.scopeVariant === 'UNLIMITED' ? 'نامحدود' : 'محدود'}`,
+        triangleDetails.tradingApproachFa
+      );
+      warningsFa.push(...triangleDetails.warnings);
+    } else if (complexDetails) {
+      primarySubtypeLabelFa = complexDetails.priorityLabelFa;
+      subwaveSignature = complexDetails.patternSignature;
+      fullDetailsFa.push(
+        `موج رابط X: ${complexDetails.xWaveCandleCount} کندل (${complexDetails.xWaveType})`,
+        complexDetails.recommendFa
+      );
+      warningsFa.push(...complexDetails.warnings);
+    } else if (primaryDetectedPattern === 'ANTI_CYCLE') {
+      subwaveSignature = '3-5';
+      const p0p = vertices[0]?.price ?? 0;
+      const p2p = vertices[2]?.price ?? 0;
+      const isExt = direction === 'BULLISH' ? p2p <= p0p + 1e-6 : p2p >= p0p - 1e-6;
+      primarySubtypeLabelFa = isExt ? 'آنتی‌سیکل گسترده (Extended — پوشش >۱۰۰٪)' : 'آنتی‌سیکل هارمونیک (Harmonic)';
+      fullDetailsFa.push(bestFit?.primaryReasonFa || primarySubtypeLabelFa);
+    } else if (primaryDetectedPattern === 'TERMINAL') {
+      subwaveSignature = '5-3-5-3-5 (هم‌پوشان)';
+      primarySubtypeLabelFa = 'سیکل ترمینال گوه‌ای (موج ۴ هم‌پوشان + موج ۵ کوتاه‌تر از ۳)';
+      fullDetailsFa.push(
+        'هم‌پوشانی موج ۴ با محدوده ۱ و کوتاه‌شدگی موج ۵ تایید شد؛ پس از پایان موج ۵ احتمال برگشت ۱۰۰٪ موج ۵ توسط موج A بالا است.'
+      );
+    } else if (primaryDetectedPattern === 'ANTI_TERMINAL') {
+      subwaveSignature = '5-3-5-3-5 (بازشونده)';
+      primarySubtypeLabelFa = 'سیکل آنتی‌ترمینال (موج ۴ هم‌پوشان + موج ۵ کشیده)';
+      fullDetailsFa.push(
+        'موج ۴ وارد حریم موج ۱ شده و موج ۵ کشیده‌تر از موج ۳ است (رفتار قیف بازشونده).'
+      );
+    } else {
+      // IDEAL_CYCLE
+      subwaveSignature = '5-3-5-3-5';
+      primarySubtypeLabelFa =
+        detectedExtension === 'WAVE_3'
+          ? 'سیکل ایده‌آل با کشیدگی موج ۳ (رایج‌ترین حالت)'
+          : detectedExtension === 'WAVE_1'
+          ? 'سیکل ایده‌آل با کشیدگی موج ۱'
+          : detectedExtension === 'WAVE_5'
+          ? 'سیکل ایده‌آل با کشیدگی موج ۵ (هشدار سیو سود)'
+          : vertices.length < 6
+          ? 'سیکل ایده‌آل در حال توسعه'
+          : 'سیکل ایده‌آل متعادل بدون هم‌پوشانی';
+      fullDetailsFa.push(bestFit?.primaryReasonFa || 'تمامی قوانین سه‌گانه بهاری در سیکل ایده‌آل رعایت شده‌اند.');
+    }
+
+    if (correctiveWaves.length > 0) {
+      for (const cw of correctiveWaves) {
+        fullDetailsFa.push(`${cw.labelFa}: ${cw.typeLabelFa} (${cw.detailsFa})`);
+        warningsFa.push(...cw.warningsFa);
+      }
+    }
+
+    const idealness = isPatternNonIdeal(primaryDetectedPattern, bestFit?.status, diagDetected33333);
+    const idealnessReasonFa =
+      idealness === 'IDEAL'
+        ? 'ساختار و تناسبات فعلی منطبق بر رفتار ایده‌آل بهاری است.'
+        : 'الگو دارای رفتار غیرایده‌آل (هم‌پوشانی، ساختار ۳-۳-۳-۳-۳، آنتی‌سیکل، فلت نامنظم/رانینگ یا ترکیبی) است و مدیریت ریسک دقیق‌تری می‌طلبد.';
+
+    const buildCandidateSubtype = (e: PatternHypothesisEvaluation): string => {
+      if (e.patternType === primaryDetectedPattern) return primarySubtypeLabelFa;
+      if (e.patternType.includes('DIAGONAL')) return 'ساختار ۳-۳-۳-۳-۳';
+      if (e.patternType === 'ZIGZAG') return 'ساختار ۵-۳-۵ / ۳-۳-۳';
+      if (e.patternType.startsWith('FLAT_')) return 'ساختار ۳-۳-۵';
+      if (e.patternType.startsWith('TRIANGLE_')) return 'ساختار ۵ ضلعی A-B-C-D-E';
+      if (e.patternType === 'ANTI_CYCLE') return 'ساختار ۳-۵';
+      if (e.patternType === 'TERMINAL') return 'هم‌پوشانی ۴ و ۱ + موج ۵ کوتاه';
+      if (e.patternType === 'ANTI_TERMINAL') return 'هم‌پوشانی ۴ و ۱ + موج ۵ ممتد';
+      if (e.patternType === 'COMPLEX_COMBINATION') return 'پیوند با موج رابط X';
+      return 'ساختار ۵-۳-۵-۳-۵';
+    };
+
+    const candidatesPool = evaluations
+      .filter(e => e.status !== 'INVALID')
+      .map(e => ({
+        patternType: e.patternType,
+        shortLabelFa: e.shortLabelFa,
+        idealness: isPatternNonIdeal(e.patternType, e.status, e.patternType.includes('DIAGONAL') && diagDetected33333),
+        subtypeLabelFa: buildCandidateSubtype(e),
+        status: e.status,
+        validityScore: e.validityScore,
+        confidenceScore: e.confidenceScore,
+        primaryReasonFa: e.primaryReasonFa
+      }));
+
+    const idealMatches = candidatesPool.filter(c => c.idealness === 'IDEAL');
+    const nonIdealMatches = candidatesPool.filter(c => c.idealness === 'NON_IDEAL');
+
+    const selectedStatus: 'VALID' | 'WARNING' | 'INVALID' =
+      selectedHardPassed === false
+        ? 'INVALID'
+        : selectedEval?.status || 'VALID';
+
+    return {
+      drawnWaveKind,
+      drawnWaveKindLabelFa,
+      primaryDetectedPattern,
+      primaryPatternLabelFa: PATTERN_LABELS_FA[primaryDetectedPattern],
+      primarySubtypeLabelFa,
+      idealness,
+      idealnessReasonFa,
+      subwaveSignature,
+      detectedExtension,
+      matchesSelectedPattern: primaryDetectedPattern === selectedPattern,
+      selectedPattern,
+      selectedPatternStatus: selectedStatus,
+      confidenceScore: bestFit?.confidenceScore ?? 75,
+      validityScore: bestFit?.validityScore ?? 75,
+      fullDetailsFa: Array.from(new Set(fullDetailsFa)).slice(0, 8),
+      warningsFa: Array.from(new Set(warningsFa)).slice(0, 6),
+      correctiveWaves,
+      drawnCorrectiveTypeLabelFa,
+      idealMatches,
+      nonIdealMatches,
+      diagonalDetails,
+      zigzagDetails,
+      flatDetails,
+      triangleDetails,
+      complexDetails
+    };
   }
 }

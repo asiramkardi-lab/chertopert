@@ -15,6 +15,7 @@ import {
   WaveFixSuggestion
 } from '../engine/rulesEngine';
 import { AllPatternsEvaluationMatrix } from './AllPatternsEvaluationMatrix';
+import { UnifiedPatternDetectionSummary } from './UnifiedPatternDetectionSummary';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -227,6 +228,20 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
               <span className="px-2 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-cyan-300 text-[10px] font-medium">
                 {PATTERN_LABELS_FA[summary.patternType]}
               </span>
+              {summary.nonIdealPatternFlag?.isNonIdeal && (
+                <span
+                  data-testid="non-ideal-pattern-badge"
+                  className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                    summary.nonIdealPatternFlag.category === 'ANTI_DIAGONAL'
+                      ? 'bg-fuchsia-950/60 border-fuchsia-500/50 text-fuchsia-200'
+                      : summary.nonIdealPatternFlag.category === 'DIAGONAL'
+                      ? 'bg-amber-950/60 border-amber-500/50 text-amber-200'
+                      : 'bg-orange-950/55 border-orange-500/45 text-orange-200'
+                  }`}
+                >
+                  غیرایده‌آل · {summary.nonIdealPatternFlag.category}
+                </span>
+              )}
               {parentRole !== 'ROOT' && parentWaveLabel && (
                 <span className="px-2 py-0.5 rounded bg-indigo-950/70 border border-indigo-500/35 text-indigo-300 text-[10px]">
                   زیرموج {parentWaveLabel} ({parentRole === 'MOTIVE' ? 'اصلی' : 'اصلاحی'})
@@ -274,6 +289,78 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
 
       {/* Scrollable Diagnostic Body */}
       <div className="overflow-y-auto p-4 space-y-4">
+        {/* Unified Automatic Pattern Detection & Corrective/Drawn Wave Summary */}
+        {summary.unifiedDetection && (
+          <UnifiedPatternDetectionSummary
+            report={summary.unifiedDetection}
+            isLocked={scenario.isLocked}
+            variant="full"
+            onApplyPattern={
+              onApplyPattern
+                ? pattern => {
+                    onApplyPattern(pattern);
+                    if (onRevalidate) {
+                      setTimeout(() => onRevalidate(), 0);
+                    }
+                  }
+                : undefined
+            }
+          />
+        )}
+
+        {/* Non-Ideal Pattern Spotlight (Session 9 Diagonal / Anti-Diagonal 3-3-3-3-3) */}
+        {summary.nonIdealPatternFlag?.isNonIdeal && (
+          <div
+            data-testid="non-ideal-pattern-spotlight"
+            className={`p-3 rounded-xl border text-[11px] space-y-2 ${
+              summary.nonIdealPatternFlag.category === 'ANTI_DIAGONAL'
+                ? 'bg-fuchsia-950/30 border-fuchsia-500/45 text-fuchsia-100'
+                : 'bg-amber-950/30 border-amber-500/45 text-amber-100'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 font-bold">
+                <AlertTriangle
+                  className={`w-4 h-4 shrink-0 ${
+                    summary.nonIdealPatternFlag.category === 'ANTI_DIAGONAL'
+                      ? 'text-fuchsia-300'
+                      : 'text-amber-300'
+                  }`}
+                />
+                <span>{summary.nonIdealPatternFlag.labelFa}</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                <span className="px-2 py-0.5 rounded bg-slate-950/80 border border-slate-700/80 text-slate-200">
+                  {summary.nonIdealPatternFlag.category}
+                </span>
+                {summary.nonIdealPatternFlag.isDetected33333Diagonal && (
+                  <span className="px-2 py-0.5 rounded bg-slate-950/80 border border-amber-500/40 text-amber-300">
+                    3-3-3-3-3
+                  </span>
+                )}
+              </div>
+            </div>
+            <p className="text-[10.5px] opacity-90 leading-relaxed">{summary.nonIdealPatternFlag.reasonFa}</p>
+            {summary.nonIdealPatternFlag.suggestedPattern &&
+              summary.nonIdealPatternFlag.suggestedPattern !== scenario.patternType &&
+              onApplyPattern && (
+                <div className="pt-1 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={scenario.isLocked}
+                    onClick={() => {
+                      onApplyPattern(summary.nonIdealPatternFlag!.suggestedPattern!);
+                      if (onRevalidate) setTimeout(() => onRevalidate(), 0);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-[10.5px] font-bold transition-colors"
+                  >
+                    تبدیل به {PATTERN_LABELS_FA[summary.nonIdealPatternFlag.suggestedPattern].split('(')[0].trim()}
+                  </button>
+                </div>
+              )}
+          </div>
+        )}
+
         {/* Locked Scenario Guard Notice */}
         {scenario.isLocked && suggestions.length > 0 && (
           <div className="p-2.5 rounded-xl bg-amber-950/35 border border-amber-500/40 text-amber-200 text-[11px] flex items-center gap-2">

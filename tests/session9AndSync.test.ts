@@ -1104,6 +1104,13 @@ describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
     expect(diagFlag?.details).toBe('ENDING_DIAGONAL');
     expect(diagFlag?.canBeSolvedByAlternate).toBe('ENDING_DIAGONAL');
     expect(idealOverDiag.suggestedAlternative).toBe('ENDING_DIAGONAL');
+    expect(idealOverDiag.nonIdealPatternFlag).toMatchObject({
+      isNonIdeal: true,
+      category: 'DIAGONAL',
+      subCategory: 'ENDING_DIAGONAL',
+      isDetected33333Diagonal: true,
+      suggestedPattern: 'ENDING_DIAGONAL'
+    });
 
     // 2. Real 3-wave candle swings on all 5 legs with broadening 1 < 3 < 5 & Rule 3 overlap -> flagged as ANTI_DIAGONAL
     const { candles: diagCandles, vertices: candleVerts } = build3WaveLegCandles([100, 140, 120, 200, 135, 265]);
@@ -1121,6 +1128,23 @@ describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
     expect(antiFlag?.details).toBe('ANTI_DIAGONAL');
     expect(antiFlag?.canBeSolvedByAlternate).toBe('ANTI_DIAGONAL');
     expect(idealOverAnti.suggestedAlternative).toBe('ANTI_DIAGONAL');
+    expect(idealOverAnti.nonIdealPatternFlag).toMatchObject({
+      isNonIdeal: true,
+      category: 'ANTI_DIAGONAL',
+      subCategory: 'ANTI_DIAGONAL',
+      isDetected33333Diagonal: true,
+      suggestedPattern: 'ANTI_DIAGONAL'
+    });
+
+    const morphFixes = RulesEngine.generateFixSuggestions(
+      'IDEAL_CYCLE',
+      candleVerts,
+      'BULLISH',
+      diagCandles,
+      'ROOT',
+      'موج 5'
+    );
+    expect(morphFixes.some(f => f.id === 'fix_diagonal_33333_morph' && f.targetPattern === 'ANTI_DIAGONAL')).toBe(true);
 
     // 3. Validating directly as ENDING_DIAGONAL passes DIAGONAL_33333_PATTERN_FLAG as distinct non-ideal type
     const validDiag = RulesEngine.validateStructure(
@@ -1135,5 +1159,10 @@ describe('FractalEngine identifyZigzag & calculateZigzagTargets', () => {
     expect(validDiagFlag?.passed).toBe(true);
     expect(validDiagFlag?.score).toBe(100);
     expect(validDiagFlag?.details).toBe('ENDING_DIAGONAL');
+    expect(validDiag.nonIdealPatternFlag).toMatchObject({
+      isNonIdeal: true,
+      category: 'DIAGONAL',
+      isDetected33333Diagonal: true
+    });
   });
 });

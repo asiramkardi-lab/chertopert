@@ -15,6 +15,7 @@ import {
 } from '../engine/rulesEngine';
 import { PatternEngines } from '../engine/patternEngines';
 import { AllPatternsEvaluationMatrix } from './AllPatternsEvaluationMatrix';
+import { UnifiedPatternDetectionSummary } from './UnifiedPatternDetectionSummary';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -692,6 +693,69 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
               </div>
             </div>
 
+            {auditResult.summary.nonIdealPatternFlag?.isNonIdeal && (
+              <div
+                className={`p-3 rounded-xl border text-[11px] space-y-1.5 ${
+                  auditResult.summary.nonIdealPatternFlag.category === 'ANTI_DIAGONAL'
+                    ? 'bg-fuchsia-950/30 border-fuchsia-500/45 text-fuchsia-100'
+                    : 'bg-amber-950/30 border-amber-500/45 text-amber-100'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        auditResult.summary.nonIdealPatternFlag.category === 'ANTI_DIAGONAL'
+                          ? 'text-fuchsia-300'
+                          : 'text-amber-300'
+                      }`}
+                    />
+                    <span>{auditResult.summary.nonIdealPatternFlag.labelFa}</span>
+                  </span>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-950/80 border border-slate-700 text-slate-200">
+                      {auditResult.summary.nonIdealPatternFlag.category}
+                    </span>
+                    {auditResult.summary.nonIdealPatternFlag.isDetected33333Diagonal && (
+                      <span className="px-1.5 py-0.5 rounded bg-slate-950/80 border border-amber-500/40 text-amber-300">
+                        3-3-3-3-3
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <p className="text-[10.5px] opacity-90 leading-relaxed">
+                  {auditResult.summary.nonIdealPatternFlag.reasonFa}
+                </p>
+                {auditResult.summary.nonIdealPatternFlag.suggestedPattern &&
+                  auditResult.summary.nonIdealPatternFlag.suggestedPattern !== scenario.patternType &&
+                  onApplyPattern && (
+                    <div className="pt-1 flex justify-end">
+                      <button
+                        type="button"
+                        disabled={scenario.isLocked}
+                        onClick={() => {
+                          const target = auditResult.summary.nonIdealPatternFlag!.suggestedPattern!;
+                          onApplyPattern(target);
+                          const updated = RulesEngine.validateStructure(
+                            target,
+                            scenario.vertices,
+                            scenario.direction,
+                            parentRole,
+                            parentWaveLabel,
+                            candles
+                          );
+                          onValidationComplete?.(updated);
+                          setAppliedFlash(PATTERN_LABELS_FA[target].split('(')[0].trim());
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-[10.5px] font-bold transition-colors"
+                      >
+                        تغییر الگو به {PATTERN_LABELS_FA[auditResult.summary.nonIdealPatternFlag.suggestedPattern].split('(')[0].trim()}
+                      </button>
+                    </div>
+                  )}
+              </div>
+            )}
+
             {/* Key Pattern Families Quick Status Strip (Ideal / Terminal / Anti-Terminal / Diagonals / Anti-Diagonal / Anti-Cycle) */}
             <div className="rounded-xl bg-slate-950/75 border border-slate-800 overflow-hidden">
               <div className="px-3 py-2 border-b border-slate-800/80 flex items-center justify-between gap-2">
@@ -924,6 +988,16 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Unified Auto-Detection Summary (All Ideal & Non-Ideal + Corrective/Drawn Wave Inspection) */}
+            {auditResult.summary.unifiedDetection && (
+              <UnifiedPatternDetectionSummary
+                report={auditResult.summary.unifiedDetection}
+                isLocked={scenario.isLocked}
+                variant="compact"
+                onApplyPattern={onApplyPattern}
+              />
+            )}
 
             {/* Compact Specialized Engine Analysis for Active Pattern (Sessions 9-17) */}
             <div className="p-2.5 rounded-xl bg-slate-950/85 border border-slate-800 space-y-2 text-[10.5px]">
