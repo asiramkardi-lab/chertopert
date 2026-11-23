@@ -236,6 +236,12 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
       const scValidatedValid = scSummary
         ? scSummary.isValid && scSummary.rules.filter(r => r.type === 'HARD' && !r.passed).length === 0
         : null;
+      const nodeFlatCheck = RulesEngine.FlatPatternValidator(
+        nodeScenario.patternType,
+        nodeScenario.vertices,
+        nodeScenario.direction,
+        candles
+      );
 
       return (
         <div key={node.id} className={depth > 0 ? 'mr-3 pr-2.5 border-r border-indigo-500/30 space-y-1.5' : 'space-y-2'}>
@@ -286,6 +292,15 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                     }`}
                   >
                     {scValidatedValid ? 'معتبر ✓' : 'خطا ✕'}
+                  </span>
+                )}
+                {nodeFlatCheck.isPotentialFlat && nodeFlatCheck.flag && (
+                  <span
+                    data-testid="wizard-tree-flat-badge"
+                    title={nodeFlatCheck.flag.reasonFa}
+                    className="px-1.5 py-0.2 rounded text-[9.5px] font-bold border bg-amber-500/15 border-amber-500/45 text-amber-200 font-mono tabular-nums whitespace-nowrap"
+                  >
+                    احتمال فلت (Flat · {nodeFlatCheck.flag.bRetracePct}%)
                   </span>
                 )}
               </div>
@@ -756,6 +771,12 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
               const scValidatedValid = scSummary
                 ? scSummary.isValid && scSummary.rules.filter(r => r.type === 'HARD' && !r.passed).length === 0
                 : null;
+              const scFlatCheck = RulesEngine.FlatPatternValidator(
+                sc.patternType,
+                sc.vertices,
+                sc.direction,
+                candles
+              );
 
               return (
                 <div key={sc.id} className="space-y-2">
@@ -786,6 +807,15 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                                 }`}
                               >
                                 {scValidatedValid ? 'معتبر ✓' : 'خطا ✕'}
+                              </span>
+                            )}
+                            {scFlatCheck.isPotentialFlat && scFlatCheck.flag && (
+                              <span
+                                data-testid="wizard-tree-flat-badge"
+                                title={scFlatCheck.flag.reasonFa}
+                                className="px-1.5 py-0.2 rounded text-[9.5px] font-bold border bg-amber-500/15 border-amber-500/45 text-amber-200 font-mono tabular-nums whitespace-nowrap"
+                              >
+                                احتمال فلت (Flat · {scFlatCheck.flag.bRetracePct}%)
                               </span>
                             )}
                           </div>

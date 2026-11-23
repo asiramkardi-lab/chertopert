@@ -10,7 +10,7 @@ import React, { useMemo, useState } from 'react';
 import { Candle, PatternFamily, RuleValidationItem, WaveRole, WaveScenario } from '../types/elliott';
 import { PATTERN_LABELS_FA, RulesEngine } from '../engine/rulesEngine';
 import { UnifiedPatternDetectionSummary } from './UnifiedPatternDetectionSummary';
-import { ShieldCheck, ShieldAlert, AlertTriangle, BarChart3, Radar, Sparkles } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, AlertTriangle, BarChart3, Radar, Sparkles, CheckCircle2, ArrowUpLeft } from 'lucide-react';
 
 interface RulesEngineComplianceCardProps {
   scenario: WaveScenario;
@@ -508,6 +508,48 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
               </span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Explicit RulesEngine Flat (3-3-5 & B > 61.8% A) Auto-Classification Indicator */}
+      {summary.flatPatternFlag && (summary.flatPatternFlag.isFlaggedFlat || summary.flatPatternFlag.isStructure335) && (
+        <div
+          data-testid="rules-engine-flat-indicator"
+          className={`px-3.5 py-2 border-t border-slate-800/80 space-y-1.5 text-[10.5px] ${
+            summary.flatPatternFlag.isFlaggedFlat
+              ? 'bg-emerald-950/20 text-emerald-100'
+              : 'bg-rose-950/20 text-rose-100'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="flex items-center gap-1.5 font-bold">
+              {summary.flatPatternFlag.isFlaggedFlat ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              ) : (
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              )}
+              <span>{summary.flatPatternFlag.labelFa}</span>
+            </span>
+            <span className="font-mono tabular-nums text-cyan-300">
+              B/A: {summary.flatPatternFlag.bRetracePct}% · C/B: {summary.flatPatternFlag.cPctOfB}%
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-300 leading-relaxed">{summary.flatPatternFlag.reasonFa}</p>
+          {summary.flatPatternFlag.isFlaggedFlat &&
+            onApplyPattern &&
+            !scenario.isLocked &&
+            scenario.patternType !== summary.flatPatternFlag.suggestedPattern && (
+              <button
+                type="button"
+                onClick={() => onApplyPattern(summary.flatPatternFlag!.suggestedPattern)}
+                className="w-full py-1 px-2.5 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-500/45 text-emerald-100 text-[10.5px] font-bold flex items-center justify-between gap-2 transition-colors"
+              >
+                <span>
+                  تغییر سناریو به {PATTERN_LABELS_FA[summary.flatPatternFlag.suggestedPattern].split('(')[0].trim()}
+                </span>
+                <ArrowUpLeft className="w-3.5 h-3.5 shrink-0" />
+              </button>
+            )}
         </div>
       )}
 

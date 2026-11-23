@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Candle, WaveScenario, PatternFamily, WaveRole, WaveVertex } from '../types/elliott';
-import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole } from '../engine/rulesEngine';
+import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole, FlatPatternFlag } from '../engine/rulesEngine';
 import { filterPatternsForRole } from '../engine/fractalSyncEngine';
 import { SmartRuleAlertEngine, ScenarioQuickStatusReport } from '../engine/smartRuleAlertEngine';
 import { ChartInteractionMode } from './ChartStudio';
@@ -72,6 +72,17 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
 
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
+  const flatFlagsById = useMemo(() => {
+    const map: Record<string, FlatPatternFlag | undefined> = {};
+    scenarios.forEach(sc => {
+      const res = RulesEngine.FlatPatternValidator(sc.patternType, sc.vertices, sc.direction, candles);
+      if (res.isPotentialFlat && res.flag) {
+        map[sc.id] = res.flag;
+      }
+    });
+    return map;
+  }, [scenarios, candles]);
+
   const quickPreviewById = useMemo(() => {
     const map: Record<string, ScenarioQuickStatusReport> = {};
     scenarios.forEach(sc => {
@@ -110,7 +121,8 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
       sc.vertices,
       sc.direction,
       sc.parentNodeId || resolvedRole !== 'ROOT' ? resolvedRole : 'ROOT',
-      resolvedLabel
+      resolvedLabel,
+      candles
     );
     setValidationReportsById(prev => ({ ...prev, [sc.id]: summary }));
     if (onValidateScenario) {
@@ -315,6 +327,15 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                           }`}
                         >
                           {scValidatedValid ? 'تأیید معتبر' : 'نیازمند اصلاح'}
+                        </span>
+                      )}
+                      {flatFlagsById[sc.id] && (
+                        <span
+                          data-testid="scenario-flat-pattern-badge"
+                          title={flatFlagsById[sc.id]!.reasonFa}
+                          className="px-1.5 py-0.5 rounded text-[9.5px] font-bold border bg-amber-500/15 border-amber-500/45 text-amber-200 font-mono tabular-nums"
+                        >
+                          احتمال فلت (Flat · {flatFlagsById[sc.id]!.macroCategory === 'REGULAR' ? 'Regular' : flatFlagsById[sc.id]!.macroCategory === 'IRREGULAR' ? 'Irregular' : 'Running'} · {flatFlagsById[sc.id]!.bRetracePct}%)
                         </span>
                       )}
                       <span className="text-[10px] text-slate-400 font-mono">({sc.patternType})</span>

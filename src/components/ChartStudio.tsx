@@ -563,6 +563,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     ]
   );
   const liveNonIdealFlag = liveValidationForHud.nonIdealPatternFlag;
+  const liveFlatFlag = liveValidationForHud.flatPatternFlag;
   const liveUnified = liveValidationForHud.unifiedDetection;
 
   // Compute next valid lower timeframe for Fractal Drill-Down
@@ -1752,6 +1753,32 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 ));
               })()}
             </select>
+            {liveFlatFlag?.isFlaggedFlat && (
+              <button
+                type="button"
+                onClick={evaluateCurrentCount}
+                title={liveFlatFlag.reasonFa}
+                data-testid="chart-flat-classification-badge"
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap font-mono tabular-nums ${
+                  liveFlatFlag.macroCategory === 'RUNNING'
+                    ? 'bg-rose-950/60 hover:bg-rose-900/60 border-rose-500/50 text-rose-200'
+                    : liveFlatFlag.macroCategory === 'IRREGULAR'
+                    ? 'bg-amber-950/60 hover:bg-amber-900/60 border-amber-500/50 text-amber-200'
+                    : 'bg-emerald-950/55 hover:bg-emerald-900/55 border-emerald-500/50 text-emerald-200'
+                }`}
+              >
+                <Layers className="w-3 h-3 shrink-0" />
+                <span>
+                  فلت ۳-۳-۵ ·{' '}
+                  {liveFlatFlag.macroCategory === 'REGULAR'
+                    ? 'متعارف'
+                    : liveFlatFlag.macroCategory === 'IRREGULAR'
+                    ? 'نامنظم'
+                    : 'جاری'}{' '}
+                  · B={liveFlatFlag.bRetracePct}%
+                </span>
+              </button>
+            )}
             {liveNonIdealFlag?.isNonIdeal ? (
               <button
                 type="button"

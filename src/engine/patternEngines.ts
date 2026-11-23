@@ -19,6 +19,7 @@ import {
   EntryStrategyOptions,
   EntryStrategyReport,
   ExtensionTmvTrailingReport,
+  FlatAnalysisOptions,
   FlatAnalysisReport,
   FlatSubtype,
   InputDataValidationReport,
@@ -1519,14 +1520,107 @@ export class PatternEngines {
   }
 
   /**
-   * Session 12 & 13 (011/012-flat-pattern-types-engine):
-   * Classifies 8 Flat subtypes using exact B/A and C/B ratios, validates B > 61.8% A rule,
-   * enforces Market-End restriction, and recommends Flat as Knot-Untangler when simpler counts fail.
+   * Session 12 Helper (Concept 12-1: Correction Evolution):
+   * Models market evolution from simple zigzags (low analyst adoption) toward flats & complex patterns (high adoption / Iran 1401).
    */
-  public static analyzeFlat(scenario: WaveScenario, candles: Candle[]): FlatAnalysisReport {
+  public static evaluateCorrectionEvolution(params: {
+    analystAdoptionPct?: number;
+    marketProfile?: FlatAnalysisOptions['marketProfile'];
+  }): {
+    dominantFamily: 'SIMPLE_ZIGZAG' | 'FLAT' | 'FLAT_OR_COMPLEX';
+    labelFa: string;
+  } {
+    const { analystAdoptionPct = 30, marketProfile } = params;
+    if (marketProfile === 'IRAN_1401') {
+      return {
+        dominantFamily: 'FLAT_OR_COMPLEX',
+        labelFa: 'بازار ایران (۱۴۰۱): الگوهای فلت و ترکیبی رایج‌تر از زیگزاگ ساده هستند.'
+      };
+    }
+    if (marketProfile === 'LOW_ANALYST' || analystAdoptionPct <= 25) {
+      return {
+        dominantFamily: 'SIMPLE_ZIGZAG',
+        labelFa: `بازار با تحلیلگران کم (${analystAdoptionPct}٪): زیگزاگ ساده الگوی غالب است.`
+      };
+    }
+    if (marketProfile === 'HIGH_ANALYST' || analystAdoptionPct >= 40) {
+      return {
+        dominantFamily: 'FLAT',
+        labelFa: `بازار با تحلیلگران زیاد (${analystAdoptionPct}٪): فلت برای فریب تحلیلگران محتمل‌تر از زیگزاگ ساده است.`
+      };
+    }
+    return {
+      dominantFamily: 'FLAT_OR_COMPLEX',
+      labelFa: 'بازار در حال بلوغ: هر دو الگوی زیگزاگ و فلت در رقابت هستند.'
+    };
+  }
+
+  /**
+   * Session 12 Helper (Concept 12-2: Actor & Stop-Hunt Psychology):
+   * Evaluates market-maker escalation from Zigzag -> Flat -> Triangle/Complex based on clustered stops.
+   */
+  public static evaluateActorStopPsychology(params: {
+    currentPatternFamily: 'SIMPLE_ZIGZAG' | 'FLAT';
+    stopClusterDensity: 'LOW' | 'HIGH';
+  }): {
+    likelyOutcome: 'ZIGZAG_VALID' | 'FLAT_LIKELY' | 'TRIANGLE_OR_COMPLEX_LIKELY';
+    explanationFa: string;
+  } {
+    const { currentPatternFamily, stopClusterDensity } = params;
+    if (currentPatternFamily === 'SIMPLE_ZIGZAG') {
+      if (stopClusterDensity === 'LOW') {
+        return {
+          likelyOutcome: 'ZIGZAG_VALID',
+          explanationFa: 'زیگزاگ ساده با تراکم استاپ کم: بازیگر اصلاح ساده را می‌پذیرد و زیگزاگ معتبر است.'
+        };
+      }
+      return {
+        likelyOutcome: 'FLAT_LIKELY',
+        explanationFa: 'تراکم بالای استاپ روی زیگزاگ ساده: بازیگر برای جمع‌آوری سهام و فعال‌سازی استاپ‌ها احتمالاً فلت می‌سازد.'
+      };
+    }
+    if (stopClusterDensity === 'HIGH') {
+      return {
+        likelyOutcome: 'TRIANGLE_OR_COMPLEX_LIKELY',
+        explanationFa: 'تراکم بالای استاپ روی فلت: احتمال تبدیل ساختار به مثلث یا الگوی ترکیبی بسیار بالا است.'
+      };
+    }
+    return {
+      likelyOutcome: 'FLAT_LIKELY',
+      explanationFa: 'فلت با تراکم استاپ کنترل‌شده: تکمیل موج C ساختار فلت ۳-۳-۵ محتمل‌تر است.'
+    };
+  }
+
+  /**
+   * Session 12 & 13 (011/012-flat-pattern-types-engine — Concepts 12-1..12-14):
+   * Validates 3-3-5 Flat vs 3-3-3 Simple Zigzag vs 5-3-5 Ideal Zigzag vs Complex Combination,
+   * enforces B > 61.8% A law, confirms A-B (3-3) + C (5 Anti-Cycle) composition, classifies all 8 Flat subtypes,
+   * resolves Wave C 5-wave shape (Ideal / Diagonal / Terminal), evaluates market-end risk, and models evolution/actor psychology.
+   */
+  public static analyzeFlat(
+    scenario: WaveScenario,
+    candles: Candle[],
+    options?: FlatAnalysisOptions
+  ): FlatAnalysisReport {
     const verts = scenario.vertices;
     const warnings: string[] = [];
     const notes: string[] = [];
+
+    const evolutionInfo =
+      options?.analystAdoptionPct !== undefined || options?.marketProfile !== undefined
+        ? PatternEngines.evaluateCorrectionEvolution({
+            analystAdoptionPct: options.analystAdoptionPct,
+            marketProfile: options.marketProfile
+          })
+        : undefined;
+
+    const actorInfo =
+      options?.stopClusterDensity !== undefined
+        ? PatternEngines.evaluateActorStopPsychology({
+            currentPatternFamily: scenario.patternType === 'ZIGZAG' ? 'SIMPLE_ZIGZAG' : 'FLAT',
+            stopClusterDensity: options.stopClusterDensity
+          })
+        : undefined;
 
     if (verts.length < 4) {
       return {
@@ -1535,11 +1629,18 @@ export class PatternEngines {
         subtypeLabelFa: 'فلت نیازمند ۳ موج کامل A-B-C',
         bPctOfA: 0,
         cPctOfB: 0,
+        structureSignature: 'نامشخص',
         validStructure335: false,
+        idealPlusAntiCycleConfirmed: false,
+        disambiguationKind: 'INVALID',
         bOver618Valid: false,
         usableAtCurrentContext: false,
-        cSubStructure: 'IDEAL',
+        contextCredibilityTier: 'LOW',
+        cSubStructure: options?.cSubStructure ?? 'IDEAL',
+        cSubStructureLabelFa: 'نامشخص (کمبود پیوت)',
         vsSimpleZigzagFa: 'برای تفکیک از زیگزاگ سیمپل حداقل ۴ پیوت لازم است.',
+        evolutionDominantPatternFa: evolutionInfo?.labelFa,
+        actorPsychologyNoteFa: actorInfo?.explanationFa,
         knotUntanglerRecommended: false,
         confidence: 0.3,
         warnings: ['نقاط پیوت برای ارزیابی ۸ نوع فلت کافی نیست.'],
@@ -1554,18 +1655,104 @@ export class PatternEngines {
     const bPctOfA = Math.round((lenB / lenA) * 1000) / 10;
     const cPctOfB = Math.round((lenC / lenB) * 1000) / 10;
     const bOver618Valid = bPctOfA >= 61.8;
+    const isBorderlineB618 = Math.abs(bPctOfA - 61.8) <= 0.6;
 
-    const sc = estimateSubwaveCount(candles, verts[2].candleIndex, verts[3].candleIndex, 5);
-    const validStructure335 = true;
-    const cSubStructure: FlatAnalysisReport['cSubStructure'] =
-      sc === 5 ? 'IDEAL' : bPctOfA > 100 ? 'TERMINAL' : 'DIAGONAL';
+    // Resolve [subA, subB, subC] internal subwave counts (Session 12-3, 12-5, 12-6, 12-14)
+    const hasExplicitVertSubs =
+      typeof (verts[1] as { subwaveCount?: number }).subwaveCount === 'number' ||
+      typeof (verts[2] as { subwaveCount?: number }).subwaveCount === 'number' ||
+      typeof (verts[3] as { subwaveCount?: number }).subwaveCount === 'number';
 
+    const subA: 3 | 5 = options?.internalSubwaves
+      ? options.internalSubwaves[0]
+      : hasExplicitVertSubs
+      ? resolveVertexSubwave(verts[1], candles, verts[0].candleIndex, verts[1].candleIndex, 3)
+      : scenario.patternType.startsWith('FLAT_')
+      ? 3
+      : resolveVertexSubwave(verts[1], candles, verts[0].candleIndex, verts[1].candleIndex, 3);
+
+    const subB: 3 | 5 = options?.internalSubwaves
+      ? options.internalSubwaves[1]
+      : hasExplicitVertSubs
+      ? resolveVertexSubwave(verts[2], candles, verts[1].candleIndex, verts[2].candleIndex, 3)
+      : scenario.patternType.startsWith('FLAT_')
+      ? 3
+      : resolveVertexSubwave(verts[2], candles, verts[1].candleIndex, verts[2].candleIndex, 3);
+
+    const estimatedSc = estimateSubwaveCount(candles, verts[2].candleIndex, verts[3].candleIndex, 5);
+    const subC: 3 | 5 = options?.internalSubwaves
+      ? options.internalSubwaves[2]
+      : hasExplicitVertSubs
+      ? resolveVertexSubwave(verts[3], candles, verts[2].candleIndex, verts[3].candleIndex, 5)
+      : scenario.patternType.startsWith('FLAT_')
+      ? 5
+      : estimatedSc;
+
+    const structureSignature = `${subA}-${subB}-${subC}`;
+    const is335 = subA === 3 && subB === 3 && subC === 5;
+    const is535 = subA === 5 && subB === 3 && subC === 5;
+    const is333 = subA === 3 && subB === 3 && subC === 3;
+    const is355 = subA === 3 && subB === 5 && subC === 5;
+    const validStructure335 = is335;
+
+    let disambiguationKind: FlatAnalysisReport['disambiguationKind'] = 'INVALID';
+    if (is535) {
+      disambiguationKind = 'IDEAL_ZIGZAG';
+    } else if (is355) {
+      disambiguationKind = 'RARE_ANTICYCLE_FLAT';
+    } else if (is333) {
+      disambiguationKind = bPctOfA > 61.8 ? 'COMPLEX_COMBINATION' : 'SIMPLE_ZIGZAG';
+    } else if (is335) {
+      disambiguationKind = bOver618Valid ? 'FLAT' : 'SIMPLE_ZIGZAG';
+    } else {
+      disambiguationKind = 'INVALID';
+    }
+
+    const idealPlusAntiCycleConfirmed = is335 && bOver618Valid;
+
+    // Session 12-12: Wave C 5-wave internal geometry (IDEAL / DIAGONAL / TERMINAL)
+    let cSubStructure: FlatAnalysisReport['cSubStructure'] = options?.cSubStructure ?? 'IDEAL';
+    if (!options?.cSubStructure && candles.length >= 10 && verts[3].candleIndex > verts[2].candleIndex + 6) {
+      const cSlice = candles.slice(
+        Math.max(0, verts[2].candleIndex),
+        Math.min(candles.length, verts[3].candleIndex + 1)
+      );
+      const rawCPivots = PivotDetector.detectPivots(cSlice, 1, 1, 0.4);
+      const bullC = verts[3].price > verts[2].price;
+      const expectedFirstType = bullC ? 'HIGH' : 'LOW';
+      const alternating: typeof rawCPivots = [];
+      let nextExpected: 'HIGH' | 'LOW' = expectedFirstType;
+      for (const piv of rawCPivots) {
+        if (piv.type === nextExpected) {
+          alternating.push(piv);
+          nextExpected = nextExpected === 'HIGH' ? 'LOW' : 'HIGH';
+        }
+      }
+      if (alternating.length >= 4) {
+        const w1End = alternating[0].price;
+        const w4End = alternating[3].price;
+        const hasW4Overlap = bullC ? w4End < w1End : w4End > w1End;
+        if (hasW4Overlap) {
+          cSubStructure = 'TERMINAL';
+        }
+      }
+    }
+    const cSubStructureLabelFa =
+      cSubStructure === 'IDEAL'
+        ? 'موج C ایده‌آل (ساختار ۵-۳-۵-۳-۵ استاندارد)'
+        : cSubStructure === 'DIAGONAL'
+        ? 'موج C قطری (ساختار ۳-۳-۳-۳-۳ در فلت)'
+        : 'موج C ترمینال (هم‌پوشانی موج ۴ در انتهای فلت)';
+
+    const isSevereRunning = bPctOfA > 100 && cPctOfB < 45;
     let subtype: FlatSubtype = 'REGULAR';
     let subtypeLabelFa = 'فلت متعارف (Regular: B=۸۱–۱۰۰٪، C=۸۱–۱۰۰٪)';
 
     if (bPctOfA > 100 && cPctOfB < 61.8) {
       subtype = 'RUNNING_DEPRECATED';
-      subtypeLabelFa = 'فلت جاری (Running — منسوخ و پرریسک)';
+      subtypeLabelFa = isSevereRunning
+        ? 'فلت جاری شدید (Severe Running — بسیار پرریسک و فاقد اعتبار معاملاتی)'
+        : 'فلت جاری (Running — منسوخ و پرریسک)';
       warnings.push('فلت جاری (B > ۱۰۰٪ و C < ۶۱.۸٪) ساختار فرکتال را به هم می‌ریزد و برای معامله توصیه نمی‌شود.');
     } else if (bPctOfA > 138.2) {
       if (cPctOfB < 81) {
@@ -1603,63 +1790,103 @@ export class PatternEngines {
       }
     }
 
-    const vsSimpleZigzagFa = !bOver618Valid
-      ? `B=${bPctOfA}٪ (< ۶۱.۸٪ موج A)؛ به‌جای فلت، زیگزاگ سیمپل محتمل‌تر است.`
-      : sc === 5
-      ? `B=${bPctOfA}٪ (> ۶۱.۸٪) و ساختار ۵ موجی C تاییدکننده فلت است (نه زیگزاگ سیمپل).`
-      : `B=${bPctOfA}٪ (> ۶۱.۸٪)؛ در صورت ۳ موجی ماندن C احتمال ساختار ترکیبی وجود دارد.`;
+    let vsSimpleZigzagFa = '';
+    if (disambiguationKind === 'IDEAL_ZIGZAG') {
+      vsSimpleZigzagFa = `ساختار ${structureSignature} مطابق زیگزاگ ایده‌آل (۵-۳-۵) است نه فلت ۳-۳-۵.`;
+    } else if (disambiguationKind === 'RARE_ANTICYCLE_FLAT') {
+      vsSimpleZigzagFa = `ساختار ${structureSignature} ترکیب نادر آنتی‌سیکل + فلت است؛ شمارش را با دقت بررسی کنید.`;
+      warnings.push('ترکیب نادر ۳-۵-۵ تشخیص داده شد.');
+    } else if (disambiguationKind === 'COMPLEX_COMBINATION') {
+      vsSimpleZigzagFa = `B=${bPctOfA}٪ (> ۶۱.۸٪) همراه با موج C سه‌موجی (${structureSignature}): نه فلت است و نه زیگزاگ سیمپل، بلکه الگوی ترکیبی محسوب می‌شود.`;
+    } else if (disambiguationKind === 'INVALID') {
+      vsSimpleZigzagFa = `ساختار ${structureSignature} برای الگوی فلت یا زیگزاگ نامعتبر است.`;
+      warnings.push(`ساختار درونی ${structureSignature} نامعتبر است.`);
+    } else if (!bOver618Valid) {
+      vsSimpleZigzagFa = `B=${bPctOfA}٪ (< ۶۱.۸٪ موج A)؛ به‌جای فلت، زیگزاگ سیمپل محتمل‌تر است.`;
+    } else {
+      vsSimpleZigzagFa = `B=${bPctOfA}٪ (> ۶۱.۸٪) و ساختار ${structureSignature} (ترکیب ایده‌آل A-B و آنتی‌سیکل C) تاییدکننده فلت است.`;
+    }
 
-    const isMarketEnd = candles.length > 0 && verts[3].candleIndex >= candles.length - 6;
-    const hasConfirmation = scenario.validityScore >= 75;
-    const usableAtCurrentContext = !isMarketEnd || hasConfirmation;
+    const isMarketEnd =
+      options?.isMarketEnd !== undefined
+        ? options.isMarketEnd
+        : candles.length > 0 && verts[3].candleIndex >= candles.length - 6;
+    const hasConfirmation =
+      options?.hasConfirmation !== undefined ? options.hasConfirmation : scenario.validityScore >= 75;
+    const usableAtCurrentContext =
+      subtype === 'RUNNING_DEPRECATED' ? !isMarketEnd : !isMarketEnd || hasConfirmation;
 
     let confidence = 0.8;
+    let contextCredibilityTier: FlatAnalysisReport['contextCredibilityTier'] = 'HIGH';
     if (subtype === 'DOUBLE_DEFICIENT') confidence -= 0.15;
     if (subtype === 'RUNNING_DEPRECATED') confidence -= 0.15;
     if (isMarketEnd) {
-      // جدول ۷ (ردیف ۱۱ تا ۱۳): اعتبار فلت در انتهای بازار
-      if (subtype === 'DOUBLE_DEFICIENT') {
+      // جدول ۷ (ردیف ۱۱ تا ۱۳) & بخش ۱۲-۱۱ / ۱۲-۱۳: اعتبار فلت در انتهای بازار
+      if (subtype === 'RUNNING_DEPRECATED') {
+        confidence = 0.25;
+        contextCredibilityTier = 'LOW';
+        warnings.push('بخش ۱۲-۱۱: فلت جاری در انتهای بازار فاقد اعتبار است.');
+      } else if (subtype === 'DOUBLE_DEFICIENT') {
         confidence = 0.3;
+        contextCredibilityTier = 'LOW';
         warnings.push('جدول ۷ (۷.۱۳): فلت ناقص دوگانه در انتهای بازار اعتبار بسیار پایینی (۰.۳۰) دارد.');
       } else if (hasConfirmation) {
         confidence = 0.6;
+        contextCredibilityTier = 'MEDIUM';
         warnings.push('جدول ۷ (۷.۱۲): فلت در انتهای بازار با تأیید جزئی دارای اعتبار متوسط (۰.۶۰) است.');
       } else {
         confidence = 0.4;
+        contextCredibilityTier = 'LOW';
         warnings.push('جدول ۷ (۷.۱۱): از فلت در انتهای بازار بدون تأیید برای معامله استفاده نکنید (اعتبار ۰.۴۰؛ فقط برای گره‌گشایی گذشته بازار).');
       }
+    } else {
+      contextCredibilityTier = confidence >= 0.72 ? 'HIGH' : 'MEDIUM';
     }
 
     const borderlineNotesFa: string[] = [];
-    if (Math.abs(bPctOfA - 61.8) <= 1.2) {
-      borderlineNotesFa.push('جدول ۷: B ≈ ۶۱.۸٪ موج A (مرز فلت و زیگزاگ سیمپل).');
+    if (isBorderlineB618) {
+      borderlineNotesFa.push('جدول ۷ (۱۲-۴): B ≈ ۶۱.۸٪ موج A (مرز فلت و زیگزاگ سیمپل).');
+    }
+    if (Math.abs(bPctOfA - 81) <= 1.0 && Math.abs(cPctOfB - 81) <= 1.0) {
+      borderlineNotesFa.push('بخش ۱۲-۸: B ≈ ۸۱٪ و C ≈ ۸۱٪ (فلت متعارف مرزی).');
     }
     if (Math.abs(bPctOfA - 100) <= 1.5 && Math.abs(cPctOfB - 100) <= 1.5) {
-      borderlineNotesFa.push('جدول ۷: B ≈ ۱۰۰٪ و C ≈ ۱۰۰٪ (فلت متعارف مرزی).');
+      borderlineNotesFa.push('جدول ۷ (۱۲-۸): B ≈ ۱۰۰٪ و C ≈ ۱۰۰٪ (فلت متعارف ایده‌آل/مرزی).');
     }
     if (Math.abs(bPctOfA - 138.2) <= 1.5) {
-      borderlineNotesFa.push('جدول ۷: B ≈ ۱۳۸.۲٪ موج A (مرز فلت نامنظم و نامنظم کشیده).');
+      borderlineNotesFa.push('جدول ۷ (۱۲-۱۰): B ≈ ۱۳۸.۲٪ موج A (مرز فلت نامنظم و نامنظم کشیده).');
     }
     notes.push(...borderlineNotesFa);
+    if (evolutionInfo) notes.push(evolutionInfo.labelFa);
+    if (actorInfo) notes.push(actorInfo.explanationFa);
 
     const knotUntanglerRecommended = !isMarketEnd && bOver618Valid && scenario.validityScore < 75;
-    const isWave4KnotUntangler = sc === 5 || knotUntanglerRecommended;
+    const isWave4KnotUntangler = estimatedSc === 5 || knotUntanglerRecommended;
     if (isWave4KnotUntangler) {
       notes.push('جدول ۷ (فلت گره‌گشا vs صبر بدون گره): در صورت وجود ۵+ زیرموج و بن‌بست شمارش گذشته، فلت گره‌گشایی است.');
     }
     notes.push('اولویت شمارش جلسه ۱۳: ایده‌آل ← قطر ← ترمینال ← زیگزاگ ← فلت ← مثلث ← ترکیبی.');
 
     return {
-      detected: bOver618Valid,
+      detected: disambiguationKind === 'FLAT' && bOver618Valid,
       subtype,
       subtypeLabelFa,
       bPctOfA,
       cPctOfB,
+      structureSignature,
       validStructure335,
+      idealPlusAntiCycleConfirmed,
+      disambiguationKind,
       bOver618Valid,
+      isBorderlineB618,
+      isSevereRunning,
       usableAtCurrentContext,
+      contextCredibilityTier,
       cSubStructure,
+      cSubStructureLabelFa,
       vsSimpleZigzagFa,
+      evolutionDominantPatternFa: evolutionInfo?.labelFa,
+      actorPsychologyNoteFa: actorInfo?.explanationFa,
       knotUntanglerRecommended,
       borderlineNotesFa,
       isWave4KnotUntangler,

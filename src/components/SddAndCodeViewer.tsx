@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -192,6 +192,32 @@ export const SddAndCodeViewer: React.FC = () => {
 4. بررسی قدرت موج مرجع (STRONG / MODERATE / WEAK) و مسدودسازی ورود در امواج ضعیف (<۱۰۰٪).
 5. ارزیابی استراتژی Fallback 50% در evaluatePullbackEntry و استثنای کنترل‌شده ۱۱-۷ در بازه ۴۲–۴۹.۹٪ با ستاپ تایید.
 6. تولید خروجی برنامه پله‌ای (SINGLE_STEP / TWO_STEP / NO_BUY) همراه با R/R و حد ابطال دقیق (T-11.1 تا T-11.40).
+`;
+
+  const session12Markdown = `# استخراج و تشریح کامل جلسه ۱۲ + سند SDD (011-flat-pattern-types-engine)
+
+## ۱. جدول ۱۴ مفهوم استخراج‌شده (۱۲-۱ تا ۱۲-۱۴)
+- [۱۲-۱] تکامل الگوهای اصلاحی: افزایش آگاهی تحلیلگران (≥۴۰٪) و بازارهای بالغ/ایران ۱۴۰۱ باعث گذار از زیگزاگ ساده (≤۲۵٪) به فلت و الگوهای ترکیبی می‌شود.
+- [۱۲-۲] دلیل روانشناسی فلت (بازیگر و جمع‌آوری استاپ‌ها): در تراکم بالای استاپ روی زیگزاگ ساده، بازیگر با دو حرکت متوالی و ساخت فلت استاپ‌ها را می‌زند؛ تراکم بالای استاپ روی فلت احتمال مثلث/ترکیبی را بالا می‌برد.
+- [۱۲-۳ & ۱۲-۶] ساختار ۳-۳-۵ و ترکیب فنی: A(۳) + B(۳) اصلاحی ایده‌آل + C(۵) آنتی‌سیکل ← فلت (۳-۳-۵)؛ ۵-۳-۵ = زیگزاگ ایده‌آل؛ ۳-۳-۳ = زیگزاگ سیمپل؛ ۳-۵-۵ = ترکیب نادر آنتی‌سیکل+فلت؛ ۵-۵-۳ = نامعتبر.
+- [۱۲-۴] قانون اساسی B ≥ ۶۱.۸٪ A: B = ۶۱.۸٪ مرز فلت/زیگزاگ، ۶۱.۸–۱۰۰٪ فلت نرمال، B > ۱۰۰٪ فلت نامنظم (Irregular)، و B < ۶۱.۸٪ زیگزاگ سیمپل.
+- [۱۲-۵ & ۱۲-۱۴] ابهام‌زدایی ساختارهای سه‌موجی و تفاوت با زیگزاگ سیمپل: B > ۶۱.۸٪ + C=۵ → FLAT؛ B < ۶۱.۸٪ + C=۳ → SIMPLE_ZIGZAG؛ B > ۶۱.۸٪ + C=۳ → COMPLEX_COMBINATION.
+- [۱۲-۷ تا ۱۲-۱۱] طبقه‌بندی کامل ۸ نوع فلت (بر اساس B/A و C/B):
+  1. REGULAR: B=۸۱–۱۰۰٪ و C=۸۱–۱۰۰٪ (شامل مرز ۸۱٪ و ایده‌آل ۱۰۰٪)
+  2. B_DEFICIENT: B=۶۱.۸–۸۱٪ و C=۸۱–۱۰۰٪
+  3. C_DEFICIENT: B=۸۱–۱۰۰٪ و C<۸۱٪
+  4. DOUBLE_DEFICIENT: B=۶۱.۸–۸۱٪ و C<۸۱٪ (پرریسک و نیازمند تایید در انتهای بازار)
+  5. IRREGULAR: B=۱۰۰–۱۳۸.۲٪ و C≥۸۱٪ (یا B>۱۳۸.۲٪ و C در بازه ۸۱–۱۰۰٪)
+  6. IRREGULAR_DEFICIENT: B>۱۰۰٪ و C=۶۱.۸–۸۱٪
+  7. IRREGULAR_EXTENDED: B>۱۳۸.۲٪ و C≥۱۰۰٪
+  8. RUNNING_DEPRECATED: B>۱۰۰٪ و C<۶۱.۸٪ (در حالت C<۴۵٪ پرچم isSevereRunning فعال و کاملاً فاقد اعتبار معاملاتی است)
+- [۱۲-۱۲] انواع ۵موجی در موج C: ایده‌آل (۵-۳-۵-۳-۵ استاندارد)، قطری (۳-۳-۳-۳-۳) و ترمینال (با هم‌پوشانی موج ۴ در انتهای C).
+- [۱۲-۱۳] اعتبار کاربردی فلت بر اساس بافت بازار: گذشته بازار ← گره‌گشایی با اعتبار بالا (confidence ≥ 0.8)؛ انتهای بازار + تایید ← اعتبار متوسط (0.6)؛ انتهای بازار بدون تایید ← عدم توصیه به معامله و اعتبار پایین (0.4 / 0.3 برای Double Deficient).
+
+## ۲. پوشش تست‌های مرزی (T-12.1 تا T-12.46)
+- PatternEngines.evaluateCorrectionEvolution (T-12.1..T-12.3)
+- PatternEngines.evaluateActorStopPsychology (T-12.4..T-12.6)
+- PatternEngines.analyzeFlat با پشتیبانی FlatAnalysisOptions و تشخیص کامل ساختار، زیرگونه‌ها، فرم C و بافت بازار (T-12.7..T-12.46).
 `;
 
   const sessions9to19Markdown = `# مفاهیم استخراج‌شده جلسات ۹ تا ۱۹، شاخه‌های SDD (008..018) و پایپ‌لاین گام ۰ تا ۱۱
@@ -843,6 +869,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION12')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION12'
+                ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg shadow-amber-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۲ (011)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -902,6 +940,8 @@ const runAnalysis = async () => {
               ? sessions3to8Markdown
               : activeTab === 'SESSION11'
               ? session11Markdown
+              : activeTab === 'SESSION12'
+              ? session12Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -925,6 +965,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSION2' ||
           activeTab === 'SESSIONS_3_8' ||
           activeTab === 'SESSION11' ||
+          activeTab === 'SESSION12' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -935,6 +976,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSION2' && session2Markdown}
         {activeTab === 'SESSIONS_3_8' && sessions3to8Markdown}
         {activeTab === 'SESSION11' && session11Markdown}
+        {activeTab === 'SESSION12' && session12Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

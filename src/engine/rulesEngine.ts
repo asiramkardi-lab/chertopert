@@ -26,6 +26,7 @@ import {
   DiagonalAnalysisReport,
   ZigzagAnalysisReport,
   FlatAnalysisReport,
+  FlatSubtype,
   TriangleAnalysisReport,
   ComplexPatternReport
 } from '../types/elliott';
@@ -71,6 +72,20 @@ export interface NonIdealPatternFlag {
   reasonFa: string;
 }
 
+export interface FlatPatternFlag {
+  isFlaggedFlat: boolean;
+  isStructure335: boolean;
+  structureSignature: string;
+  bRetracePct: number;
+  cPctOfB: number;
+  meetsB618Rule: boolean;
+  macroCategory: 'REGULAR' | 'IRREGULAR' | 'RUNNING';
+  subtype: FlatSubtype;
+  suggestedPattern: 'FLAT_REGULAR' | 'FLAT_EXPANDED' | 'FLAT_RUNNING';
+  labelFa: string;
+  reasonFa: string;
+}
+
 export interface ValidationSummary {
   patternType: PatternFamily;
   direction: WaveDirection;
@@ -94,6 +109,7 @@ export interface ValidationSummary {
   wave4ComplexCorrectionProbable?: boolean;
   wave5TruncationOrTerminalHint?: boolean;
   nonIdealPatternFlag?: NonIdealPatternFlag;
+  flatPatternFlag?: FlatPatternFlag;
   unifiedDetection?: UnifiedPatternDetectionReport;
 }
 
@@ -275,6 +291,222 @@ export function classifyAntiCyclePlacement(
 }
 
 export class RulesEngine {
+  public static evaluateFlat335Rule(
+    pattern: PatternFamily,
+    vertices: WaveVertex[],
+    direction: WaveDirection = 'BULLISH',
+    candles?: Candle[],
+    internalSubwaves?: [3 | 5, 3 | 5, 3 | 5]
+  ): FlatPatternFlag | undefined {
+    if (vertices.length < 3) return undefined;
+    const isBull = direction === 'BULLISH';
+    const p0 = vertices[0].price;
+    const p1 = vertices[1].price;
+    const p2 = vertices[2].price;
+    const p3 = vertices[3]?.price;
+
+    const lenA = Math.abs(p1 - p0);
+    // In corrective 0-A-B-C, B moves opposite to A
+    const aIsUp = p1 >= p0;
+    const retraceB = aIsUp ? Math.max(0, p1 - p2) : Math.max(0, p2 - p1);
+    if (lenA <= 1e-6) return undefined;
+
+    const bRetracePct = Math.round((retraceB / lenA) * 1000) / 10;
+    const lenC = p3 !== undefined ? Math.abs(p3 - p2) : 0;
+    const cPctOfB = retraceB > 1e-6 && p3 !== undefined ? Math.round((lenC / retraceB) * 1000) / 10 : 0;
+
+    const resolveSubwave = (vIdx: number, fallback: 3 | 5 | null): 3 | 5 | null => {
+      const v = vertices[vIdx] as (WaveVertex & { subwaveCount?: number }) | undefined;
+      if (v && (v.subwaveCount === 3 || v.subwaveCount === 5)) return v.subwaveCount;
+      if (candles && candles.length >= 12 && vIdx > 0 && vertices[vIdx]) {
+        const s = Math.max(0, Math.min(candles.length - 1, Math.min(vertices[vIdx - 1].candleIndex, vertices[vIdx].candleIndex)));
+        const e = Math.max(s, Math.min(candles.length - 1, Math.max(vertices[vIdx - 1].candleIndex, vertices[vIdx].candleIndex)));
+        const slice = candles.slice(s, e + 1);
+        if (slice.length >= 7) {
+          const pivCount = PivotDetector.detectPivots(slice, 1, 1, 0.45).length;
+          if (pivCount >= 4) return 5;
+          if (pivCount >= 2) return 3;
+        }
+      }
+      return fallback;
+    };
+
+    const isFlatSelected = pattern === 'FLAT_REGULAR' || pattern === 'FLAT_EXPANDED' || pattern === 'FLAT_RUNNING';
+    const subA = internalSubwaves ? internalSubwaves[0] : resolveSubwave(1, isFlatSelected ? 3 : null);
+    const subB = internalSubwaves ? internalSubwaves[1] : resolveSubwave(2, isFlatSelected ? 3 : null);
+    const subC =
+      vertices.length >= 4
+        ? internalSubwaves
+          ? internalSubwaves[2]
+          : resolveSubwave(3, isFlatSelected ? 5 : null)
+        : isFlatSelected
+        ? 5
+        : null;
+
+    const sigParts = [subA ?? '?', subB ?? '?', ...(vertices.length >= 4 || internalSubwaves ? [subC ?? '?'] : [])];
+    const structureSignature = sigParts.join('-');
+    const isStructure335 =
+      subA === 3 && subB === 3 && (vertices.length >= 4 || internalSubwaves ? subC === 5 : isFlatSelected);
+
+    // Strict > 61.8% retracement rule per Session 12.4
+    const meetsB618Rule = bRetracePct > 61.8 + 1e-4;
+    const isFlaggedFlat = isStructure335 && meetsB618Rule;
+
+    const macroCategory: FlatPatternFlag['macroCategory'] =
+      bRetracePct > 100.1 && (vertices.length >= 4 ? cPctOfB < 61.8 : pattern === 'FLAT_RUNNING')
+        ? 'RUNNING'
+        : bRetracePct > 100.1
+        ? 'IRREGULAR'
+        : 'REGULAR';
+
+    const suggestedPattern: FlatPatternFlag['suggestedPattern'] =
+      macroCategory === 'RUNNING' ? 'FLAT_RUNNING' : macroCategory === 'IRREGULAR' ? 'FLAT_EXPANDED' : 'FLAT_REGULAR';
+
+    let subtype: FlatSubtype = 'REGULAR';
+    if (vertices.length >= 4) {
+      const tempFlat: WaveScenario = {
+        id: 'flat_flag_eval',
+        name: 'Flat Flag Eval',
+        color: '#f59e0b',
+        isPrimary: false,
+        isLocked: false,
+        isSelectedForTree: false,
+        patternType: suggestedPattern,
+        degree: 'PRIMARY',
+        direction: isBull ? 'BULLISH' : 'BEARISH',
+        vertices: vertices.slice(0, 4),
+        currentWave: 'C',
+        completionPercentage: 100,
+        validityScore: 85,
+        idealnessScore: 85,
+        confidenceScore: 85,
+        invalidationPrice: p0,
+        targets: [],
+        rulesResults: [],
+        source: 'AI',
+        timeframe: '1D'
+      };
+      const rep = PatternEngines.analyzeFlat(tempFlat, candles || [], {
+        internalSubwaves: subA && subB && subC ? [subA, subB, subC] : [3, 3, 5]
+      });
+      subtype = rep.subtype;
+    } else if (macroCategory === 'RUNNING') {
+      subtype = 'RUNNING_DEPRECATED';
+    } else if (macroCategory === 'IRREGULAR') {
+      subtype = bRetracePct > 138.2 ? 'IRREGULAR_EXTENDED' : 'IRREGULAR';
+    } else if (bRetracePct < 81) {
+      subtype = 'B_DEFICIENT';
+    }
+
+    const macroLabelFa =
+      macroCategory === 'RUNNING'
+        ? 'فلت جاری (Running Flat)'
+        : macroCategory === 'IRREGULAR'
+        ? 'فلت نامنظم (Irregular Flat)'
+        : 'فلت متعارف (Regular Flat)';
+
+    const labelFa = isFlaggedFlat
+      ? `الگوی فلت شناسایی شد: ${macroLabelFa} (۳-۳-۵)`
+      : isStructure335 && !meetsB618Rule
+      ? `ساختار ۳-۳-۵ با موج B ضعیف (${bRetracePct}٪ ≤ ۶۱.۸٪ — زیگزاگ سیمپل محتمل‌تر است)`
+      : `ساختار ${structureSignature} (${bRetracePct > 61.8 ? 'B > ۶۱.۸٪' : 'B ≤ ۶۱.۸٪'})`;
+
+    const reasonFa = isFlaggedFlat
+      ? `ساختار درونی ۳-۳-۵ و اصلاح موج B برابر ${bRetracePct}٪ (> ۶۱.۸٪ موج A) است؛ سناریو به‌طور خودکار به عنوان ${macroLabelFa} پرچم‌گذاری شد.`
+      : isStructure335
+      ? `ساختار ۳-۳-۵ انتخاب شده اما اصلاح موج B برابر ${bRetracePct}٪ (کمتر یا مساوی ۶۱.۸٪ موج A) است؛ برای تایید فلت باید B > ۶۱.۸٪ باشد.`
+      : `امضای درونی ${structureSignature} با ساختار الزامی ۳-۳-۵ فلت متفاوت است.`;
+
+    return {
+      isFlaggedFlat,
+      isStructure335,
+      structureSignature,
+      bRetracePct,
+      cPctOfB,
+      meetsB618Rule,
+      macroCategory,
+      subtype,
+      suggestedPattern,
+      labelFa,
+      reasonFa
+    };
+  }
+
+  /**
+   * RulesEngine 'FlatPatternValidator' Rule:
+   * Monitors any scenario with a 3-3-5 vertex structure, automatically calculates B-wave retracement,
+   * and if B > 61.8% A, flags it as a potential 'Flat' pattern (Regular, Irregular, or Running).
+   */
+  public static FlatPatternValidator(
+    pattern: PatternFamily,
+    vertices: WaveVertex[],
+    direction: WaveDirection = 'BULLISH',
+    candles?: Candle[],
+    internalSubwaves?: [3 | 5, 3 | 5, 3 | 5]
+  ): {
+    flag?: FlatPatternFlag;
+    rule?: RuleValidationItem;
+    isPotentialFlat: boolean;
+  } {
+    const evaluatedFlat = this.evaluateFlat335Rule(
+      pattern,
+      vertices,
+      direction,
+      candles,
+      internalSubwaves
+    );
+    if (!evaluatedFlat) {
+      return { isPotentialFlat: false };
+    }
+
+    const alreadyFlat =
+      pattern === 'FLAT_REGULAR' || pattern === 'FLAT_EXPANDED' || pattern === 'FLAT_RUNNING';
+
+    if (evaluatedFlat.isFlaggedFlat) {
+      return {
+        flag: evaluatedFlat,
+        isPotentialFlat: true,
+        rule: {
+          ruleId: 'FlatPatternValidator',
+          name: 'FlatPatternValidator',
+          nameFa: 'اعتبارسنج الگوی فلت (FlatPatternValidator): ساختار ۳-۳-۵ و موج B > ۶۱.۸٪',
+          type: 'STRUCTURE',
+          passed: alreadyFlat,
+          score: alreadyFlat ? 100 : 48,
+          conceptId: 'C23',
+          details: evaluatedFlat.macroCategory,
+          messageFa: evaluatedFlat.reasonFa,
+          canBeSolvedByAlternate: alreadyFlat ? undefined : evaluatedFlat.suggestedPattern
+        }
+      };
+    }
+
+    if (
+      evaluatedFlat.isStructure335 &&
+      !evaluatedFlat.meetsB618Rule &&
+      (alreadyFlat || internalSubwaves?.join('-') === '3-3-5')
+    ) {
+      return {
+        flag: evaluatedFlat,
+        isPotentialFlat: false,
+        rule: {
+          ruleId: 'FlatPatternValidator',
+          name: 'FlatPatternValidator',
+          nameFa: 'اعتبارسنج الگوی فلت (FlatPatternValidator): بررسی قانون ۶۱.۸٪ در ساختار ۳-۳-۵',
+          type: 'STRUCTURE',
+          passed: false,
+          score: 35,
+          conceptId: 'C23',
+          details: 'BELOW_618',
+          messageFa: evaluatedFlat.reasonFa,
+          canBeSolvedByAlternate: 'ZIGZAG'
+        }
+      };
+    }
+
+    return { flag: evaluatedFlat, isPotentialFlat: false };
+  }
+
   /**
    * Validate a wave structure against rules corresponding to its declared PatternFamily & optional ParentRole
    */
@@ -285,12 +517,13 @@ export class RulesEngine {
     parentRole: WaveRole = 'ROOT',
     parentWaveLabel: string = '',
     candles?: Candle[],
-    options?: { skipUnifiedDetection?: boolean }
+    options?: { skipUnifiedDetection?: boolean; internalSubwaves?: [3 | 5, 3 | 5, 3 | 5] }
   ): ValidationSummary {
     const rules: RuleValidationItem[] = [];
     let suggestedAlternative: PatternFamily | undefined;
     let alternativeReason: string | undefined;
     let nonIdealPatternFlag: NonIdealPatternFlag | undefined;
+    let flatPatternFlag: FlatPatternFlag | undefined;
 
     if (vertices.length < 2) {
       return {
@@ -1848,6 +2081,40 @@ export class RulesEngine {
       });
     }
 
+    // Automatic Session 12 FlatPatternValidator (3-3-5 & B > 61.8% A) Rule Validator & Scenario Tree Flag
+    const canEvaluateFlatFlag =
+      vertices.length >= 3 &&
+      (vertices.length <= 4 ||
+        pattern === 'FLAT_REGULAR' ||
+        pattern === 'FLAT_EXPANDED' ||
+        pattern === 'FLAT_RUNNING' ||
+        pattern === 'ZIGZAG' ||
+        Boolean(options?.internalSubwaves));
+    if (canEvaluateFlatFlag) {
+      const flatValidation = this.FlatPatternValidator(
+        pattern,
+        vertices,
+        direction,
+        candles,
+        options?.internalSubwaves
+      );
+      if (flatValidation.flag) {
+        flatPatternFlag = flatValidation.flag;
+      }
+      if (flatValidation.rule) {
+        rules.push(flatValidation.rule);
+        if (
+          flatValidation.isPotentialFlat &&
+          flatValidation.flag &&
+          flatValidation.rule.canBeSolvedByAlternate &&
+          !suggestedAlternative
+        ) {
+          suggestedAlternative = flatValidation.flag.suggestedPattern;
+          alternativeReason = flatValidation.flag.reasonFa;
+        }
+      }
+    }
+
     let unifiedDetection: UnifiedPatternDetectionReport | undefined;
     if (!options?.skipUnifiedDetection && vertices.length >= 3) {
       const prelimHardPassed = rules.filter(r => r.type === 'HARD').every(r => r.passed);
@@ -2246,6 +2513,7 @@ export class RulesEngine {
       wave4ComplexCorrectionProbable,
       wave5TruncationOrTerminalHint,
       nonIdealPatternFlag,
+      flatPatternFlag,
       unifiedDetection
     };
   }

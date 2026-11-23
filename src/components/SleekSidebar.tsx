@@ -5,7 +5,7 @@
  * Features: AI Copilot & Rules, Fractal Tree, Scenario Universe, TF Boundary, and SDD/Code Viewer.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Candle,
   WaveScenario, 
@@ -15,7 +15,7 @@ import {
   WaveVertex,
   TimeframeBoundaryReport 
 } from '../types/elliott';
-import { ValidationSummary } from '../engine/rulesEngine';
+import { RulesEngine, ValidationSummary } from '../engine/rulesEngine';
 import { ChartInteractionMode } from './ChartStudio';
 import { ExplainabilityPanel } from './ExplainabilityPanel';
 import { PatternValidator } from './PatternValidator';
@@ -29,6 +29,7 @@ import { SmartRuleAlertWidget } from './SmartRuleAlertWidget';
 import { TargetProjectionPanel } from './TargetProjectionPanel';
 import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import { RulesEngineComplianceCard } from './RulesEngineComplianceCard';
+import { FlatPatternInspector } from './FlatSidebarVisualizer';
 import { 
   Cpu, 
   GitBranch, 
@@ -40,10 +41,11 @@ import {
   Layers,
   Crosshair,
   ArrowUpLeft,
-  Sparkles
+  Sparkles,
+  CheckCircle2
 } from 'lucide-react';
 
-export type SidebarTab = 'COPILOT' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
+export type SidebarTab = 'COPILOT' | 'FLAT_ANALYSIS' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
 
 interface SleekSidebarProps {
   activeScenario: WaveScenario;
@@ -127,6 +129,18 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
   const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'CONFLUENCE' | 'PRZ'>('RADAR');
+  const [showInlineFlatToggle, setShowInlineFlatToggle] = useState<boolean>(false);
+
+  const liveFlatFlag = useMemo(
+    () =>
+      RulesEngine.evaluateFlat335Rule(
+        activeScenario.patternType,
+        activeScenario.vertices,
+        activeScenario.direction,
+        candles
+      ),
+    [activeScenario.patternType, activeScenario.vertices, activeScenario.direction, candles]
+  );
 
   useEffect(() => {
     if (drillContext?.key) {
@@ -134,8 +148,20 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
     }
   }, [drillContext?.key]);
 
+  const is335Identified = Boolean(liveFlatFlag?.isStructure335) || activeScenario.patternType.startsWith('FLAT_');
+
+  useEffect(() => {
+    setShowInlineFlatToggle(is335Identified);
+  }, [is335Identified, activeScenario.id]);
+
   const tabs = [
     { id: 'COPILOT' as SidebarTab, label: 'دستیار هوشمند و قوانین', icon: Cpu, badge: `${activeScenario.validityScore}%` },
+    {
+      id: 'FLAT_ANALYSIS' as SidebarTab,
+      label: 'بازرس فلت ۳-۳-۵',
+      icon: Layers,
+      badge: liveFlatFlag ? `${liveFlatFlag.bRetracePct}%` : '۳-۳-۵'
+    },
     { id: 'ANGLE_TARGETS' as SidebarTab, label: 'زوایا و اهداف', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
     { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch, badge: '۴ درجه' },
     { id: 'SCENARIOS' as SidebarTab, label: 'سناریوهای موازی', icon: FolderGit2, badge: `${scenarios.length}` },
@@ -150,24 +176,28 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const isFlatTabAlert = tab.id === 'FLAT_ANALYSIS' && is335Identified && !isActive;
           return (
             <button
               key={tab.id}
+              data-testid={tab.id === 'FLAT_ANALYSIS' ? 'flat-pattern-inspector-tab' : undefined}
               onClick={() => {
                 setActiveTab(tab.id);
                 if (tab.id !== 'SCENARIOS') onHoverScenario?.(null);
               }}
-              className={`flex items-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+              className={`flex items-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ${
                 isActive
                   ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
+                  : isFlatTabAlert
+                  ? 'bg-amber-950/40 border border-amber-500/45 text-amber-200 hover:bg-amber-950/60'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : isFlatTabAlert ? 'text-amber-300' : 'text-slate-400'}`} />
               <span>{tab.label}</span>
               {tab.badge && (
-                <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
-                  isActive ? 'bg-indigo-900/60 text-white' : 'bg-slate-800 text-slate-400'
+                <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono tabular-nums ${
+                  isActive ? 'bg-indigo-900/60 text-white' : isFlatTabAlert ? 'bg-amber-900/50 text-amber-200' : 'bg-slate-800 text-slate-400'
                 }`}>
                   {tab.badge}
                 </span>
@@ -198,6 +228,73 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               parentWaveLabel={drillContext?.waveLabel || ''}
               onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
             />
+
+            {/* Studio Sidebar Flat Pattern Inspector (Auto-activates when 3-3-5 structure is identified) */}
+            <div className="rounded-xl bg-[#0b1324] border border-slate-800 overflow-hidden">
+              <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInlineFlatToggle(prev => !prev)}
+                  aria-expanded={showInlineFlatToggle || is335Identified}
+                  className="flex items-center gap-2 min-w-0 text-right flex-1"
+                >
+                  <Layers className="w-4 h-4 text-amber-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                      <span>بازرس الگوی فلت (Flat Pattern Inspector)</span>
+                      {liveFlatFlag?.isFlaggedFlat && (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      )}
+                    </div>
+                    <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
+                      {liveFlatFlag
+                        ? `B/A: ${liveFlatFlag.bRetracePct}% · C/B: ${liveFlatFlag.cPctOfB}% · ${
+                            liveFlatFlag.macroCategory === 'REGULAR'
+                              ? 'Regular'
+                              : liveFlatFlag.macroCategory === 'IRREGULAR'
+                              ? 'Irregular'
+                              : 'Running'
+                          }`
+                        : 'با شناسایی ساختار ۳-۳-۵ به‌صورت خودکار فعال می‌شود'}
+                    </div>
+                  </div>
+                </button>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowInlineFlatToggle(prev => !prev)}
+                    className={`px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 ${
+                      showInlineFlatToggle || is335Identified
+                        ? 'bg-amber-600/30 border-amber-500/60 text-amber-100'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {showInlineFlatToggle || is335Identified ? 'فعال (بستن)' : 'باز کردن'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('FLAT_ANALYSIS')}
+                    className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
+                    title="باز کردن تب کامل بازرس الگوی فلت ۳-۳-۵"
+                  >
+                    <ArrowUpLeft className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {showInlineFlatToggle && (
+                <div className="p-2.5 pt-0 border-t border-slate-800/80">
+                  <FlatPatternInspector
+                    scenario={activeScenario}
+                    candles={candles}
+                    parentRole={drillContext?.role || 'ROOT'}
+                    parentWaveLabel={drillContext?.waveLabel || ''}
+                    onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                  />
+                </div>
+              )}
+            </div>
 
             {/* Quick Shortcuts to Angle Radar & Fibonacci Confluence Zones */}
             <div className="grid grid-cols-1 gap-2">
@@ -276,6 +373,18 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               scenario={activeScenario}
               onApplyAlternative={(newPattern) => onPatternChange(newPattern)}
               onApplyExtendedAdjustment={() => {}}
+            />
+          </div>
+        )}
+
+        {activeTab === 'FLAT_ANALYSIS' && (
+          <div className="space-y-4">
+            <FlatPatternInspector
+              scenario={activeScenario}
+              candles={candles}
+              parentRole={drillContext?.role || 'ROOT'}
+              parentWaveLabel={drillContext?.waveLabel || ''}
+              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
             />
           </div>
         )}

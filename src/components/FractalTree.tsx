@@ -9,6 +9,7 @@
 import React, { useMemo, useState } from 'react';
 import { Candle, WaveDegree, WaveScenario } from '../types/elliott';
 import { DEGREE_CONFIGS, FractalEngine } from '../engine/fractalEngine';
+import { RulesEngine } from '../engine/rulesEngine';
 import {
   GitBranch,
   ChevronRight,
@@ -178,6 +179,12 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
               liveTreeContext.rootScenarios[0];
             if (!rootSc) return null;
             const rootHardOk = rootSc.rulesResults.filter(r => r.type === 'HARD').every(r => r.passed);
+            const rootFlatCheck = RulesEngine.FlatPatternValidator(
+              rootSc.patternType,
+              rootSc.vertices,
+              rootSc.direction,
+              candles
+            );
             return (
               <div className="space-y-1.5 font-mono text-[10.5px]">
                 <button
@@ -189,9 +196,20 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                       : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
                   }`}
                 >
-                  <span className="truncate font-sans font-semibold">
-                    کلان ({rootSc.timeframe}): {rootSc.name.split('(')[0].trim()}
-                  </span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="truncate font-sans font-semibold">
+                      کلان ({rootSc.timeframe}): {rootSc.name.split('(')[0].trim()}
+                    </span>
+                    {rootFlatCheck.isPotentialFlat && rootFlatCheck.flag && (
+                      <span
+                        data-testid="tree-flat-pattern-badge"
+                        title={rootFlatCheck.flag.reasonFa}
+                        className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/45 text-amber-200 font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0"
+                      >
+                        احتمال فلت (Flat · {rootFlatCheck.flag.bRetracePct}%)
+                      </span>
+                    )}
+                  </div>
                   <span className={rootHardOk ? 'text-emerald-400 shrink-0' : 'text-rose-400 shrink-0'}>
                     {rootSc.validityScore}% {rootHardOk ? '✓' : '✕'}
                   </span>
@@ -203,6 +221,9 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                   const subSc = subList.find(s => s.id === activeSubId) || subList[0];
                   const isLeaf = idx === liveTreeContext.drillStack.length - 1;
                   const subHardOk = subSc ? subSc.rulesResults.filter(r => r.type === 'HARD').every(r => r.passed) : true;
+                  const subFlatCheck = subSc
+                    ? RulesEngine.FlatPatternValidator(subSc.patternType, subSc.vertices, subSc.direction, candles)
+                    : undefined;
                   return (
                     <div key={d.key} className="mr-3 pr-2 border-r border-cyan-500/40">
                       <button
@@ -214,9 +235,20 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                             : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
                         }`}
                       >
-                        <span className="truncate font-sans">
-                          {d.waveLabel} ({d.targetTimeframe}) · {d.role === 'MOTIVE' ? 'پیشرو' : 'اصلاحی'}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="truncate font-sans">
+                            {d.waveLabel} ({d.targetTimeframe}) · {d.role === 'MOTIVE' ? 'پیشرو' : 'اصلاحی'}
+                          </span>
+                          {subFlatCheck?.isPotentialFlat && subFlatCheck.flag && (
+                            <span
+                              data-testid="tree-flat-pattern-badge"
+                              title={subFlatCheck.flag.reasonFa}
+                              className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/45 text-amber-200 font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0"
+                            >
+                              احتمال فلت (Flat · {subFlatCheck.flag.bRetracePct}%)
+                            </span>
+                          )}
+                        </div>
                         {subSc && (
                           <span className={subHardOk ? 'text-emerald-400 shrink-0' : 'text-amber-300 shrink-0'}>
                             {subSc.validityScore}% {subHardOk ? '✓' : '!'}

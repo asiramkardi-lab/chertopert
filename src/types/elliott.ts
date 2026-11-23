@@ -260,17 +260,52 @@ export type FlatSubtype =
   | 'IRREGULAR_EXTENDED'
   | 'RUNNING_DEPRECATED';
 
+export interface FlatAnalysisOptions {
+  /** Override 3-leg internal subwave structure [A, B, C] (e.g. [3,3,5], [5,3,5], [3,3,3], [3,5,5]) */
+  internalSubwaves?: [3 | 5, 3 | 5, 3 | 5];
+  /** Override Wave C 5-wave internal form (Session 12-12) */
+  cSubStructure?: 'IDEAL' | 'DIAGONAL' | 'TERMINAL';
+  /** Explicit market-end vs past-market context override (Session 12-13) */
+  isMarketEnd?: boolean;
+  /** Explicit confirmation override at market end (Session 12-13) */
+  hasConfirmation?: boolean;
+  /** Market analyst adoption % (e.g. 10% vs 50%, Session 12-1) */
+  analystAdoptionPct?: number;
+  /** Market environment profile (e.g. 'IRAN_1401', Session 12-1) */
+  marketProfile?: 'LOW_ANALYST' | 'HIGH_ANALYST' | 'IRAN_1401' | 'GLOBAL';
+  /** Density of clustered retail stops triggering market-maker traps (Session 12-2) */
+  stopClusterDensity?: 'LOW' | 'HIGH';
+}
+
 export interface FlatAnalysisReport {
   detected: boolean;
   subtype: FlatSubtype;
   subtypeLabelFa: string;
   bPctOfA: number;
   cPctOfB: number;
+  /** Resolved [subA, subB, subC] signature string e.g. '3-3-5', '3-3-3', '5-3-5' */
+  structureSignature: string;
   validStructure335: boolean;
+  /** Confirms A-B (3-3 Ideal correction) + C (5 Anti-Cycle) technical decomposition (Session 12-6) */
+  idealPlusAntiCycleConfirmed: boolean;
+  /** Pattern disambiguation across Flat vs Simple Zigzag vs Ideal Zigzag vs Complex Combination (12-5, 12-14) */
+  disambiguationKind:
+    | 'FLAT'
+    | 'SIMPLE_ZIGZAG'
+    | 'IDEAL_ZIGZAG'
+    | 'COMPLEX_COMBINATION'
+    | 'RARE_ANTICYCLE_FLAT'
+    | 'INVALID';
   bOver618Valid: boolean;
+  isBorderlineB618?: boolean;
+  isSevereRunning?: boolean;
   usableAtCurrentContext: boolean;
+  contextCredibilityTier: 'HIGH' | 'MEDIUM' | 'LOW';
   cSubStructure: 'IDEAL' | 'DIAGONAL' | 'TERMINAL';
+  cSubStructureLabelFa: string;
   vsSimpleZigzagFa: string;
+  evolutionDominantPatternFa?: string;
+  actorPsychologyNoteFa?: string;
   knotUntanglerRecommended: boolean;
   borderlineNotesFa?: string[];
   isWave4KnotUntangler?: boolean;

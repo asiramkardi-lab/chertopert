@@ -16,6 +16,7 @@ import {
 import { PatternEngines } from '../engine/patternEngines';
 import { AllPatternsEvaluationMatrix } from './AllPatternsEvaluationMatrix';
 import { UnifiedPatternDetectionSummary } from './UnifiedPatternDetectionSummary';
+import { FlatPatternPanel } from './FlatPatternPanel';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -1077,18 +1078,7 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
               )}
 
               {auditResult.specializedReport.kind === 'FLAT' && (
-                <div className="space-y-1 text-slate-300">
-                  <div className="flex items-center justify-between font-semibold text-white">
-                    <span>{auditResult.specializedReport.data.subtypeLabelFa}</span>
-                    <span className="font-mono tabular-nums text-amber-300">
-                      B/A: {auditResult.specializedReport.data.bPctOfA}٪ · C/B: {auditResult.specializedReport.data.cPctOfB}٪
-                    </span>
-                  </div>
-                  <p className="text-slate-400 leading-relaxed">
-                    {auditResult.specializedReport.data.vsSimpleZigzagFa}
-                    {auditResult.specializedReport.data.knotUntanglerRecommended ? ' · پیشنهاد گره‌گشایی زیرموج‌ها' : ''}
-                  </p>
-                </div>
+                <FlatPatternPanel scenario={scenario} candles={candles} />
               )}
 
               {auditResult.specializedReport.kind === 'TRIANGLE' && (
