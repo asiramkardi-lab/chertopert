@@ -268,68 +268,66 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
             />
 
-            {/* Studio Sidebar Flat Pattern Inspector (Auto-activates when 3-3-5 structure is identified) */}
-            <div className="rounded-xl bg-[#0b1324] border border-slate-800 overflow-hidden">
-              <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowInlineFlatToggle(prev => !prev)}
-                  aria-expanded={showInlineFlatToggle || is335Identified}
-                  className="flex items-center gap-2 min-w-0 text-right flex-1"
-                >
-                  <Layers className="w-4 h-4 text-amber-400 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
-                      <span>بازرس الگوی فلت (Flat Pattern Inspector)</span>
-                      {liveFlatFlag?.isFlaggedFlat && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      )}
-                    </div>
-                    <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
-                      {liveFlatFlag
-                        ? `B/A: ${liveFlatFlag.bRetracePct}% · C/B: ${liveFlatFlag.cPctOfB}% · ${liveFlatFlag.subtypeLabelEn}${
-                            liveFlatFlag.isRunningExcluded ? ' (حذف جاری)' : ''
-                          }`
-                        : 'با شناسایی ساختار ۳-۳-۵ به‌صورت خودکار فعال می‌شود'}
-                    </div>
-                  </div>
-                </button>
-
-                <div className="flex items-center gap-1.5 shrink-0">
+            {/* Studio Sidebar Flat Pattern Inspector (Activates ONLY when a 3-3-5 scenario is selected) */}
+            {is335Identified && (
+              <div className="rounded-xl bg-[#0b1324] border border-amber-500/40 overflow-hidden">
+                <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
                   <button
                     type="button"
                     onClick={() => setShowInlineFlatToggle(prev => !prev)}
-                    className={`px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 ${
-                      showInlineFlatToggle || is335Identified
-                        ? 'bg-amber-600/30 border-amber-500/60 text-amber-100'
-                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
-                    }`}
+                    aria-expanded={showInlineFlatToggle}
+                    className="flex items-center gap-2 min-w-0 text-right flex-1"
                   >
-                    {showInlineFlatToggle || is335Identified ? 'فعال (بستن)' : 'باز کردن'}
+                    <Layers className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                        <span>بازرس الگوی فلت (Flat Pattern Inspector)</span>
+                        {liveFlatFlag?.isFlaggedFlat && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        )}
+                      </div>
+                      <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
+                        {liveFlatFlag
+                          ? `B/A: ${liveFlatFlag.bRetracePct}% · C/B: ${liveFlatFlag.cPctOfB}% · ${liveFlatFlag.subtypeLabelEn}${
+                              liveFlatFlag.isRunningExcluded ? ' (حذف جاری)' : ''
+                            }`
+                          : 'ساختار ۳-۳-۵ فعال'}
+                      </div>
+                    </div>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('FLAT_ANALYSIS')}
-                    className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
-                    title="باز کردن تب کامل بازرس الگوی فلت ۳-۳-۵"
-                  >
-                    <ArrowUpLeft className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
 
-              {showInlineFlatToggle && (
-                <div className="p-2.5 pt-0 border-t border-slate-800/80">
-                  <FlatPatternInspector
-                    scenario={activeScenario}
-                    candles={candles}
-                    parentRole={drillContext?.role || 'ROOT'}
-                    parentWaveLabel={drillContext?.waveLabel || ''}
-                    onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-                  />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowInlineFlatToggle(prev => !prev)}
+                      className="px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 bg-amber-600/30 border-amber-500/60 text-amber-100"
+                    >
+                      {showInlineFlatToggle ? 'بستن' : 'نمایش'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('FLAT_ANALYSIS')}
+                      className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
+                      title="باز کردن تب کامل بازرس الگوی فلت ۳-۳-۵"
+                    >
+                      <ArrowUpLeft className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
+
+                {showInlineFlatToggle && (
+                  <div className="p-2.5 pt-0 border-t border-slate-800/80">
+                    <FlatPatternInspector
+                      scenario={activeScenario}
+                      candles={candles}
+                      parentRole={drillContext?.role || 'ROOT'}
+                      parentWaveLabel={drillContext?.waveLabel || ''}
+                      onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Quick Shortcuts to Angle Radar & Fibonacci Confluence Zones */}
             <div className="grid grid-cols-1 gap-2">
@@ -414,13 +412,28 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
         {activeTab === 'FLAT_ANALYSIS' && (
           <div className="space-y-4">
-            <FlatPatternInspector
-              scenario={activeScenario}
-              candles={candles}
-              parentRole={drillContext?.role || 'ROOT'}
-              parentWaveLabel={drillContext?.waveLabel || ''}
-              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-            />
+            {is335Identified ? (
+              <FlatPatternInspector
+                scenario={activeScenario}
+                candles={candles}
+                parentRole={drillContext?.role || 'ROOT'}
+                parentWaveLabel={drillContext?.waveLabel || ''}
+                onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+              />
+            ) : (
+              <div
+                data-testid="flat-inspector-inactive-notice"
+                className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 space-y-2 leading-relaxed"
+              >
+                <div className="flex items-center gap-2 font-bold text-amber-300">
+                  <Layers className="w-4 h-4 shrink-0" />
+                  <span>بازرس الگوی فلت (۳-۳-۵) در انتظار انتخاب سناریوی ۳-۳-۵</span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  این ابزار تنها زمانی فعال می‌شود که یک سناریوی دارای ساختار ۳-۳-۵ (یا الگوی فلت) انتخاب شده باشد.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

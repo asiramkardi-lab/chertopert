@@ -7,8 +7,8 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Candle, PatternFamily, WaveRole, WaveScenario } from '../types/elliott';
-import { RulesEngine, PATTERN_LABELS_FA } from '../engine/rulesEngine';
+import { Candle, FlatSubtype, PatternFamily, WaveRole, WaveScenario } from '../types/elliott';
+import { RulesEngine, PATTERN_LABELS_FA, isExcludedFlat } from '../engine/rulesEngine';
 import { PatternEngines } from '../engine/patternEngines';
 import {
   Layers,
@@ -30,48 +30,107 @@ interface FlatSidebarVisualizerProps {
 }
 
 type StructureSelectionMode = 'AUTO' | '3-3-5' | '3-3-3' | '5-3-5';
-type FlatVariantFocus = 'AUTO' | 'REGULAR' | 'IRREGULAR' | 'RUNNING';
+type FlatVariantFocus = 'AUTO' | FlatSubtype;
 
-const VARIANT_REFERENCE: Record<
-  'REGULAR' | 'IRREGULAR' | 'RUNNING',
+const EIGHT_SUBTYPE_MATRIX: Array<{
+  id: FlatSubtype;
+  en: string;
+  fa: string;
+  bRule: string;
+  cRule: string;
+  targetPattern: PatternFamily;
+  sampleB: number;
+  sampleC: number;
+  riskTag?: string;
+}> = [
   {
-    titleFa: string;
-    subtitleFa: string;
-    bRuleFa: string;
-    cRuleFa: string;
-    targetPattern: PatternFamily;
-    sampleB: number;
-    sampleC: number;
-  }
-> = {
-  REGULAR: {
-    titleFa: 'فلت متعارف (Regular)',
-    subtitleFa: 'B در بازه ۶۱.۸٪ تا ۱۰۰٪ موج A (ایده‌آل ۸۱–۱۰۰٪)',
-    bRuleFa: '۶۱.۸٪ < B ≤ ۱۰۰٪',
-    cRuleFa: 'C ≈ ۸۱–۱۰۰٪ B',
+    id: 'REGULAR',
+    en: 'Regular',
+    fa: 'متعارف',
+    bRule: 'B: ۸۱–۱۰۰٪',
+    cRule: 'C: ۸۱–۱۰۰٪',
     targetPattern: 'FLAT_REGULAR',
     sampleB: 90,
-    sampleC: 95
+    sampleC: 90
   },
-  IRREGULAR: {
-    titleFa: 'فلت نامنظم (Irregular)',
-    subtitleFa: 'موج B از ۱۰۰٪ مبدأ A فراتر می‌رود و موج C پوشش می‌دهد',
-    bRuleFa: 'B > ۱۰۰٪ A',
-    cRuleFa: 'C ≥ ۶۱.۸٪ B',
+  {
+    id: 'B_DEFICIENT',
+    en: 'B-Deficient',
+    fa: 'ناقص B',
+    bRule: 'B: ۶۱.۸–۸۱٪',
+    cRule: 'C: ۸۱–۱۰۰٪',
+    targetPattern: 'FLAT_REGULAR',
+    sampleB: 70,
+    sampleC: 90
+  },
+  {
+    id: 'C_DEFICIENT',
+    en: 'C-Deficient',
+    fa: 'ناقص C',
+    bRule: 'B: ۸۱–۱۰۰٪',
+    cRule: 'C: ۶۱.۸–۸۱٪',
+    targetPattern: 'FLAT_REGULAR',
+    sampleB: 90,
+    sampleC: 70,
+    riskTag: 'پرریسک'
+  },
+  {
+    id: 'DOUBLE_DEFICIENT',
+    en: 'Double-Deficient',
+    fa: 'ناقص دوگانه',
+    bRule: 'B: ۶۱.۸–۸۱٪',
+    cRule: 'C: ۶۱.۸–۸۱٪',
+    targetPattern: 'FLAT_REGULAR',
+    sampleB: 70,
+    sampleC: 70,
+    riskTag: 'بسیار پرریسک'
+  },
+  {
+    id: 'IRREGULAR',
+    en: 'Irregular',
+    fa: 'نامنظم',
+    bRule: 'B: ۱۰۰–۱۳۸.۲٪',
+    cRule: 'C: ۸۱–۱۰۰٪+',
     targetPattern: 'FLAT_EXPANDED',
-    sampleB: 118,
-    sampleC: 105
+    sampleB: 112,
+    sampleC: 102
   },
-  RUNNING: {
-    titleFa: 'فلت جاری (Running)',
-    subtitleFa: 'B > ۱۰۰٪ A اما C کوتاه و ناکافی (< ۶۱.۸٪ B) — پرریسک',
-    bRuleFa: 'B > ۱۰۰٪ A',
-    cRuleFa: 'C < ۶۱.۸٪ B',
+  {
+    id: 'IRREGULAR_DEFICIENT',
+    en: 'Irregular-Deficient',
+    fa: 'نامنظم ناقص',
+    bRule: 'B: ۱۰۰–۱۳۸.۲٪',
+    cRule: 'C: ۶۱.۸–۸۱٪',
+    targetPattern: 'FLAT_EXPANDED',
+    sampleB: 112,
+    sampleC: 72
+  },
+  {
+    id: 'IRREGULAR_EXTENDED',
+    en: 'Irregular-Extended',
+    fa: 'نامنظم کشیده',
+    bRule: 'B: > ۱۳۸.۲٪',
+    cRule: 'C: ≥ ۱۰۰٪',
+    targetPattern: 'FLAT_EXPANDED',
+    sampleB: 150,
+    sampleC: 120
+  },
+  {
+    id: 'RUNNING_DEPRECATED',
+    en: 'Running',
+    fa: 'جاری (حذف)',
+    bRule: 'B: > ۱۰۰٪',
+    cRule: 'C: < ۶۱.۸٪',
     targetPattern: 'FLAT_RUNNING',
     sampleB: 112,
-    sampleC: 48
+    sampleC: 48,
+    riskTag: 'حذف'
   }
-};
+];
+
+const SUBTYPE_BY_ID: Record<FlatSubtype, (typeof EIGHT_SUBTYPE_MATRIX)[number]> = Object.fromEntries(
+  EIGHT_SUBTYPE_MATRIX.map(item => [item.id, item])
+) as Record<FlatSubtype, (typeof EIGHT_SUBTYPE_MATRIX)[number]>;
 
 export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
   scenario,
@@ -126,25 +185,27 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
   const flatFlag = summary.flatPatternFlag;
   const marketTerminalFlag = summary.marketTerminalFlag;
   const has3PlusVerts = scenario.vertices.length >= 3;
+  const excludedByRunningHelper = isExcludedFlat(scenario, candles);
 
-  // Determine effective B% and C% (live scenario or focused variant preview if < 3 verts)
-  const activeMacro: 'REGULAR' | 'IRREGULAR' | 'RUNNING' =
-    variantFocus !== 'AUTO'
-      ? variantFocus
-      : flatFlag?.macroCategory ??
-        (scenario.patternType === 'FLAT_RUNNING'
-          ? 'RUNNING'
-          : scenario.patternType === 'FLAT_EXPANDED'
-          ? 'IRREGULAR'
-          : 'REGULAR');
+  const detectedSubtype: FlatSubtype =
+    flatFlag?.subtype ??
+    flatReport.subtype ??
+    (scenario.patternType === 'FLAT_RUNNING'
+      ? 'RUNNING_DEPRECATED'
+      : scenario.patternType === 'FLAT_EXPANDED'
+      ? 'IRREGULAR'
+      : 'REGULAR');
+
+  const activeSubtype: FlatSubtype = variantFocus !== 'AUTO' ? variantFocus : detectedSubtype;
+  const activeMeta = SUBTYPE_BY_ID[activeSubtype] || SUBTYPE_BY_ID.REGULAR;
 
   const liveBPct = has3PlusVerts
     ? flatFlag?.bRetracePct ?? flatReport.bPctOfA
-    : VARIANT_REFERENCE[activeMacro].sampleB;
+    : activeMeta.sampleB;
   const liveCPct =
     scenario.vertices.length >= 4
       ? flatFlag?.cPctOfB ?? flatReport.cPctOfB
-      : VARIANT_REFERENCE[activeMacro].sampleC;
+      : activeMeta.sampleC;
 
   const is335Selected =
     structureMode === '3-3-5' ||
@@ -203,29 +264,15 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
   const threshold100Pos = clampPct(100);
   const bMarkerPos = clampPct(liveBPct);
 
-  const recommendedPattern = flatFlag?.suggestedPattern ?? VARIANT_REFERENCE[activeMacro].targetPattern;
+  const recommendedPattern = flatFlag?.suggestedPattern ?? activeMeta.targetPattern;
   const needsPatternApply =
     Boolean(onApplyPattern) &&
     !scenario.isLocked &&
     isFlatClassified &&
     scenario.patternType !== recommendedPattern;
 
-  const macroSubtypeNameEn =
-    variantFocus === 'AUTO' && flatFlag?.subtypeLabelEn
-      ? flatFlag.subtypeLabelEn
-      : activeMacro === 'REGULAR'
-      ? 'Regular'
-      : activeMacro === 'IRREGULAR'
-      ? 'Irregular'
-      : 'Running';
-  const macroSubtypeNameFa =
-    variantFocus === 'AUTO' && flatFlag?.subtypeLabelFa
-      ? flatFlag.subtypeLabelFa
-      : activeMacro === 'REGULAR'
-      ? 'فلت متعارف'
-      : activeMacro === 'IRREGULAR'
-      ? 'فلت نامنظم'
-      : 'فلت جاری';
+  const macroSubtypeNameEn = activeMeta.en;
+  const macroSubtypeNameFa = activeMeta.fa;
 
   return (
     <section
@@ -247,28 +294,31 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
           </div>
         </div>
 
-        <div
-          className={`flex items-center gap-1 text-[10.5px] font-bold font-mono tabular-nums shrink-0 ${
-            flatFlag?.isRunningExcluded
-              ? 'text-rose-400'
-              : isFlatClassified
-              ? 'text-emerald-400'
-              : is335Selected && !passesB618
-              ? 'text-rose-400'
-              : 'text-amber-300'
-          }`}
-        >
-          {isFlatClassified && !flatFlag?.isRunningExcluded ? (
-            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-          ) : (
-            <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-          )}
-          <span>
-            {isFlatClassified
-              ? `Flat · ${macroSubtypeNameEn}`
-              : is335Selected
-              ? 'B ≤ 61.8% (Zigzag)'
-              : flatFlag?.structureSignature || 'انتخاب ساختار'}
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+          <span
+            data-testid="inspector-flat-subtype-badge"
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10.5px] font-bold font-mono tabular-nums ${
+              activeSubtype === 'RUNNING_DEPRECATED' || excludedByRunningHelper
+                ? 'bg-rose-500/20 border-rose-500/50 text-rose-200'
+                : isFlatClassified
+                ? 'bg-emerald-500/15 border-emerald-500/45 text-emerald-200'
+                : is335Selected && !passesB618
+                ? 'bg-rose-500/15 border-rose-500/45 text-rose-200'
+                : 'bg-amber-500/15 border-amber-500/45 text-amber-200'
+            }`}
+          >
+            {isFlatClassified && !flatFlag?.isRunningExcluded && !excludedByRunningHelper ? (
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span>
+              {isFlatClassified
+                ? `${macroSubtypeNameEn}${excludedByRunningHelper ? ' · Excluded' : ''}`
+                : is335Selected
+                ? 'B ≤ 61.8% (Zigzag)'
+                : flatFlag?.structureSignature || 'انتخاب ساختار'}
+            </span>
           </span>
         </div>
       </div>
@@ -328,14 +378,14 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
           </div>
         </div>
         <div className="pt-1 border-t border-slate-800/70 flex items-center justify-between gap-2 text-[10px] text-slate-300">
-          <span className="truncate">{flatFlag?.subtype ? flatReport.subtypeLabelFa : VARIANT_REFERENCE[activeMacro].titleFa}</span>
+          <span className="truncate">{flatFlag?.subtype ? flatReport.subtypeLabelFa : `${activeMeta.fa} (${activeMeta.en})`}</span>
           <span className="font-mono tabular-nums text-slate-400 shrink-0">
-            {VARIANT_REFERENCE[activeMacro].bRuleFa} · {VARIANT_REFERENCE[activeMacro].cRuleFa}
+            {activeMeta.bRule} · {activeMeta.cRule}
           </span>
         </div>
       </div>
 
-      {/* Wave Structure 3-3-5 Selector + Flat Subtype Preview Switcher */}
+      {/* Wave Structure 3-3-5 Selector + All 8 Session 13 Flat Sub-types Matrix */}
       <div className="px-3.5 py-2.5 space-y-2 text-[10.5px]">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-slate-400 flex items-center gap-1">
@@ -367,35 +417,35 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
           </div>
         </div>
 
-        {/* 3 Canonical Flat Variants Switcher (Regular / Irregular / Running) */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {(['REGULAR', 'IRREGULAR', 'RUNNING'] as const).map(variant => {
-            const meta = VARIANT_REFERENCE[variant];
-            const isSelectedVariant = activeMacro === variant;
+        {/* All 8 Session 13 Flat Sub-Types Mapping Grid */}
+        <div data-testid="inspector-8-subtype-matrix" className="grid grid-cols-2 gap-1.5">
+          {EIGHT_SUBTYPE_MATRIX.map(item => {
+            const isSelectedVariant = activeSubtype === item.id;
+            const isRunningRow = item.id === 'RUNNING_DEPRECATED';
             return (
               <button
-                key={variant}
+                key={item.id}
                 type="button"
                 onClick={() => {
-                  setVariantFocus(prev => (prev === variant ? 'AUTO' : variant));
+                  setVariantFocus(prev => (prev === item.id ? 'AUTO' : item.id));
                   if (structureMode === 'AUTO' && !is335Selected) {
                     setStructureMode('3-3-5');
                   }
                 }}
                 className={`p-2 rounded-lg border text-right transition-colors ${
                   isSelectedVariant
-                    ? 'bg-amber-950/35 border-amber-500/55 text-white'
+                    ? isRunningRow
+                      ? 'bg-rose-950/40 border-rose-500/60 text-white'
+                      : 'bg-amber-950/35 border-amber-500/60 text-white'
                     : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                 }`}
               >
-                <div className="text-[10.5px] font-bold truncate">
-                  {variant === 'REGULAR' ? 'متعارف' : variant === 'IRREGULAR' ? 'نامنظم' : 'جاری'}
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[10.5px] font-bold truncate">{item.fa}</span>
+                  <span className="text-[9px] font-mono text-slate-300 shrink-0">{item.en}</span>
                 </div>
                 <div className="font-mono tabular-nums text-[9.5px] text-amber-300 mt-0.5">
-                  {meta.bRuleFa}
-                </div>
-                <div className="font-mono tabular-nums text-[9px] text-slate-400">
-                  {meta.cRuleFa}
+                  {item.bRule} · {item.cRule}
                 </div>
               </button>
             );
@@ -614,7 +664,7 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
             )}
           </div>
           <p className="text-slate-400">
-            {flatFlag?.reasonFa || VARIANT_REFERENCE[activeMacro].subtitleFa}
+            {flatFlag?.reasonFa || `${activeMeta.fa} (${activeMeta.en}): ${activeMeta.bRule} · ${activeMeta.cRule}`}
           </p>
           {flatReport.tradingPolicyReasonFa && (
             <p
