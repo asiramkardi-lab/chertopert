@@ -358,6 +358,15 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 </span>
               </div>
             </div>
+            {nodeTerminalCheck.isFlatAtMarketEnd && nodeTerminalCheck.flag && (
+              <div
+                data-testid="wizard-tree-terminal-warning-banner"
+                className="flex items-start gap-1.5 px-2 py-1 rounded-lg bg-rose-950/35 border border-rose-500/40 text-[10px] text-rose-200 leading-relaxed"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                <span>{nodeTerminalCheck.flag.warningLabelFa}</span>
+              </div>
+            )}
           </div>
 
           {isRoot && scSummary && (
@@ -879,6 +888,15 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                         {isOverlay || isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                       </button>
                     </div>
+                    {scTerminalCheck.isFlatAtMarketEnd && scTerminalCheck.flag && (
+                      <div
+                        data-testid="wizard-sub-terminal-warning-banner"
+                        className="flex items-start gap-1.5 px-2 py-1 rounded-lg bg-rose-950/35 border border-rose-500/40 text-[10px] text-rose-200 leading-relaxed"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                        <span>{scTerminalCheck.flag.warningLabelFa}</span>
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[11px] gap-2 flex-wrap">
                       <span

@@ -28,7 +28,8 @@ import {
   FlatAnalysisReport,
   FlatSubtype,
   TriangleAnalysisReport,
-  ComplexPatternReport
+  ComplexPatternReport,
+  MarketTerminalScenarioWarning
 } from '../types/elliott';
 import { PivotDetector, getPivotWindowForTimeframe } from './pivotDetector';
 import {
@@ -358,6 +359,36 @@ export class RulesEngine {
   }
 
   /**
+   * Session 13 Helper: Returns true if the given WaveScenario is a 'Running' Flat
+   * (B > 100% A and C < 61.8% B, or subtype RUNNING_DEPRECATED) flagged for exclusion/removal.
+   */
+  public static isExcludedFlat(scenario: WaveScenario, candles?: Candle[]): boolean {
+    if (!scenario) return false;
+    if (scenario.vertices.length < 3) {
+      return scenario.patternType === 'FLAT_RUNNING';
+    }
+    const check = this.FlatPatternValidator(
+      scenario.patternType,
+      scenario.vertices,
+      scenario.direction,
+      candles
+    );
+    if (check.isRunningExcluded || check.subtype === 'RUNNING_DEPRECATED') {
+      return true;
+    }
+    if (check.flag) {
+      return this.identifyRunningFlatForExclusion({
+        bRetracePct: check.flag.bRetracePct,
+        cPctOfB: check.flag.cPctOfB,
+        hasCVertex: scenario.vertices.length >= 4,
+        pattern: scenario.patternType,
+        subtype: check.flag.subtype
+      }).shouldExclude;
+    }
+    return scenario.patternType === 'FLAT_RUNNING';
+  }
+
+  /**
    * Session 13 Helper: Filters a list of WaveScenarios, separating standard scenarios from
    * 'Running' Flat scenarios flagged for exclusion.
    */
@@ -381,7 +412,7 @@ export class RulesEngine {
             subtype: check.flag.subtype
           })
         : { isRunningFlat: false, shouldExclude: false, isSevereRunning: false, reasonFa: '' };
-      if (check.isRunningExcluded || ratioCheck.shouldExclude) {
+      if (this.isExcludedFlat(sc, candles) || check.isRunningExcluded || ratioCheck.shouldExclude) {
         excluded.push({
           scenario: sc,
           reasonFa: check.exclusionReasonFa || ratioCheck.reasonFa,
@@ -727,37 +758,128 @@ export class RulesEngine {
   }
 
   /**
+   * Builds scenario-level warning metadata from a MarketTerminalFlag when a Flat pattern sits at chart end.
+   */
+  public static buildMarketTerminalWarningMetadata(
+    flag?: MarketTerminalFlag
+  ): MarketTerminalScenarioWarning | undefined {
+    if (!flag || !flag.isFlatAtMarketEnd) return undefined;
+    return {
+      isFlatAtMarketEnd: true,
+      code: 'FLAT_AT_MARKET_END',
+      terminalCandleIndex: flag.terminalCandleIndex,
+      finalCandleIndex: Math.max(0, flag.totalCandles - 1),
+      distanceFromEndCandles: flag.distanceFromEndCandles,
+      warningLabelFa: flag.warningLabelFa,
+      warningReasonFa: flag.warningReasonFa,
+      countingPriorityNoteFa: flag.countingPriorityNoteFa
+    };
+  }
+
+  /**
+   * Returns an updated copy of a WaveScenario annotated with MarketTerminalValidator
+   * warning metadata (when Flat is near chart end) and Running Flat exclusion status.
+   */
+  public static withScenarioValidationMetadata(
+    scenario: WaveScenario,
+    summary: ValidationSummary,
+    candles?: Candle[]
+  ): WaveScenario {
+    const warningMeta = this.buildMarketTerminalWarningMetadata(summary.marketTerminalFlag);
+    const isExcluded = this.isExcludedFlat(scenario, candles);
+    const next: WaveScenario = {
+      ...scenario,
+      isExcludedRunningFlat: isExcluded
+    };
+    if (warningMeta) {
+      next.marketTerminalWarning = warningMeta;
+    } else if ('marketTerminalWarning' in next) {
+      delete next.marketTerminalWarning;
+    }
+    return next;
+  }
+
+  /**
    * RulesEngine 'MarketTerminalValidator' Rule (Session 13 §2.1 & §2.2):
    * Flags any scenario containing a Flat pattern if its terminal vertex is close to the end of
-   * the current market data chart, warning that Flat patterns must NOT be used in the end-phase
-   * for trading (only in past market history as a last-resort knot-untangler after Ideal/Diag/Zigzag).
+   * the current market data chart, injecting `marketTerminalWarning` metadata into the scenario
+   * when provided and warning that Flat patterns must NOT be used in the current market's end-phase.
    */
   public static MarketTerminalValidator(
-    pattern: PatternFamily,
-    vertices: WaveVertex[],
+    scenario: WaveScenario,
     candles?: Candle[],
-    flatFlag?: FlatPatternFlag,
     options?: { terminalWindowCandles?: number }
   ): {
     flag?: MarketTerminalFlag;
     rule?: RuleValidationItem;
     isFlatAtMarketEnd: boolean;
+    warningMetadata?: MarketTerminalScenarioWarning;
+    scenario: WaveScenario;
+  };
+  public static MarketTerminalValidator(
+    pattern: PatternFamily,
+    vertices: WaveVertex[],
+    candles?: Candle[],
+    flatFlag?: FlatPatternFlag,
+    options?: { terminalWindowCandles?: number; scenario?: WaveScenario }
+  ): {
+    flag?: MarketTerminalFlag;
+    rule?: RuleValidationItem;
+    isFlatAtMarketEnd: boolean;
+    warningMetadata?: MarketTerminalScenarioWarning;
+    scenario?: WaveScenario;
+  };
+  public static MarketTerminalValidator(
+    patternOrScenario: PatternFamily | WaveScenario,
+    verticesOrCandles?: WaveVertex[] | Candle[],
+    candlesOrOptions?: Candle[] | { terminalWindowCandles?: number },
+    flatFlag?: FlatPatternFlag,
+    options?: { terminalWindowCandles?: number; scenario?: WaveScenario }
+  ): {
+    flag?: MarketTerminalFlag;
+    rule?: RuleValidationItem;
+    isFlatAtMarketEnd: boolean;
+    warningMetadata?: MarketTerminalScenarioWarning;
+    scenario?: WaveScenario;
   } {
+    const isScenarioInput = typeof patternOrScenario === 'object' && patternOrScenario !== null;
+    const targetScenario = isScenarioInput ? patternOrScenario : options?.scenario;
+    const pattern = isScenarioInput ? patternOrScenario.patternType : patternOrScenario;
+    const vertices = isScenarioInput
+      ? patternOrScenario.vertices
+      : ((verticesOrCandles as WaveVertex[] | undefined) ?? []);
+    const candles = isScenarioInput
+      ? (verticesOrCandles as Candle[] | undefined)
+      : (candlesOrOptions as Candle[] | undefined);
+    const resolvedOptions = isScenarioInput
+      ? (candlesOrOptions as { terminalWindowCandles?: number } | undefined)
+      : options;
+
+    const resolvedFlatFlag = isScenarioInput
+      ? this.FlatPatternValidator(pattern, vertices, patternOrScenario.direction, candles).flag
+      : flatFlag;
+
     const isFlatScenario =
       pattern === 'FLAT_REGULAR' ||
       pattern === 'FLAT_EXPANDED' ||
       pattern === 'FLAT_RUNNING' ||
-      Boolean(flatFlag?.isFlaggedFlat);
+      Boolean(resolvedFlatFlag?.isFlaggedFlat);
 
     if (!isFlatScenario || vertices.length < 3 || !candles || candles.length === 0) {
-      return { isFlatAtMarketEnd: false };
+      if (targetScenario && 'marketTerminalWarning' in targetScenario) {
+        delete targetScenario.marketTerminalWarning;
+      }
+      return {
+        isFlatAtMarketEnd: false,
+        ...(targetScenario ? { scenario: targetScenario } : {})
+      };
     }
 
     const totalCandles = candles.length;
     const lastVertex = vertices[vertices.length - 1];
     const terminalCandleIndex = lastVertex.candleIndex;
     const distanceFromEndCandles = Math.max(0, totalCandles - 1 - terminalCandleIndex);
-    const thresholdCandles = options?.terminalWindowCandles ?? 5;
+    const thresholdCandles = resolvedOptions?.terminalWindowCandles ?? 5;
     const isFlatAtMarketEnd = distanceFromEndCandles <= thresholdCandles;
 
     const countingPriorityNoteFa =
@@ -783,6 +905,15 @@ export class RulesEngine {
       countingPriorityNoteFa
     };
 
+    const warningMetadata = this.buildMarketTerminalWarningMetadata(flag);
+    if (targetScenario) {
+      if (warningMetadata) {
+        targetScenario.marketTerminalWarning = warningMetadata;
+      } else {
+        delete targetScenario.marketTerminalWarning;
+      }
+    }
+
     const rule: RuleValidationItem = {
       ruleId: 'MarketTerminalValidator',
       name: 'MarketTerminalValidator',
@@ -800,7 +931,9 @@ export class RulesEngine {
     return {
       flag,
       rule,
-      isFlatAtMarketEnd
+      isFlatAtMarketEnd,
+      warningMetadata,
+      ...(targetScenario ? { scenario: targetScenario } : {})
     };
   }
 
@@ -3392,7 +3525,7 @@ export class RulesEngine {
       isPrimary: boolean
     ): WaveScenario => {
       const val = this.validateStructure(patternType, verts, inferredDir, parentRole, parentLegLabel || '', candles);
-      return {
+      const baseScenario: WaveScenario = {
         id,
         name,
         color,
@@ -3417,6 +3550,7 @@ export class RulesEngine {
         parentNodeId,
         parentLegLabel
       };
+      return this.withScenarioValidationMetadata(baseScenario, val, candles);
     };
 
     const makeVert = (label: string, idx: number, price: number, confirmed = true): WaveVertex => ({
@@ -5578,4 +5712,12 @@ export class RulesEngine {
       complexDetails
     };
   }
+}
+
+/**
+ * Top-level Session 13 helper: Flags 'Running' Flat scenarios (B > 100% A, C < 61.8% B)
+ * for exclusion/removal from standard Elliott wave counting and trading.
+ */
+export function isExcludedFlat(scenario: WaveScenario, candles?: Candle[]): boolean {
+  return RulesEngine.isExcludedFlat(scenario, candles);
 }

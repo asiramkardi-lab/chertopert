@@ -597,17 +597,21 @@ export default function App() {
           currentStudioDrill.waveLabel,
           effectiveCandles
         );
-        editedChild = {
-          ...sc,
-          vertices: alignedVerts,
-          validityScore: val.validityScore,
-          idealnessScore: val.idealnessScore,
-          confidenceScore: val.confidenceScore,
-          invalidationPrice: val.invalidationPrice,
-          targets: val.targets,
-          rulesResults: val.rules,
-          source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
-        };
+        editedChild = RulesEngine.withScenarioValidationMetadata(
+          {
+            ...sc,
+            vertices: alignedVerts,
+            validityScore: val.validityScore,
+            idealnessScore: val.idealnessScore,
+            confidenceScore: val.confidenceScore,
+            invalidationPrice: val.invalidationPrice,
+            targets: val.targets,
+            rulesResults: val.rules,
+            source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
+          },
+          val,
+          effectiveCandles
+        );
         return editedChild;
       });
       if (editedChild) {
@@ -622,17 +626,21 @@ export default function App() {
     const nextRoots = scenarios.map(sc => {
       if (sc.id !== targetId) return sc;
       const val = RulesEngine.validateStructure(sc.patternType, newVertices, sc.direction, 'ROOT', '', candles);
-      editedRoot = {
-        ...sc,
-        vertices: newVertices,
-        validityScore: val.validityScore,
-        idealnessScore: val.idealnessScore,
-        confidenceScore: val.confidenceScore,
-        invalidationPrice: val.invalidationPrice,
-        targets: val.targets,
-        rulesResults: val.rules,
-        source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
-      };
+      editedRoot = RulesEngine.withScenarioValidationMetadata(
+        {
+          ...sc,
+          vertices: newVertices,
+          validityScore: val.validityScore,
+          idealnessScore: val.idealnessScore,
+          confidenceScore: val.confidenceScore,
+          invalidationPrice: val.invalidationPrice,
+          targets: val.targets,
+          rulesResults: val.rules,
+          source: sc.source === 'MANUAL_DRAW' ? 'MANUAL_DRAW' : 'USER_EDITED'
+        },
+        val,
+        candles
+      );
       return editedRoot;
     });
     setScenarios(nextRoots);
@@ -663,17 +671,21 @@ export default function App() {
           currentStudioDrill.waveLabel,
           effectiveCandles
         );
-        editedChild = {
-          ...sc,
-          patternType: newPattern,
-          validityScore: val.validityScore,
-          idealnessScore: val.idealnessScore,
-          confidenceScore: val.confidenceScore,
-          invalidationPrice: val.invalidationPrice,
-          targets: val.targets,
-          rulesResults: val.rules,
-          source: 'USER_EDITED'
-        };
+        editedChild = RulesEngine.withScenarioValidationMetadata(
+          {
+            ...sc,
+            patternType: newPattern,
+            validityScore: val.validityScore,
+            idealnessScore: val.idealnessScore,
+            confidenceScore: val.confidenceScore,
+            invalidationPrice: val.invalidationPrice,
+            targets: val.targets,
+            rulesResults: val.rules,
+            source: 'USER_EDITED'
+          },
+          val,
+          effectiveCandles
+        );
         return editedChild;
       });
       if (editedChild) {
@@ -688,17 +700,21 @@ export default function App() {
       prev.map(sc => {
         if (sc.id !== targetId) return sc;
         const val = RulesEngine.validateStructure(newPattern, sc.vertices, sc.direction, 'ROOT', '', candles);
-        return {
-          ...sc,
-          patternType: newPattern,
-          validityScore: val.validityScore,
-          idealnessScore: val.idealnessScore,
-          confidenceScore: val.confidenceScore,
-          invalidationPrice: val.invalidationPrice,
-          targets: val.targets,
-          rulesResults: val.rules,
-          source: 'USER_EDITED'
-        };
+        return RulesEngine.withScenarioValidationMetadata(
+          {
+            ...sc,
+            patternType: newPattern,
+            validityScore: val.validityScore,
+            idealnessScore: val.idealnessScore,
+            confidenceScore: val.confidenceScore,
+            invalidationPrice: val.invalidationPrice,
+            targets: val.targets,
+            rulesResults: val.rules,
+            source: 'USER_EDITED'
+          },
+          val,
+          candles
+        );
       })
     );
   };
@@ -709,16 +725,20 @@ export default function App() {
       let validatedChild: WaveScenario | null = null;
       const updatedList = list.map(sc => {
         if (sc.id !== id) return sc;
-        validatedChild = {
-          ...sc,
-          patternType: summary.patternType,
-          validityScore: summary.validityScore,
-          idealnessScore: summary.idealnessScore,
-          confidenceScore: summary.confidenceScore,
-          invalidationPrice: summary.invalidationPrice,
-          targets: summary.targets,
-          rulesResults: summary.rules
-        };
+        validatedChild = RulesEngine.withScenarioValidationMetadata(
+          {
+            ...sc,
+            patternType: summary.patternType,
+            validityScore: summary.validityScore,
+            idealnessScore: summary.idealnessScore,
+            confidenceScore: summary.confidenceScore,
+            invalidationPrice: summary.invalidationPrice,
+            targets: summary.targets,
+            rulesResults: summary.rules
+          },
+          summary,
+          effectiveCandles
+        );
         return validatedChild;
       });
       if (validatedChild) {
@@ -732,16 +752,20 @@ export default function App() {
     setScenarios(prev =>
       prev.map(sc =>
         sc.id === id
-          ? {
-              ...sc,
-              patternType: summary.patternType,
-              validityScore: summary.validityScore,
-              idealnessScore: summary.idealnessScore,
-              confidenceScore: summary.confidenceScore,
-              invalidationPrice: summary.invalidationPrice,
-              targets: summary.targets,
-              rulesResults: summary.rules
-            }
+          ? RulesEngine.withScenarioValidationMetadata(
+              {
+                ...sc,
+                patternType: summary.patternType,
+                validityScore: summary.validityScore,
+                idealnessScore: summary.idealnessScore,
+                confidenceScore: summary.confidenceScore,
+                invalidationPrice: summary.invalidationPrice,
+                targets: summary.targets,
+                rulesResults: summary.rules
+              },
+              summary,
+              candles
+            )
           : sc
       )
     );

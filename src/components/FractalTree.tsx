@@ -84,6 +84,21 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
     [activeScenario, candles]
   );
 
+  const activeTerminalCheck = useMemo(() => {
+    const flatCheck = RulesEngine.FlatPatternValidator(
+      activeScenario.patternType,
+      activeScenario.vertices,
+      activeScenario.direction,
+      candles
+    );
+    return RulesEngine.MarketTerminalValidator(
+      activeScenario.patternType,
+      activeScenario.vertices,
+      candles,
+      flatCheck.flag
+    );
+  }, [activeScenario, candles]);
+
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col gap-4">
       {/* Header */}
@@ -96,6 +111,22 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
           حداکثر {degreeCap.maxAllowed} درجه ({activeScenario.timeframe})
         </span>
       </div>
+
+      {/* MarketTerminalValidator Visual Warning for Active Scenario */}
+      {activeTerminalCheck.isFlatAtMarketEnd && activeTerminalCheck.flag && (
+        <div
+          data-testid="fractal-tree-market-terminal-banner"
+          className="p-2.5 rounded-xl bg-rose-950/35 border border-rose-500/45 text-[11px] text-rose-100 space-y-1"
+        >
+          <div className="flex items-center gap-1.5 font-bold text-rose-200">
+            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{activeTerminalCheck.flag.warningLabelFa}</span>
+          </div>
+          <p className="text-[10.5px] text-rose-200/90 leading-relaxed">
+            {activeTerminalCheck.flag.countingPriorityNoteFa}
+          </p>
+        </div>
+      )}
 
       {/* Market & Timeframe Degree Cap Info */}
       <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1 text-[11px]">
@@ -234,6 +265,12 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                     {rootSc.validityScore}% {rootHardOk ? '✓' : '✕'}
                   </span>
                 </button>
+                {rootTerminalCheck.isFlatAtMarketEnd && rootTerminalCheck.flag && (
+                  <div className="px-2.5 py-1.5 rounded-lg bg-rose-950/35 border border-rose-500/35 text-rose-200 font-sans text-[10px] flex items-start gap-1.5 leading-relaxed">
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                    <span>{rootTerminalCheck.flag.warningLabelFa}</span>
+                  </div>
+                )}
 
                 {liveTreeContext.drillStack.map((d, idx) => {
                   const subList = liveTreeContext.subScenariosByKey[d.key] || [];
@@ -292,6 +329,12 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                           </span>
                         )}
                       </button>
+                      {subTerminalCheck?.isFlatAtMarketEnd && subTerminalCheck.flag && (
+                        <div className="mt-1 px-2 py-1 rounded-lg bg-rose-950/35 border border-rose-500/35 text-rose-200 font-sans text-[10px] flex items-start gap-1.5 leading-relaxed">
+                          <ShieldAlert className="w-3 h-3 text-rose-400 shrink-0 mt-0.5" />
+                          <span>{subTerminalCheck.flag.warningLabelFa}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

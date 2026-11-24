@@ -691,6 +691,17 @@ export interface TopDownPipelineReport {
   };
 }
 
+export interface MarketTerminalScenarioWarning {
+  isFlatAtMarketEnd: boolean;
+  code: 'FLAT_AT_MARKET_END';
+  terminalCandleIndex: number;
+  finalCandleIndex: number;
+  distanceFromEndCandles: number;
+  warningLabelFa: string;
+  warningReasonFa: string;
+  countingPriorityNoteFa: string;
+}
+
 export interface WaveScenario {
   id: string;
   name: string;
@@ -717,6 +728,8 @@ export interface WaveScenario {
   parentNodeId?: string;
   parentLegLabel?: string; // e.g. "موج 1" or "موج 3"
   notes?: string;
+  marketTerminalWarning?: MarketTerminalScenarioWarning;
+  isExcludedRunningFlat?: boolean;
 }
 
 export interface TimeframeEvaluation {

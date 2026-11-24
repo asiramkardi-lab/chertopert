@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Candle, WaveScenario, PatternFamily, WaveRole, WaveVertex } from '../types/elliott';
-import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole, FlatPatternFlag, MarketTerminalFlag } from '../engine/rulesEngine';
+import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole, FlatPatternFlag, MarketTerminalFlag, isExcludedFlat } from '../engine/rulesEngine';
 import { filterPatternsForRole } from '../engine/fractalSyncEngine';
 import { SmartRuleAlertEngine, ScenarioQuickStatusReport } from '../engine/smartRuleAlertEngine';
 import { ChartInteractionMode } from './ChartStudio';
@@ -72,20 +72,27 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
 
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
-  const { flatFlagsById, terminalFlagsById } = useMemo(() => {
+  const { flatFlagsById, terminalWarningsById, excludedRunningById } = useMemo(() => {
     const fMap: Record<string, FlatPatternFlag | undefined> = {};
-    const tMap: Record<string, MarketTerminalFlag | undefined> = {};
+    const tMap: Record<
+      string,
+      Pick<MarketTerminalFlag, 'warningLabelFa' | 'warningReasonFa' | 'distanceFromEndCandles'> | undefined
+    > = {};
+    const eMap: Record<string, boolean> = {};
     scenarios.forEach(sc => {
       const res = RulesEngine.FlatPatternValidator(sc.patternType, sc.vertices, sc.direction, candles);
       if (res.isPotentialFlat && res.flag) {
         fMap[sc.id] = res.flag;
       }
+      eMap[sc.id] = Boolean(sc.isExcludedRunningFlat) || isExcludedFlat(sc, candles);
       const term = RulesEngine.MarketTerminalValidator(sc.patternType, sc.vertices, candles, res.flag);
       if (term.isFlatAtMarketEnd && term.flag) {
         tMap[sc.id] = term.flag;
+      } else if (sc.marketTerminalWarning?.isFlatAtMarketEnd) {
+        tMap[sc.id] = sc.marketTerminalWarning;
       }
     });
-    return { flatFlagsById: fMap, terminalFlagsById: tMap };
+    return { flatFlagsById: fMap, terminalWarningsById: tMap, excludedRunningById: eMap };
   }, [scenarios, candles]);
 
   const quickPreviewById = useMemo(() => {
@@ -339,23 +346,23 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                           data-testid="scenario-flat-pattern-badge"
                           title={flatFlagsById[sc.id]!.reasonFa}
                           className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold border font-mono tabular-nums ${
-                            flatFlagsById[sc.id]!.isRunningExcluded
+                            excludedRunningById[sc.id] || flatFlagsById[sc.id]!.isRunningExcluded
                               ? 'bg-rose-500/15 border-rose-500/45 text-rose-200'
                               : 'bg-amber-500/15 border-amber-500/45 text-amber-200'
                           }`}
                         >
                           احتمال فلت ({flatFlagsById[sc.id]!.subtypeLabelEn} · {flatFlagsById[sc.id]!.bRetracePct}%)
-                          {flatFlagsById[sc.id]!.isRunningExcluded ? ' · حذف جاری' : ''}
+                          {excludedRunningById[sc.id] || flatFlagsById[sc.id]!.isRunningExcluded ? ' · حذف جاری' : ''}
                         </span>
                       )}
-                      {terminalFlagsById[sc.id] && (
+                      {terminalWarningsById[sc.id] && (
                         <span
                           data-testid="scenario-market-terminal-warning"
-                          title={terminalFlagsById[sc.id]!.warningReasonFa}
+                          title={terminalWarningsById[sc.id]!.warningReasonFa}
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold border bg-rose-500/20 border-rose-500/50 text-rose-200"
                         >
                           <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                          <span>هشدار انتهای بازار · احتیاط شدید فلت</span>
+                          <span>هشدار انتهای بازار · عدم استفاده فلت در فاز پایانی</span>
                         </span>
                       )}
                       <span className="text-[10px] text-slate-400 font-mono">({sc.patternType})</span>
@@ -370,10 +377,10 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                       </span>
                       <span>منبع: <strong className="text-slate-300">{sc.source === 'AI' ? 'هوش مصنوعی' : 'کاربر'}</strong></span>
                     </div>
-                    {terminalFlagsById[sc.id] && (
+                    {terminalWarningsById[sc.id] && (
                       <div className="mt-1 flex items-start gap-1.5 px-2 py-1 rounded-lg bg-rose-950/35 border border-rose-500/35 text-[10px] text-rose-200 leading-relaxed">
                         <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0 mt-0.5" />
-                        <span>{terminalFlagsById[sc.id]!.warningLabelFa}</span>
+                        <span>{terminalWarningsById[sc.id]!.warningLabelFa}</span>
                       </div>
                     )}
                   </div>

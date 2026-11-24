@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PatternEngines } from '../src/engine/patternEngines';
-import { RulesEngine } from '../src/engine/rulesEngine';
+import { RulesEngine, isExcludedFlat } from '../src/engine/rulesEngine';
 import { Candle, FlatAnalysisOptions, PatternFamily, WaveScenario, WaveVertex } from '../src/types/elliott';
 
 function makeCandles(count = 24): Candle[] {
@@ -393,6 +393,13 @@ describe('Session 13 Flat Advanced Naming, Rules & Knot-Untangler Engine (T-13.1
 
     const regScenario = makeFlatScenario([200, 100, 190, 109], { patternType: 'FLAT_REGULAR' });
     const runScenario = makeFlatScenario([200, 100, 215, 160], { patternType: 'FLAT_RUNNING' });
+    const irregScenario = makeFlatScenario([200, 100, 210, 105], { patternType: 'FLAT_EXPANDED' });
+    const cDefScenario = makeFlatScenario([200, 100, 195, 147], { patternType: 'FLAT_REGULAR' });
+    expect(isExcludedFlat(runScenario)).toBe(true);
+    expect(RulesEngine.isExcludedFlat(runScenario)).toBe(true);
+    expect(isExcludedFlat(regScenario)).toBe(false);
+    expect(isExcludedFlat(irregScenario)).toBe(false);
+    expect(isExcludedFlat(cDefScenario)).toBe(false);
     const batchFiltered = RulesEngine.excludeRunningFlats([regScenario, runScenario]);
     expect(batchFiltered.retained).toHaveLength(1);
     expect(batchFiltered.retained[0].patternType).toBe('FLAT_REGULAR');
@@ -611,5 +618,26 @@ describe('Session 13 Flat Advanced Naming, Rules & Knot-Untangler Engine (T-13.1
     );
     expect(normalZigzagEnd.marketTerminalFlag).toBeUndefined();
     expect(normalZigzagEnd.rules.some(r => r.ruleId === 'MarketTerminalValidator')).toBe(false);
+
+    // 5) Direct scenario overload injects & clears scenario.marketTerminalWarning metadata
+    const endScenario = makeFlatScenario([200, 100, 190, 105], {
+      patternType: 'FLAT_REGULAR',
+      candleIndices: [18, 24, 31, 38]
+    });
+    const injectedRes = RulesEngine.MarketTerminalValidator(endScenario, candles40);
+    expect(injectedRes.isFlatAtMarketEnd).toBe(true);
+    expect(endScenario.marketTerminalWarning?.isFlatAtMarketEnd).toBe(true);
+    expect(endScenario.marketTerminalWarning?.code).toBe('FLAT_AT_MARKET_END');
+    expect(endScenario.marketTerminalWarning?.distanceFromEndCandles).toBe(1);
+    expect(endScenario.marketTerminalWarning?.warningLabelFa).toContain('فاز پایانی');
+
+    const pastScenario = makeFlatScenario([200, 100, 190, 105], {
+      patternType: 'FLAT_REGULAR',
+      candleIndices: [2, 6, 11, 16]
+    });
+    pastScenario.marketTerminalWarning = endScenario.marketTerminalWarning;
+    const clearedRes = RulesEngine.MarketTerminalValidator(pastScenario, candles40);
+    expect(clearedRes.isFlatAtMarketEnd).toBe(false);
+    expect(pastScenario.marketTerminalWarning).toBeUndefined();
   });
 });
