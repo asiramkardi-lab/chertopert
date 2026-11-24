@@ -408,6 +408,31 @@ export interface EntryStrategyReport {
   notes: string[];
 }
 
+export interface TriangleAnalysisOptions {
+  /** Override 5-leg internal subwave structure [A, B, C, D, E] (e.g. [3,3,3,3,3], [5,5,5,5,5], [3,5,3,5,3]) */
+  internalSubwaves?: number[];
+  /** Override whether 5-wave structure is clear & defined */
+  hasClearStructure?: boolean;
+  /** Override whether Wave E termination is clearly defined */
+  hasDefinedEnd?: boolean;
+  /** Explicit market-end vs past/mid-market context */
+  isMarketEnd?: boolean;
+  /** Explicit trendline breakout confirmation */
+  breakoutConfirmed?: boolean;
+  /** Explicit breakout direction relative to main trend */
+  breakoutDirection?: 'WITH_TREND' | 'COUNTER_TREND' | 'NONE';
+  /** Main trend direction prior to corrective triangle */
+  mainTrendDirection?: WaveDirection;
+  /** Market psychology state: confident direct trend vs indecisive market */
+  marketState?: 'CONFIDENT_TREND' | 'INDECISIVE';
+  /** Whether a Diagonal alternative is also plausible during market indecision */
+  diagonalPossible?: boolean;
+  /** Override upper trendline touch count for evaluation */
+  trendlineUpperTouches?: number;
+  /** Override lower trendline touch count for evaluation */
+  trendlineLowerTouches?: number;
+}
+
 export interface TriangleAnalysisReport {
   detected: boolean;
   triangleType: 'CONTRACTING' | 'EXPANDING' | 'INVALID';
@@ -418,9 +443,22 @@ export interface TriangleAnalysisReport {
   positionValid: boolean;
   positionSlotLabelFa: string;
   frequencyPct: string;
+  frequencyRank?: 'MOST_COMMON' | 'COMMON' | 'LESS_COMMON' | 'INVALID';
+  expectedReplacementPattern?: 'ENDING_DIAGONAL' | 'IDEAL_CYCLE' | 'ZIGZAG' | null;
   namingValid: boolean;
+  namingPatternKind?: 'TRIANGLE_ABCDE' | 'DIAGONAL_12345' | 'ZIGZAG_ABC' | 'MISLABELED_TRIANGLE';
+  subwaveSignature?: string;
+  subwaveStructureValid?: boolean;
+  tradabilityStatus?: 'TRADABLE' | 'NOT_TRADABLE' | 'WITH_CAUTION';
+  tradabilityLabelFa?: string;
+  isTradable?: boolean;
   continuationLabelFa: string;
+  continuationVerdict?: 'CONTINUATION_BULLISH' | 'CONTINUATION_BEARISH' | 'RARE_TERMINAL_BREAKOUT' | 'PENDING';
+  nextExpectedWave?: 'WAVE_5' | 'WAVE_C' | 'WAVE_3' | 'PENDING';
+  nextExpectedWaveLabelFa?: string;
   isCounterTrendAligned: boolean;
+  counterTrendSlopeClass?: 'DESCENDING' | 'ASCENDING' | 'SYMMETRIC';
+  counterTrendVerdict?: 'VALID' | 'RARE_ENDING_TRIANGLE' | 'INVALID_POSITION';
   idealRetracement50: boolean;
   idealCompletionBeforeBox3: boolean;
   timingZone?: 'BEFORE_BOX_3' | 'INSIDE_BOX_3' | 'AFTER_BOX_3';
@@ -432,6 +470,10 @@ export interface TriangleAnalysisReport {
   isParallelRectangle?: boolean;
   isMixedTrendlines?: boolean;
   isRareWaveATriangle?: boolean;
+  upperTrendlineTouches?: number;
+  lowerTrendlineTouches?: number;
+  trendlineStrengthStatus?: 'VALID' | 'WEAK' | 'INVALID';
+  indecisionAssessmentFa?: string;
   confidence: number;
   warnings: string[];
   notes: string[];

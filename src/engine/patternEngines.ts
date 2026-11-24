@@ -23,8 +23,10 @@ import {
   FlatAnalysisReport,
   FlatSubtype,
   InputDataValidationReport,
+  TriangleAnalysisOptions,
   TriangleAnalysisReport,
   WaveCharacteristicsReport,
+  WaveDirection,
   WavePersonalityItem,
   WaveRole,
   WaveScenario,
@@ -2084,22 +2086,24 @@ export class PatternEngines {
   }
 
   /**
-   * Session 14 & 15 (013/014-triangle-advanced-engine):
-   * Analyzes Contracting/Expanding geometry, corrective position (2=20%, 4=50%, B=30%),
-   * A-B-C-D-E naming enforcement, 50% retracement ideal guideline, before-3rd-box ideal completion,
-   * trading approach (await breakout vs after breakout + pullback), and Ending Triangle detection.
+   * Session 14 & 15 (013/014-triangle-engine):
+   * Evaluates Tradability (14.1), Contracting vs Expanding vs Parallel (14.2, 14.8),
+   * Corrective Position (2, 4, B only — 14.3, 14.11), 5-wave A-B-C-D-E naming (14.4, 14.6),
+   * 3-3-3-3-3 internal subwaves (14.5), Market Indecision (14.7), Continuation & End=Correction End (14.9, 14.10),
+   * Counter-trend alignment (14.12), Zob practical W4 (14.13), and Trendline touch scoring (14.14).
    */
   public static analyzeTriangle(
     scenario: WaveScenario,
     candles: Candle[],
     parentRole: WaveRole = 'ROOT',
-    parentWaveLabel: string = ''
+    parentWaveLabel: string = '',
+    options?: TriangleAnalysisOptions
   ): TriangleAnalysisReport {
     const verts = scenario.vertices;
     const warnings: string[] = [];
     const notes: string[] = [];
 
-    const cleanPos = parentWaveLabel.replace(/[()VW\s]/g, '').toUpperCase();
+    const cleanPos = parentWaveLabel.replace(/موج/g, '').replace(/[()VW\s]/g, '').toUpperCase();
     const posChar = cleanPos.includes('2')
       ? '2'
       : cleanPos.includes('B')
@@ -2119,29 +2123,80 @@ export class PatternEngines {
       : '4';
 
     const freqMap: Record<string, string> = { '2': '۲۰٪', '4': '۵۰٪', B: '۳۰٪', '5': 'نادر', A: 'بسیار نادر' };
+    const freqRankMap: Record<string, TriangleAnalysisReport['frequencyRank']> = {
+      '4': 'MOST_COMMON',
+      B: 'COMMON',
+      '2': 'LESS_COMMON'
+    };
     const positionValid = posChar === '2' || posChar === '4' || posChar === 'B' || parentRole === 'ROOT';
     const frequencyPct = freqMap[posChar] || '۰٪';
+    const frequencyRank: TriangleAnalysisReport['frequencyRank'] =
+      positionValid ? freqRankMap[posChar] || 'MOST_COMMON' : 'INVALID';
     const endingTriangle = posChar === '5';
+    const expectedReplacementPattern: TriangleAnalysisReport['expectedReplacementPattern'] =
+      posChar === '5'
+        ? 'ENDING_DIAGONAL'
+        : posChar === '1' || posChar === '3'
+        ? 'IDEAL_CYCLE'
+        : null;
 
     if (!positionValid && !endingTriangle && posChar !== 'A') {
-      warnings.push(`مثلث در موج ${posChar} (اصلی) مجاز نیست؛ احتمالاً الگوی قطر (Diagonal) است.`);
+      warnings.push(`مثلث در موج ${posChar} (اصلی) مجاز نیست؛ شمارش اشتباه است و باید موج اصلاحی (۲، ۴ یا B) باشد.`);
     }
     if (endingTriangle) {
-      warnings.push('مثلث پایانی (Ending Triangle) در موج ۵: پس از تکمیل E احتمال ریزش پرقدرت وجود دارد.');
+      warnings.push('مثلث در موج ۵ مجاز نیست (باید قطر پایانی باشد)؛ در حالت نادر مثلث پایانی پس از E ریزش پرقدرت رخ می‌دهد.');
     }
 
     const coreLabels = verts.slice(1, 6).map(v => v.label.replace(/[()VW\s]/g, '').toUpperCase());
-    const namingValid =
+    const isABCDE =
       verts.length >= 6 &&
       coreLabels[0] === 'A' &&
       coreLabels[1] === 'B' &&
       coreLabels[2] === 'C' &&
       coreLabels[3] === 'D' &&
       coreLabels[4] === 'E';
+    const is12345 =
+      verts.length >= 6 &&
+      coreLabels[0] === '1' &&
+      coreLabels[1] === '2' &&
+      coreLabels[2] === '3' &&
+      coreLabels[3] === '4' &&
+      coreLabels[4] === '5';
+    const is3WaveABC =
+      verts.length === 4 &&
+      coreLabels[0] === 'A' &&
+      coreLabels[1] === 'B' &&
+      coreLabels[2] === 'C';
+
+    const namingValid = isABCDE;
+    const namingPatternKind: TriangleAnalysisReport['namingPatternKind'] = isABCDE
+      ? 'TRIANGLE_ABCDE'
+      : is12345
+      ? 'MISLABELED_TRIANGLE'
+      : is3WaveABC
+      ? 'ZIGZAG_ABC'
+      : 'MISLABELED_TRIANGLE';
 
     if (!namingValid && verts.length >= 6) {
       warnings.push('نام‌گذاری مثلث باید A-B-C-D-E باشد (نه ۱-۲-۳-۴-۵ که مخصوص قطر است).');
     }
+
+    const nextExpectedWave: TriangleAnalysisReport['nextExpectedWave'] =
+      posChar === '4'
+        ? 'WAVE_5'
+        : posChar === 'B'
+        ? 'WAVE_C'
+        : posChar === '2'
+        ? 'WAVE_3'
+        : 'PENDING';
+    const nextExpectedWaveLabelFa =
+      nextExpectedWave === 'WAVE_5'
+        ? 'پایان موج E = پایان اصلاح موج ۴ ← شروع موج ۵'
+        : nextExpectedWave === 'WAVE_C'
+        ? 'پایان موج E = پایان اصلاح موج B ← شروع موج C'
+        : nextExpectedWave === 'WAVE_3'
+        ? 'پایان موج E = پایان اصلاح موج ۲ ← شروع موج ۳'
+        : 'در انتظار تعیین جایگاه اصلاحی مثلث';
 
     if (verts.length < 5) {
       if (verts.length === 4) {
@@ -2154,8 +2209,19 @@ export class PatternEngines {
         positionValid,
         positionSlotLabelFa: `موقعیت: موج ${posChar}`,
         frequencyPct,
-        namingValid,
+        frequencyRank,
+        expectedReplacementPattern: verts.length === 4 ? 'ZIGZAG' : expectedReplacementPattern,
+        namingValid: false,
+        namingPatternKind: verts.length === 4 ? 'ZIGZAG_ABC' : namingPatternKind,
+        subwaveSignature: options?.internalSubwaves?.join('-') || '3-3-3-?',
+        subwaveStructureValid: false,
+        tradabilityStatus: 'NOT_TRADABLE',
+        tradabilityLabelFa: 'غیرمعامله‌پذیر (ساختار ناقص بدون پایان E)',
+        isTradable: false,
         continuationLabelFa: 'در انتظار تکمیل اضلاع D و E',
+        continuationVerdict: 'PENDING',
+        nextExpectedWave: 'PENDING',
+        nextExpectedWaveLabelFa,
         isCounterTrendAligned: true,
         idealRetracement50: false,
         idealCompletionBeforeBox3: false,
@@ -2163,9 +2229,12 @@ export class PatternEngines {
         timingSpanRatio: 0,
         tradingApproachFa: 'صبر تا تکمیل موج E و شکست خط روند',
         endingTriangle,
+        upperTrendlineTouches: options?.trendlineUpperTouches ?? 1,
+        lowerTrendlineTouches: options?.trendlineLowerTouches ?? 1,
+        trendlineStrengthStatus: 'WEAK',
         confidence: 0.45,
         warnings,
-        notes: ['حداقل ۴ ضلع از مثلث برای بررسی همگرایی یا واگرایی لازم است.']
+        notes: ['حداقل ۵ ضلع (A-B-C-D-E) برای تشخیص مثلث لازم است؛ ساختار سه‌موجی زیگزاگ محسوب می‌شود.']
       };
     }
 
@@ -2173,20 +2242,30 @@ export class PatternEngines {
     const legB = Math.abs(verts[2].price - verts[1].price);
     const legC = Math.abs(verts[3].price - verts[2].price);
     const legD = Math.abs(verts[4].price - verts[3].price);
-    const legE = verts[5] ? Math.abs(verts[5].price - verts[4].price) : legD * 0.7;
 
-    // Table 8: Subwave counts across legs A..E (5 legs with 5 subwaves -> warn Diagonal)
-    const subwaveCounts: number[] = [];
-    for (let li = 0; li < Math.min(5, verts.length - 1); li++) {
-      subwaveCounts.push(estimateSubwaveCount(candles, verts[li].candleIndex, verts[li + 1].candleIndex, 3));
-    }
+    // Table 8 & Session 14.5: Subwave counts across legs A..E (3-3-3-3-3 mandatory for Triangle)
+    const subwaveCounts: number[] =
+      options?.internalSubwaves && options.internalSubwaves.length === 5
+        ? [...options.internalSubwaves]
+        : Array.from({ length: Math.min(5, verts.length - 1) }, (_, li) =>
+            estimateSubwaveCount(candles, verts[li].candleIndex, verts[li + 1].candleIndex, 3)
+          );
+    const subwaveSignature = subwaveCounts.join('-');
+    const all3Subwaves = subwaveCounts.length >= 4 && subwaveCounts.every(c => c === 3);
+    const all5Subwaves = subwaveCounts.length >= 4 && subwaveCounts.every(c => c === 5);
+    const isMixedSubwaves = subwaveCounts.length >= 4 && !all3Subwaves && !all5Subwaves;
+    const subwaveStructureValid = all3Subwaves;
+
     let subwaveMismatchWarningFa: string | undefined;
-    if (subwaveCounts.length === 5 && subwaveCounts.every(c => c === 5)) {
-      subwaveMismatchWarningFa = 'جدول ۸: هر ۵ ضلع ساختار ۵زیرموجی دارند؛ این الگو قطر (Diagonal) است نه مثلث (۳-۳-۳-۳-۳).';
+    if (all5Subwaves) {
+      subwaveMismatchWarningFa = 'جدول ۸ / ۱۴.۵: هر ۵ ضلع ساختار ۵زیرموجی دارند؛ این الگو قطر (Diagonal) یا ایمپالس است نه مثلث (۳-۳-۳-۳-۳).';
+      warnings.push(subwaveMismatchWarningFa);
+    } else if (isMixedSubwaves) {
+      subwaveMismatchWarningFa = `ساختار درونی مختلط (${subwaveSignature}) برای مثلث نامعتبر است؛ تمام اضلاع مثلث باید سه‌موجی (۳-۳-۳-۳-۳) باشند.`;
       warnings.push(subwaveMismatchWarningFa);
     }
 
-    // جدول ۸ (۸.۹ و ۸.۱۰) + جلسه ۱۵: بررسی مستطیل (موازی)، صعودی/نزولی، محدود/نامحدود و خطوط روند مختلط
+    // جدول ۸ (۸.۹ و ۸.۱۰) + جلسه ۱۴/۱۵: بررسی مستطیل (موازی)، صعودی/نزولی، محدود/نامحدود و خطوط روند مختلط
     const topA = verts[1].price;
     const topC = verts[3].price;
     const botB = verts[2].price;
@@ -2243,6 +2322,8 @@ export class PatternEngines {
         ? 'LIMITED'
         : 'UNLIMITED';
 
+    const legE = verts[5] ? Math.abs(verts[5].price - verts[4].price) : legD * 0.7;
+
     const isContracting =
       !isParallelRectangle &&
       !isMixedTrendlines &&
@@ -2258,13 +2339,37 @@ export class PatternEngines {
       ? 'CONTRACTING'
       : 'INVALID';
 
-    // Counter-trend alignment check (Session 14.12 & 15.1): corrective triangle must not trend monotonically with impulse
+    // Counter-trend alignment check (Session 14.12 & 15.1)
     const netDrift = Math.abs(verts[verts.length - 1].price - verts[0].price);
     const isCounterTrendAligned =
       positionValid && netDrift <= Math.max(0.01, Math.max(legA, legB) * 1.15);
 
+    const mainTrendDir: WaveDirection = options?.mainTrendDirection ?? scenario.direction;
+    const upperMidSlope = upperC - upperA;
+    const lowerMidSlope = lowerD - lowerB;
+    const netSlopeSign = upperMidSlope + lowerMidSlope;
+    const counterTrendSlopeClass: TriangleAnalysisReport['counterTrendSlopeClass'] =
+      netSlopeSign < -triangleHeight * 0.05
+        ? 'DESCENDING'
+        : netSlopeSign > triangleHeight * 0.05
+        ? 'ASCENDING'
+        : 'SYMMETRIC';
+
+    const counterTrendVerdict: TriangleAnalysisReport['counterTrendVerdict'] = !positionValid
+      ? 'INVALID_POSITION'
+      : (mainTrendDir === 'BULLISH' && counterTrendSlopeClass === 'ASCENDING') ||
+        (mainTrendDir === 'BEARISH' && counterTrendSlopeClass === 'DESCENDING')
+      ? 'RARE_ENDING_TRIANGLE'
+      : 'VALID';
+
+    if (counterTrendVerdict === 'RARE_ENDING_TRIANGLE') {
+      warnings.push(
+        `جلسه ۱۴.۱۲: مثلث در روند ${mainTrendDir === 'BULLISH' ? 'صعودی' : 'نزولی'} شیب هم‌جهت دارد (نادر — مثلث پایانی).`
+      );
+    }
+
     if (isParallelRectangle) {
-      warnings.push('جدول ۸ (۸.۹): خطوط روند تقریباً موازی هستند؛ الگوی مستطیل محتمل است (مثلث همگرای استاندارد نیست).');
+      warnings.push('جدول ۸ (۸.۹) / ۱۴.۲: خطوط روند تقریباً موازی هستند؛ الگوی مستطیل است و مثلث محسوب نمی‌شود.');
     }
     if (isMixedTrendlines) {
       warnings.push('جدول ۸ (۸.۱۰): خطوط روند مختلط هستند (یک ضلع همگرا و ضلع مقابل واگرا)؛ مثلث نامعتبر است.');
@@ -2273,7 +2378,7 @@ export class PatternEngines {
       warnings.push('جدول ۸ (۸.۱۷–۸.۱۸) / جلسه ۱۵.۹: مثلث نامحدود (موج A به صورت مثلث یا جایگاه موج A) بسیار نادر است.');
     }
     if (triangleType === 'EXPANDING') {
-      warnings.push('مثلث واگرا (Expanding) نایاب‌تر از مثلث مانع است؛ شمارش را بادقت کنترل کنید.');
+      warnings.push('مثلث واگرا / گستشی (Expanding) نایاب‌تر از مثلث مانع است؛ شمارش را بادقت کنترل کنید.');
     }
     if (!isCounterTrendAligned) {
       warnings.push('هشدار جلسه ۱۵.۱: مثلث هم‌جهت با روند اصلی (به جای اصلاحی) احتمالاً الگوی قطر است.');
@@ -2287,7 +2392,7 @@ export class PatternEngines {
         : '';
 
     const triangleTypeLabelFa = isParallelRectangle
-      ? 'مستطیل / خطوط موازی (نیازمند تفکیک — جدول ۸.۹)'
+      ? 'مستطیل / خطوط موازی (مثلث نیست — جدول ۸.۹)'
       : isMixedTrendlines
       ? 'خطوط روند مختلط — مثلث نامعتبر (جدول ۸.۱۰)'
       : triangleType === 'EXPANDING'
@@ -2326,8 +2431,62 @@ export class PatternEngines {
     const lastClose = candles.length > 0 ? candles[candles.length - 1].close : verts[verts.length - 1].price;
     const upperBound = Math.max(verts[1].price, verts[3].price);
     const lowerBound = Math.min(verts[1].price, verts[3].price);
-    const brokeOut =
+    const inferredBrokeOut =
       scenario.direction === 'BULLISH' ? lastClose > upperBound : lastClose < lowerBound;
+    const brokeOut = options?.breakoutConfirmed ?? inferredBrokeOut;
+
+    // Session 14.14: Trendline touches (no strict rule, helper visualization; >=2 valid, 1 weak, 0 invalid)
+    const computeLineTouches = (pts: Array<{ x: number; y: number }>, lineA: { x: number; y: number }, lineB: { x: number; y: number }) => {
+      const dx = lineB.x - lineA.x;
+      if (Math.abs(dx) < 1e-6) return 2;
+      let count = 0;
+      for (const p of pts) {
+        const expected = lineA.y + ((lineB.y - lineA.y) * (p.x - lineA.x)) / dx;
+        if (Math.abs(p.y - expected) <= triangleHeight * 0.08) count++;
+      }
+      return Math.max(2, count);
+    };
+    const upperPts = verts.filter((_, i) => i % 2 === 1).map(v => ({ x: v.candleIndex, y: v.price }));
+    const lowerPts = verts.filter((_, i) => i > 0 && i % 2 === 0).map(v => ({ x: v.candleIndex, y: v.price }));
+    const upperTrendlineTouches =
+      options?.trendlineUpperTouches ??
+      (upperPts.length >= 2 ? computeLineTouches(upperPts, upperPts[0], upperPts[1]) : upperPts.length);
+    const lowerTrendlineTouches =
+      options?.trendlineLowerTouches ??
+      (lowerPts.length >= 2 ? computeLineTouches(lowerPts, lowerPts[0], lowerPts[1]) : lowerPts.length);
+    const minTouches = Math.min(upperTrendlineTouches, lowerTrendlineTouches);
+    const trendlineStrengthStatus: TriangleAnalysisReport['trendlineStrengthStatus'] =
+      minTouches <= 0 ? 'INVALID' : minTouches === 1 ? 'WEAK' : 'VALID';
+
+    // Session 14.1: Tradability evaluation
+    const isMarketEndCtx =
+      options?.isMarketEnd ?? (candles.length > 0 && lastVertIdx >= candles.length - 4);
+    const clear5Waves =
+      (options?.hasClearStructure ?? (triangleType !== 'INVALID' && subwaveStructureValid && !all5Subwaves)) &&
+      verts.length >= 5;
+    const definedEnd = options?.hasDefinedEnd ?? verts.length >= 6;
+    const tradabilityEval = PatternEngines.evaluateTriangleTradability({
+      hasClear5Waves: clear5Waves,
+      hasDefinedEnd: definedEnd,
+      isMarketEnd: isMarketEndCtx,
+      breakoutConfirmed: brokeOut
+    });
+
+    // Session 14.7: Market Indecision assessment
+    const indecisionEval = PatternEngines.evaluateTriangleMarketIndecision({
+      marketState: options?.marketState ?? (triangleType !== 'INVALID' ? 'INDECISIVE' : 'CONFIDENT_TREND'),
+      subwaves: subwaveCounts,
+      diagonalPossible: options?.diagonalPossible ?? all5Subwaves
+    });
+
+    // Session 14.9 & 14.10: Continuation & Wave Exit
+    const contEval = PatternEngines.evaluateTriangleContinuationAndExit({
+      mainTrend: mainTrendDir,
+      breakoutDirection:
+        options?.breakoutDirection ?? (brokeOut ? 'WITH_TREND' : 'NONE'),
+      correctiveSlot: posChar === '2' || posChar === '4' || posChar === 'B' ? posChar : '4',
+      isEComplete: definedEnd
+    });
 
     const tradingApproachFa = endingTriangle
       ? 'مثلث پایانی (موج ۵): با تکمیل E آماده سیو سود فوری و خروج باشید (جدول ۱۰.۱۱ / ۱۱.۱۰).'
@@ -2335,10 +2494,7 @@ export class PatternEngines {
       ? 'شکست خط روند رخ داده است — بهترین ورود در پول‌بک به خط روند شکسته‌شده (ریسک کم)'
       : 'در حال نوسان درون مثلث — منتظر شکست خط روند بمانید (ورود در E پرریسک است)';
 
-    const continuationLabelFa =
-      scenario.direction === 'BULLISH'
-        ? 'الگوی ادامه‌دهنده صعودی: پس از اتمام E جهش در جهت روند اصلی'
-        : 'الگوی ادامه‌دهنده نزولی: پس از اتمام E ادامه فشار نزول';
+    const continuationLabelFa = contEval.continuationLabelFa;
 
     notes.push(`فراوانی موقعیت در موج ${posChar}: ${frequencyPct} | دامنه: ${scopeVariant === 'UNLIMITED' ? 'نامحدود (Unlimited)' : 'محدود (Limited)'} | نام‌گذاری غالباً: ${dominantWaveName}`);
     notes.push(
@@ -2349,15 +2505,23 @@ export class PatternEngines {
         : 'برخی اضلاع کمتر از ۵۰٪ بازگشت داشته‌اند (مثلث غیرایده‌آل).'
     );
 
+    const detected =
+      triangleType !== 'INVALID' &&
+      !isParallelRectangle &&
+      !isMixedTrendlines &&
+      !all5Subwaves &&
+      !isMixedSubwaves;
+
     const confidence =
       (positionValid ? 0.8 : 0.35) -
       (isParallelRectangle || isMixedTrendlines ? 0.25 : 0) -
+      (!subwaveStructureValid ? 0.22 : 0) -
       (triangleType === 'EXPANDING' ? 0.1 : 0) -
       (allUnder50 ? 0.12 : idealRetracement50 ? 0 : 0.06) -
       (brokeOut ? 0 : 0.08);
 
     return {
-      detected: triangleType !== 'INVALID',
+      detected,
       triangleType,
       triangleTypeLabelFa,
       directionalVariant,
@@ -2366,9 +2530,22 @@ export class PatternEngines {
       positionValid,
       positionSlotLabelFa: `موج ${posChar} (${positionValid ? 'اصلاحی مجاز' : endingTriangle ? 'پایانی' : 'نامعتبر'})`,
       frequencyPct,
+      frequencyRank,
+      expectedReplacementPattern: all5Subwaves ? 'ENDING_DIAGONAL' : expectedReplacementPattern,
       namingValid,
+      namingPatternKind,
+      subwaveSignature,
+      subwaveStructureValid,
+      tradabilityStatus: tradabilityEval.status,
+      tradabilityLabelFa: tradabilityEval.labelFa,
+      isTradable: tradabilityEval.isTradable,
       continuationLabelFa,
+      continuationVerdict: contEval.continuationVerdict,
+      nextExpectedWave: contEval.nextExpectedWave,
+      nextExpectedWaveLabelFa: contEval.nextExpectedWaveLabelFa,
       isCounterTrendAligned,
+      counterTrendSlopeClass,
+      counterTrendVerdict,
       idealRetracement50,
       idealCompletionBeforeBox3,
       timingZone,
@@ -2380,9 +2557,391 @@ export class PatternEngines {
       isParallelRectangle,
       isMixedTrendlines,
       isRareWaveATriangle,
+      upperTrendlineTouches,
+      lowerTrendlineTouches,
+      trendlineStrengthStatus,
+      indecisionAssessmentFa: indecisionEval.reasonFa,
       confidence: Math.max(0.15, Math.min(0.95, confidence)),
       warnings,
       notes
+    };
+  }
+
+  /**
+   * Session 14 (§2.1, T-14.1..T-14.3):
+   * Triangle Tradability Evaluator:
+   * - Clear 5 waves + defined E -> TRADABLE
+   * - Ambiguous / undefined E -> NOT_TRADABLE
+   * - Market end without breakout -> WITH_CAUTION (may expand)
+   */
+  public static evaluateTriangleTradability(params: {
+    hasClear5Waves: boolean;
+    hasDefinedEnd: boolean;
+    isMarketEnd?: boolean;
+    breakoutConfirmed?: boolean;
+  }): {
+    status: 'TRADABLE' | 'NOT_TRADABLE' | 'WITH_CAUTION';
+    isTradable: boolean;
+    labelFa: string;
+  } {
+    const { hasClear5Waves, hasDefinedEnd, isMarketEnd = false, breakoutConfirmed = false } = params;
+    if (!hasClear5Waves || !hasDefinedEnd) {
+      return {
+        status: 'NOT_TRADABLE',
+        isTradable: false,
+        labelFa: 'غیرمعامله‌پذیر (مثلث مبهم یا بدون پایان مشخص موج E)'
+      };
+    }
+    if (isMarketEnd && !breakoutConfirmed) {
+      return {
+        status: 'WITH_CAUTION',
+        isTradable: true,
+        labelFa: 'معامله با احتیاط در انتهای بازار (احتمال گسترش موج E تا شکست خط روند)'
+      };
+    }
+    return {
+      status: 'TRADABLE',
+      isTradable: true,
+      labelFa: 'معامله‌پذیر (ساختار واضح ۵موجی A-B-C-D-E و پایان مشخص)'
+    };
+  }
+
+  /**
+   * Session 14 (§2.4, §2.5, §2.6, T-14.11..T-14.19):
+   * Structure & Naming Disambiguator:
+   * - A-B-C-D-E + [3,3,3,3,3] -> TRIANGLE
+   * - 1-2-3-4-5 + [5,3,5,3,5] or [3,3,3,3,3] -> DIAGONAL / IMPULSE
+   * - A-B-C (3 waves) -> ZIGZAG
+   * - A-B-C-D-E labeled as 1-2-3-4-5 or mixed subwaves -> INVALID / MISLABELED
+   */
+  public static classifyTriangleStructureAndNaming(params: {
+    labels: string[];
+    subwaves?: number[];
+    declaredAsTriangle?: boolean;
+  }): {
+    classification: 'TRIANGLE' | 'DIAGONAL' | 'ZIGZAG' | 'INVALID';
+    isValid: boolean;
+    namingValid: boolean;
+    subwaveStructureValid: boolean;
+    reasonFa: string;
+  } {
+    const norm = params.labels
+      .map(l => l.replace(/[()VW\s]/g, '').toUpperCase())
+      .filter(l => l !== '0');
+    const sig = norm.join('-');
+    const subs = params.subwaves;
+    const all3 = subs ? subs.length === 5 && subs.every(s => s === 3) : true;
+    const all5 = subs ? subs.length === 5 && subs.every(s => s === 5) : false;
+
+    if (sig === 'A-B-C') {
+      return {
+        classification: 'ZIGZAG',
+        isValid: !params.declaredAsTriangle,
+        namingValid: false,
+        subwaveStructureValid: false,
+        reasonFa: 'ساختار ۳ موجی A-B-C یک زیگزاگ است، نه مثلث ۵موجی A-B-C-D-E.'
+      };
+    }
+
+    if (sig === '1-2-3-4-5') {
+      if (params.declaredAsTriangle) {
+        return {
+          classification: 'INVALID',
+          isValid: false,
+          namingValid: false,
+          subwaveStructureValid: all3,
+          reasonFa: 'خطا: نام‌گذاری مثلث باید A-B-C-D-E باشد؛ استفاده از ۱-۲-۳-۴-۵ مخصوص قطر است.'
+        };
+      }
+      return {
+        classification: 'DIAGONAL',
+        isValid: true,
+        namingValid: true,
+        subwaveStructureValid: all3 || all5,
+        reasonFa: 'ساختار ۱-۲-۳-۴-۵ مربوط به الگوی قطر / ایمپالس است، نه مثلث.'
+      };
+    }
+
+    if (sig === 'A-B-C-D-E') {
+      if (all5) {
+        return {
+          classification: 'DIAGONAL',
+          isValid: false,
+          namingValid: true,
+          subwaveStructureValid: false,
+          reasonFa: 'ساختار ۵زیرموجی (۵-۵-۵-۵-۵) الگوی قطر است، نه مثلث (۳-۳-۳-۳-۳).'
+        };
+      }
+      if (!all3) {
+        return {
+          classification: 'INVALID',
+          isValid: false,
+          namingValid: true,
+          subwaveStructureValid: false,
+          reasonFa: `ساختار درونی مختلط (${subs?.join('-')}) برای مثلث نامعتبر است؛ هر ۵ ضلع باید سه‌موجی (۳-۳-۳-۳-۳) باشند.`
+        };
+      }
+      return {
+        classification: 'TRIANGLE',
+        isValid: true,
+        namingValid: true,
+        subwaveStructureValid: true,
+        reasonFa: 'ساختار A-B-C-D-E با زیرموج‌های ۳-۳-۳-۳-۳: الگوی مثلث معتبر.'
+      };
+    }
+
+    return {
+      classification: 'INVALID',
+      isValid: false,
+      namingValid: false,
+      subwaveStructureValid: false,
+      reasonFa: `نام‌گذاری «${sig}» با ساختار استاندارد A-B-C-D-E مثلث منطبق نیست.`
+    };
+  }
+
+  /**
+   * Session 14 (§2.7, T-14.20..T-14.22):
+   * Market Indecision Psychology Evaluator:
+   * - Confident direct trend -> NOT_TRIANGLE
+   * - Indecisive market + 3-3-3-3-3 -> DEFINITIVE_TRIANGLE
+   * - Indecisive market + diagonalPossible -> BOTH_TRIANGLE_AND_DIAGONAL
+   */
+  public static evaluateTriangleMarketIndecision(params: {
+    marketState: 'CONFIDENT_TREND' | 'INDECISIVE';
+    subwaves?: number[];
+    diagonalPossible?: boolean;
+  }): {
+    verdict: 'NOT_TRIANGLE' | 'DEFINITIVE_TRIANGLE' | 'BOTH_TRIANGLE_AND_DIAGONAL';
+    possiblePatterns: Array<'TRIANGLE' | 'DIAGONAL' | 'DIRECT_TREND'>;
+    reasonFa: string;
+  } {
+    const all3 = params.subwaves ? params.subwaves.length === 5 && params.subwaves.every(s => s === 3) : false;
+    if (params.marketState === 'CONFIDENT_TREND') {
+      return {
+        verdict: 'NOT_TRIANGLE',
+        possiblePatterns: ['DIRECT_TREND'],
+        reasonFa: 'بازار در روند مطمئن و مستقیم است؛ مثلث محصول دودلی بازار است و در این حالت تشکیل نمی‌شود.'
+      };
+    }
+    if (params.diagonalPossible && !all3) {
+      return {
+        verdict: 'BOTH_TRIANGLE_AND_DIAGONAL',
+        possiblePatterns: ['TRIANGLE', 'DIAGONAL'],
+        reasonFa: 'در فضای دودلی بازار پیش از تکمیل زیرساختار، هر دو سناریوی مثلث و قطر باید در پیش‌بینی لحاظ شوند.'
+      };
+    }
+    if (all3) {
+      return {
+        verdict: 'DEFINITIVE_TRIANGLE',
+        possiblePatterns: params.diagonalPossible ? ['TRIANGLE', 'DIAGONAL'] : ['TRIANGLE'],
+        reasonFa: 'دودلی بازار همراه با ساختار درونی ۳-۳-۳-۳-۳: الگوی مثلث قطعی تشخیص داده شد.'
+      };
+    }
+    return {
+      verdict: 'BOTH_TRIANGLE_AND_DIAGONAL',
+      possiblePatterns: ['TRIANGLE', 'DIAGONAL'],
+      reasonFa: 'دودلی بازار فعال است؛ با تایید ساختار ۳-۳-۳-۳-۳ سناریوی مثلث تقویت می‌شود.'
+    };
+  }
+
+  /**
+   * Session 14 (§2.9 & §2.10, T-14.26..T-14.31):
+   * Continuation Pattern & Wave-E Exit = End of Corrective Wave.
+   */
+  public static evaluateTriangleContinuationAndExit(params: {
+    mainTrend: WaveDirection;
+    breakoutDirection?: 'WITH_TREND' | 'COUNTER_TREND' | 'NONE';
+    correctiveSlot: '2' | '4' | 'B';
+    isEComplete?: boolean;
+  }): {
+    continuationVerdict: 'CONTINUATION_BULLISH' | 'CONTINUATION_BEARISH' | 'RARE_TERMINAL_BREAKOUT' | 'PENDING';
+    continuationLabelFa: string;
+    nextExpectedWave: 'WAVE_5' | 'WAVE_C' | 'WAVE_3' | 'PENDING';
+    nextExpectedWaveLabelFa: string;
+    isRare: boolean;
+  } {
+    const { mainTrend, breakoutDirection = 'WITH_TREND', correctiveSlot, isEComplete = true } = params;
+    const nextExpectedWave: 'WAVE_5' | 'WAVE_C' | 'WAVE_3' | 'PENDING' = !isEComplete
+      ? 'PENDING'
+      : correctiveSlot === '4'
+      ? 'WAVE_5'
+      : correctiveSlot === 'B'
+      ? 'WAVE_C'
+      : 'WAVE_3';
+
+    const nextExpectedWaveLabelFa =
+      nextExpectedWave === 'WAVE_5'
+        ? 'پایان مثلث موج ۴ (E) = پایان موج اصلاحی ← شروع موج ۵'
+        : nextExpectedWave === 'WAVE_C'
+        ? 'پایان مثلث موج B (E) = پایان موج اصلاحی ← شروع موج C'
+        : nextExpectedWave === 'WAVE_3'
+        ? 'پایان مثلث موج ۲ (E) = پایان موج اصلاحی ← شروع موج ۳'
+        : 'در انتظار تکمیل موج E';
+
+    if (breakoutDirection === 'COUNTER_TREND') {
+      return {
+        continuationVerdict: 'RARE_TERMINAL_BREAKOUT',
+        continuationLabelFa: 'شکست خلاف روند اصلی (نادر — مثلث پایانی)',
+        nextExpectedWave,
+        nextExpectedWaveLabelFa,
+        isRare: true
+      };
+    }
+
+    if (breakoutDirection === 'NONE') {
+      return {
+        continuationVerdict: 'PENDING',
+        continuationLabelFa:
+          mainTrend === 'BULLISH'
+            ? 'الگوی ادامه‌دهنده صعودی (در انتظار شکست رو به بالا)'
+            : 'الگوی ادامه‌دهنده نزولی (در انتظار شکست رو به پایین)',
+        nextExpectedWave,
+        nextExpectedWaveLabelFa,
+        isRare: false
+      };
+    }
+
+    return {
+      continuationVerdict: mainTrend === 'BULLISH' ? 'CONTINUATION_BULLISH' : 'CONTINUATION_BEARISH',
+      continuationLabelFa:
+        mainTrend === 'BULLISH'
+          ? 'الگوی ادامه‌دهنده صعودی: پس از شکست رو به بالا، صعود ادامه می‌یابد'
+          : 'الگوی ادامه‌دهنده نزولی: پس از شکست رو به پایین، نزول ادامه می‌یابد',
+      nextExpectedWave,
+      nextExpectedWaveLabelFa,
+      isRare: false
+    };
+  }
+
+  /**
+   * Session 14 (§2.12, T-14.35..T-14.37):
+   * Counter-Trend Alignment:
+   * - Bullish main trend + Descending triangle -> VALID
+   * - Bullish main trend + Ascending triangle -> RARE (ending triangle)
+   * - Bearish main trend + Ascending triangle -> VALID
+   */
+  public static evaluateTriangleCounterTrend(params: {
+    mainTrend: WaveDirection;
+    triangleSlope: 'ASCENDING' | 'DESCENDING' | 'SYMMETRIC';
+  }): {
+    isValid: boolean;
+    isRare: boolean;
+    verdict: 'VALID' | 'RARE_ENDING_TRIANGLE';
+    reasonFa: string;
+  } {
+    const { mainTrend, triangleSlope } = params;
+    if (
+      (mainTrend === 'BULLISH' && triangleSlope === 'DESCENDING') ||
+      (mainTrend === 'BEARISH' && triangleSlope === 'ASCENDING') ||
+      triangleSlope === 'SYMMETRIC'
+    ) {
+      return {
+        isValid: true,
+        isRare: false,
+        verdict: 'VALID',
+        reasonFa: `مثلث با شیب ${triangleSlope === 'DESCENDING' ? 'نزولی' : triangleSlope === 'ASCENDING' ? 'صعودی' : 'متقارن'} خلاف جهت روند ${mainTrend === 'BULLISH' ? 'صعودی' : 'نزولی'} است و صحیح می‌باشد.`
+      };
+    }
+    return {
+      isValid: true,
+      isRare: true,
+      verdict: 'RARE_ENDING_TRIANGLE',
+      reasonFa: 'مثلث هم‌جهت با روند اصلی (مثلاً مثلث صعودی در روند صعودی) نادر است و احتمال مثلث پایانی دارد.'
+    };
+  }
+
+  /**
+   * Session 14 (§2.13, T-14.38..T-14.40):
+   * Practical Case Study — Zob Ahan (ذوب):
+   * - Wave 4 Contracting or Expanding Triangle (A-B-C-D-E, 3-3-3-3-3) -> VALID (leads into Wave 5)
+   * - Wave 5 Triangle -> INVALID (must be Ending Diagonal)
+   */
+  public static evaluateZobPracticalTriangle(params: {
+    waveSlot: '2' | '4' | 'B' | '5' | '1' | '3';
+    triangleType: 'CONTRACTING' | 'EXPANDING';
+    subwaves?: number[];
+    breakoutPullbackConfirmed?: boolean;
+  }): {
+    isValid: boolean;
+    nextWave: '5' | '3' | 'C' | 'NONE';
+    recommendedSetupFa: string;
+    errorPatternSuggestion?: 'ENDING_DIAGONAL' | 'IDEAL_CYCLE';
+    reasonFa: string;
+  } {
+    const { waveSlot, triangleType, subwaves = [3, 3, 3, 3, 3], breakoutPullbackConfirmed = false } = params;
+    if (waveSlot === '5') {
+      return {
+        isValid: false,
+        nextWave: 'NONE',
+        recommendedSetupFa: 'خطا: در موج ۵ باید الگوی قطر پایانی (Ending Diagonal) بررسی شود',
+        errorPatternSuggestion: 'ENDING_DIAGONAL',
+        reasonFa: 'در مثال ذوب مثلث در موج ۵ مجاز نیست؛ ساختار موج ۵ باید قطر پایانی باشد.'
+      };
+    }
+    if (waveSlot === '1' || waveSlot === '3') {
+      return {
+        isValid: false,
+        nextWave: 'NONE',
+        recommendedSetupFa: 'خطا: مثلث در موج ۱ یا ۳ مجاز نیست',
+        errorPatternSuggestion: 'IDEAL_CYCLE',
+        reasonFa: `مثلث در موج ${waveSlot} مجاز نیست.`
+      };
+    }
+    const all3 = subwaves.length === 5 && subwaves.every(s => s === 3);
+    if (!all3) {
+      return {
+        isValid: false,
+        nextWave: 'NONE',
+        recommendedSetupFa: 'خطا: ساختار درونی اضلاع مثلث باید ۳-۳-۳-۳-۳ باشد',
+        errorPatternSuggestion: 'ENDING_DIAGONAL',
+        reasonFa: 'ساختار درونی اضلاع مثلث ذوب با الگوی ۳-۳-۳-۳-۳ تطابق ندارد.'
+      };
+    }
+    const nextWave = waveSlot === '4' ? '5' : waveSlot === 'B' ? 'C' : '3';
+    return {
+      isValid: true,
+      nextWave,
+      recommendedSetupFa: breakoutPullbackConfirmed
+        ? `ستاپ ذوب تایید شد: شکست خط روند بالا + پولبک ← شروع موج ${nextWave} شتابدار`
+        : `در انتظار شکست خط روند بالا و پولبک برای ورود موج ${nextWave}`,
+      reasonFa: `مثلث ${triangleType === 'EXPANDING' ? 'گستشی' : 'مانع'} در موج ${waveSlot} ذوب معتبر است و پایان E آغازگر موج ${nextWave} خواهد بود.`
+    };
+  }
+
+  /**
+   * Session 14 (§2.14, T-14.41..T-14.43):
+   * Triangle Trendline Helper Rule (no strict mathematical law, visual aid):
+   * - 2+ touches -> VALID (more touches = higher credibility)
+   * - 1 touch -> WEAK
+   * - 0 touches -> INVALID
+   */
+  public static evaluateTriangleTrendlineTouches(touches: number): {
+    status: 'VALID' | 'WEAK' | 'INVALID';
+    isValid: boolean;
+    touches: number;
+    reasonFa: string;
+  } {
+    if (touches >= 2) {
+      return {
+        status: 'VALID',
+        isValid: true,
+        touches,
+        reasonFa: `خط روند مثلث با ${touches} برخورد معتبر است (ابزار نمایشی؛ برخورد بیشتر = اعتبار بالاتر).`
+      };
+    }
+    if (touches === 1) {
+      return {
+        status: 'WEAK',
+        isValid: false,
+        touches,
+        reasonFa: 'خط روند مثلث تنها ۱ برخورد دارد و ضعیف است (ابزار نمایشی؛ بدون نقش تایید قطعی).'
+      };
+    }
+    return {
+      status: 'INVALID',
+      isValid: false,
+      touches,
+      reasonFa: 'خط روند با ۰ برخورد نامعتبر است و مثلث را نمایش نمی‌دهد.'
     };
   }
 

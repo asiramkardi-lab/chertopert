@@ -594,6 +594,30 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
         </div>
       )}
 
+      {/* Session 14 TrianglePatternValidator Summary Readout */}
+      {summary.triangleReport && (
+        <div
+          data-testid="rules-engine-triangle-indicator"
+          className={`px-3.5 py-2 border-t border-slate-800/80 space-y-1 text-[10.5px] ${
+            summary.triangleReport.detected && summary.triangleReport.positionValid
+              ? 'bg-emerald-950/20 text-emerald-100'
+              : 'bg-rose-950/25 text-rose-100'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="font-bold">
+              {summary.triangleReport.triangleTypeLabelFa}
+            </span>
+            <span className="font-mono tabular-nums text-cyan-300">
+              {summary.triangleReport.subwaveSignature || '3-3-3-3-3'} · فراوانی {summary.triangleReport.frequencyPct}
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-300 leading-relaxed">
+            {summary.triangleReport.tradabilityLabelFa || summary.triangleReport.tradingApproachFa}
+          </p>
+        </div>
+      )}
+
       {/* Clean Footer Metadata Strip (No Static Pills) */}
       <div className="px-3.5 py-2 bg-slate-950/65 border-t border-slate-800 flex items-center justify-between gap-2 text-[10.5px] text-slate-400 font-mono tabular-nums">
         <span>

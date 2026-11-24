@@ -45,6 +45,15 @@ export const SUPPORTED_ASSETS: MarketAssetConfig[] = [
     maxAllowedDegree: 6,
     descriptionFa: 'انس جهانی طلا — ساختار منظم، مناسب برای تحلیل از هفتگی تا یک‌ساعته',
     timeframes: ['1M', '1W', '1D', '4H', '1H', '15M']
+  },
+  {
+    id: 'TSE_ZOB',
+    name: 'ذوب‌آهن اصفهان (ذوب)',
+    symbol: 'ذوب (TSE)',
+    marketType: 'TSE_IRAN',
+    maxAllowedDegree: 4,
+    descriptionFa: 'مثال عملی جلسه ۱۴ — مثلث مانع (A-B-C-D-E) در موج ۴ پیش از جهش موج ۵',
+    timeframes: ['1M', '1W', '1D', '4H', '1H', '15M']
   }
 ];
 
@@ -119,6 +128,21 @@ const ASSET_WAYPOINTS: Record<string, Waypoint[]> = {
     { u: 0.78, p: 0.37, isMotive: false },  // Wave 4 overlaps W1 (0.37 < 0.40 -> Terminal / Diagonal candidate!)
     { u: 0.95, p: 0.85, isMotive: true },   // Wave 5 (shorter than W3 -> Terminal!)
     { u: 1.0, p: 0.74, isMotive: false }
+  ],
+  // Zob Ahan (ذوب): Session 14 Practical Wave 4 Contracting Triangle (A-B-C-D-E) -> Wave 5 breakout
+  TSE_ZOB: [
+    { u: 0.0, p: 0.14, isMotive: false },
+    { u: 0.06, p: 0.0, isMotive: false },   // Absolute Bottom
+    { u: 0.20, p: 0.28, isMotive: true },   // Wave 1
+    { u: 0.29, p: 0.13, isMotive: false },  // Wave 2
+    { u: 0.48, p: 0.72, isMotive: true },   // Wave 3
+    { u: 0.56, p: 0.48, isMotive: false },  // Wave 4.A
+    { u: 0.63, p: 0.66, isMotive: false },  // Wave 4.B
+    { u: 0.70, p: 0.52, isMotive: false },  // Wave 4.C
+    { u: 0.76, p: 0.62, isMotive: false },  // Wave 4.D
+    { u: 0.82, p: 0.55, isMotive: false },  // Wave 4.E (Triangle End)
+    { u: 0.97, p: 0.98, isMotive: true },   // Wave 5 Impulsive breakout
+    { u: 1.0, p: 0.91, isMotive: false }
   ]
 };
 
@@ -162,8 +186,22 @@ const ANCHOR_START_TS = ANCHOR_END_TS - TOTAL_SPAN_MS;
 
 function evaluatePriceAtTimestamp(assetId: string, ts: number, depth: number): number {
   const waypoints = ASSET_WAYPOINTS[assetId] || ASSET_WAYPOINTS.BTCUSDT;
-  const base = assetId === 'BTCUSDT' ? 42000 : assetId === 'TSE_SHAPNA' ? 3100 : 1920;
-  const scale = assetId === 'BTCUSDT' ? 46000 : assetId === 'TSE_SHAPNA' ? 3900 : 880;
+  const base =
+    assetId === 'BTCUSDT'
+      ? 42000
+      : assetId === 'TSE_SHAPNA'
+      ? 3100
+      : assetId === 'TSE_ZOB'
+      ? 2400
+      : 1920;
+  const scale =
+    assetId === 'BTCUSDT'
+      ? 46000
+      : assetId === 'TSE_SHAPNA'
+      ? 3900
+      : assetId === 'TSE_ZOB'
+      ? 2800
+      : 880;
 
   const u = Math.max(0, Math.min(1, (ts - ANCHOR_START_TS) / TOTAL_SPAN_MS));
 
@@ -245,7 +283,14 @@ export function generateRealisticCandles(
   }
 
   const candles: Candle[] = [];
-  const baseScale = assetId === 'BTCUSDT' ? 46000 : assetId === 'TSE_SHAPNA' ? 3900 : 880;
+  const baseScale =
+    assetId === 'BTCUSDT'
+      ? 46000
+      : assetId === 'TSE_SHAPNA'
+      ? 3900
+      : assetId === 'TSE_ZOB'
+      ? 2800
+      : 880;
   const noiseAmp = timeframe === '15M' ? 0.008 : timeframe === '1H' ? 0.005 : 0.003;
 
   for (let i = 0; i < actualCount; i++) {

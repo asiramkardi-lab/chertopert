@@ -27,6 +27,7 @@ import {
   ZigzagAnalysisReport,
   FlatAnalysisReport,
   FlatSubtype,
+  TriangleAnalysisOptions,
   TriangleAnalysisReport,
   ComplexPatternReport,
   MarketTerminalScenarioWarning
@@ -131,6 +132,7 @@ export interface ValidationSummary {
   nonIdealPatternFlag?: NonIdealPatternFlag;
   flatPatternFlag?: FlatPatternFlag;
   marketTerminalFlag?: MarketTerminalFlag;
+  triangleReport?: TriangleAnalysisReport;
   unifiedDetection?: UnifiedPatternDetectionReport;
 }
 
@@ -758,6 +760,93 @@ export class RulesEngine {
   }
 
   /**
+   * RulesEngine 'TrianglePatternValidator' (Session 14 §2.1..§2.14):
+   * Validates 5-leg A-B-C-D-E naming, 3-3-3-3-3 internal structure, corrective slot (2, 4, B only),
+   * Contracting vs Expanding vs Parallel Rectangle geometry, tradability, and trendline touches.
+   */
+  public static TrianglePatternValidator(
+    pattern: PatternFamily,
+    vertices: WaveVertex[],
+    direction: WaveDirection = 'BULLISH',
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = '',
+    candles: Candle[] = [],
+    options?: TriangleAnalysisOptions
+  ): {
+    isTriangleScenario: boolean;
+    isValidTriangle: boolean;
+    report: TriangleAnalysisReport;
+    rules: RuleValidationItem[];
+  } {
+    const tempScenario: WaveScenario = {
+      id: 'tri_val',
+      name: 'Triangle Validation',
+      color: '#38bdf8',
+      isPrimary: false,
+      isLocked: false,
+      isSelectedForTree: false,
+      patternType: pattern,
+      degree: 'PRIMARY',
+      direction,
+      vertices,
+      currentWave: vertices[vertices.length - 1]?.label || 'E',
+      completionPercentage: 100,
+      validityScore: 80,
+      idealnessScore: 80,
+      confidenceScore: 80,
+      invalidationPrice: vertices[0]?.price ?? 0,
+      targets: [],
+      rulesResults: [],
+      source: 'AI',
+      timeframe: '1D'
+    };
+
+    const report = PatternEngines.analyzeTriangle(
+      tempScenario,
+      candles,
+      parentRole,
+      parentWaveLabel,
+      options
+    );
+    const rules: RuleValidationItem[] = [];
+    const isTriangleScenario =
+      pattern === 'TRIANGLE_CONVERGING' ||
+      pattern === 'TRIANGLE_EXPANDING' ||
+      report.namingPatternKind === 'TRIANGLE_ABCDE';
+
+    if (vertices.length >= 5) {
+      rules.push({
+        ruleId: 'TRIANGLE_NAMING_ABCDE',
+        name: 'Triangle A-B-C-D-E Naming (Session 14 §2.4 & §2.6)',
+        nameFa: 'نام‌گذاری ۵موجی مثلث (A-B-C-D-E — نه ۱-۲-۳-۴-۵)',
+        type: 'STRUCTURE',
+        passed: report.namingValid,
+        score: report.namingValid ? 100 : 35,
+        conceptId: 'C24',
+        messageFa: report.namingValid
+          ? 'نام‌گذاری ۵ ضلع مثلث به‌درستی با حروف A-B-C-D-E ثبت شده است.'
+          : 'خطا: نام‌گذاری مثلث باید A-B-C-D-E باشد (استفاده از ۱-۲-۳-۴-۵ مربوط به قطر است).',
+        canBeSolvedByAlternate: !report.namingValid && report.namingPatternKind === 'MISLABELED_TRIANGLE'
+          ? 'ENDING_DIAGONAL'
+          : undefined
+      });
+    }
+
+    const isValidTriangle =
+      report.detected &&
+      report.positionValid &&
+      report.namingValid &&
+      Boolean(report.subwaveStructureValid);
+
+    return {
+      isTriangleScenario,
+      isValidTriangle,
+      report,
+      rules
+    };
+  }
+
+  /**
    * Builds scenario-level warning metadata from a MarketTerminalFlag when a Flat pattern sits at chart end.
    */
   public static buildMarketTerminalWarningMetadata(
@@ -1215,7 +1304,11 @@ export class RulesEngine {
     parentRole: WaveRole = 'ROOT',
     parentWaveLabel: string = '',
     candles?: Candle[],
-    options?: { skipUnifiedDetection?: boolean; internalSubwaves?: [3 | 5, 3 | 5, 3 | 5] }
+    options?: {
+      skipUnifiedDetection?: boolean;
+      internalSubwaves?: [3 | 5, 3 | 5, 3 | 5];
+      triangleOptions?: TriangleAnalysisOptions;
+    }
   ): ValidationSummary {
     const rules: RuleValidationItem[] = [];
     let suggestedAlternative: PatternFamily | undefined;
@@ -1223,6 +1316,7 @@ export class RulesEngine {
     let nonIdealPatternFlag: NonIdealPatternFlag | undefined;
     let flatPatternFlag: FlatPatternFlag | undefined;
     let marketTerminalFlag: MarketTerminalFlag | undefined;
+    let triangleReport: TriangleAnalysisReport | undefined;
 
     if (vertices.length < 2) {
       return {
@@ -1742,28 +1836,37 @@ export class RulesEngine {
               : 'هندسه موج‌های مثلث با نوع همگرا/واگرا مطابقت ندارد.'
           });
 
-          if (candles && candles.length >= 15) {
-            let fiveWaveLegCount = 0;
-            for (let legIdx = 1; legIdx < Math.min(vertices.length, 6); legIdx++) {
-              const s = Math.max(0, Math.min(candles.length - 1, Math.min(vertices[legIdx - 1].candleIndex, vertices[legIdx].candleIndex)));
-              const e = Math.max(s, Math.min(candles.length - 1, Math.max(vertices[legIdx - 1].candleIndex, vertices[legIdx].candleIndex)));
-              const slice = candles.slice(s, e + 1);
-              if (slice.length >= 8 && PivotDetector.detectPivots(slice, 1, 1, 0.45).length >= 4) {
-                fiveWaveLegCount++;
-              }
-            }
-            const triSubOk = fiveWaveLegCount === 0;
+          const triValidator = this.TrianglePatternValidator(
+            pattern,
+            vertices,
+            direction,
+            parentRole,
+            parentWaveLabel,
+            candles || [],
+            options?.triangleOptions
+          );
+          triangleReport = triValidator.report;
+          rules.push(...triValidator.rules);
+
+          const hasOverrideSubs = Boolean(options?.triangleOptions?.internalSubwaves?.length);
+          if (hasOverrideSubs || (candles && candles.length >= 15)) {
+            const subCounts = triValidator.report.subwaveCounts || [3, 3, 3, 3, 3];
+            const fiveWaveLegCount = subCounts.filter(c => c === 5).length;
+            const triSubOk = Boolean(triValidator.report.subwaveStructureValid);
             rules.push({
               ruleId: 'TRIANGLE_SUBWAVES_33333',
               name: 'Triangle 3-3-3-3-3 Internal Subwaves',
               nameFa: 'ساختار درونی سه‌موجی اضلاع مثلث (۳-۳-۳-۳-۳)',
               type: 'STRUCTURE',
               passed: triSubOk,
-              score: triSubOk ? 100 : 50,
+              score: triSubOk ? 100 : 40,
               conceptId: 'C24',
               messageFa: triSubOk
                 ? 'اضلاع مثلث از ساختار سه‌موجی (۳-۳-۳-۳-۳) پیروی می‌کنند.'
-                : `در ${fiveWaveLegCount} ضلع مثلث ساختار ۵موجی دیده شد؛ در صورت تکرار، الگوی قطر (Diagonal) بررسی شود.`
+                : fiveWaveLegCount === subCounts.length
+                ? 'هر ۵ ضلع مثلث ساختار ۵موجی دارند؛ این الگو قطر (Diagonal) است نه مثلث.'
+                : `ساختار درونی اضلاع (${subCounts.join('-')}) با الگوی سه‌موجی مثلث (۳-۳-۳-۳-۳) مطابقت ندارد.`,
+              canBeSolvedByAlternate: !triSubOk && fiveWaveLegCount >= 4 ? 'ENDING_DIAGONAL' : undefined
             });
           }
         }
@@ -3228,6 +3331,7 @@ export class RulesEngine {
       nonIdealPatternFlag,
       flatPatternFlag,
       marketTerminalFlag,
+      triangleReport,
       unifiedDetection
     };
   }

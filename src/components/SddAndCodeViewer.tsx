@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -245,6 +245,81 @@ export const SddAndCodeViewer: React.FC = () => {
 - PatternEngines.evaluateWave4FlatKnotUntangler (T-13.45..T-13.47)
 - PatternEngines.evaluateSimpleCountingClassification (T-13.48..T-13.50)
 - PatternEngines.evaluatePracticalWave4Flat (T-13.51..T-13.53)
+`;
+
+  const session14Markdown = `# استخراج و تشریح کامل جلسه ۱۴ + سند SDD (013-triangle-pattern-engine)
+
+## ۱. جدول ۱۴ مفهوم استخراج‌شده جلسه ۱۴ (۱۴-۱ تا ۱۴-۱۴)
+- [۱۴-۱] مثلث به عنوان الگوی اصلاحی معامله‌پذیر (برخلاف فلت): مثلث واضح با ۵ موج و پایان مشخص E ← TRADABLE؛ مبهم یا بدون پایان E ← NOT_TRADABLE؛ انتهای بازار بدون شکست ← WITH_CAUTION.
+- [۱۴-۲ & ۱۴-۸] مثلث مانع (Contracting — خطوط همگرا) در برابر مثلث گستشی (Expanding — خطوط واگرا) و مستطیل (خطوط موازی = نامعتبر).
+- [۱۴-۳ & ۱۴-۱۱] مثلث فقط در امواج اصلاحی (۲ = ۲۰٪ کم‌تر، ۴ = ۵۰٪ رایج‌ترین، B = ۳۰٪ رایج)؛ در موج ۱ و ۳ (باید سیکل ایده‌آل باشد) و موج ۵ (باید قطر پایانی باشد) نامعتبر است.
+- [۱۴-۴ & ۱۴-۶] ساختار ۵ موجی و نام‌گذاری الزامی A-B-C-D-E (نه ۱-۲-۳-۴-۵ مخصوص قطر، نه A-B-C مخصوص زیگزاگ).
+- [۱۴-۵] زیرموج‌های درونی ۳-۳-۳-۳-۳ در هر ۵ ضلع مثلث (اگر ۵-۵-۵-۵-۵ ← قطر؛ اگر مختلط مثل ۳-۵-۳-۵-۳ ← نامعتبر).
+- [۱۴-۷] روانشناسی دودلی بازار: روند مطمئن ← مثلث شکل نمی‌گیرد؛ دودلی بازار + ۳-۳-۳-۳-۳ ← مثلث قطعی؛ دودلی پیش از قطعیت زیرساختار ← احتمال هم‌زمان مثلث و قطر.
+- [۱۴-۹ & ۱۴-۱۰] الگوی ادامه‌دهنده و قانون پایان E = پایان موج اصلاحی (موج ۴ → ۵، موج B → C، موج ۲ → ۳)؛ شکست خلاف روند ← RARE_TERMINAL_BREAKOUT.
+- [۱۴-۱۲] خلاف جهت روند اصلی: روند صعودی + مثلث نزولی ← VALID؛ روند صعودی + مثلث صعودی ← نادر (احتمال مثلث پایانی)؛ روند نزولی + مثلث صعودی ← VALID.
+- [۱۴-۱۳] مطالعه موردی عملی ذوب‌آهن اصفهان (TSE_ZOB): مثلث مانع/گستشی موج ۴ (A-B-C-D-E) منتهی به موج ۵ شتابدار پس از شکست و پولبک.
+- [۱۴-۱۴] خطوط روند مثلث: ابزار نمایشی بدون قانون ریاضی سخت (۲+ برخورد = VALID، ۱ برخورد = WEAK، ۰ برخورد = INVALID).
+
+## ۲. پوشش کامل تست‌های مرزی (T-14.1 تا T-14.43)
+- PatternEngines.evaluateTriangleTradability (T-14.1..T-14.3)
+- PatternEngines.analyzeTriangle (T-14.4..T-14.10, T-14.23..T-14.25, T-14.32..T-14.34)
+- PatternEngines.classifyTriangleStructureAndNaming (T-14.11..T-14.19)
+- PatternEngines.evaluateTriangleMarketIndecision (T-14.20..T-14.22)
+- PatternEngines.evaluateTriangleContinuationAndExit (T-14.26..T-14.31)
+- PatternEngines.evaluateTriangleCounterTrend (T-14.35..T-14.37)
+- PatternEngines.evaluateZobPracticalTriangle (T-14.38..T-14.40)
+- PatternEngines.evaluateTriangleTrendlineTouches (T-14.41..T-14.43)
+- RulesEngine.TrianglePatternValidator & TSE_ZOB
+
+## ۳. مرجع پیاده‌سازی Backend (FastAPI / Pydantic v2)
+\`\`\`python
+class TriangleValidateRequest(BaseModel):
+    labels: List[str] = Field(..., example=["A", "B", "C", "D", "E"])
+    subwaves: List[int] = Field(default=[3, 3, 3, 3, 3])
+    wave_slot: Literal["1", "2", "3", "4", "5", "B"] = "4"
+    upper_slope: float
+    lower_slope: float
+    touches: int = 2
+
+def validate_triangle(req: TriangleValidateRequest) -> Dict[str, Any]:
+    if req.wave_slot not in ("2", "4", "B"):
+        return {"valid": False, "reason": "ENDING_DIAGONAL" if req.wave_slot == "5" else "IDEAL_CYCLE"}
+    if req.labels != ["A", "B", "C", "D", "E"] or req.subwaves != [3, 3, 3, 3, 3]:
+        return {"valid": False, "reason": "INVALID_STRUCTURE_OR_NAMING"}
+    if abs(req.upper_slope - req.lower_slope) < 0.05:
+        return {"valid": False, "pattern": "PARALLEL_RECTANGLE"}
+    tri_type = "CONTRACTING" if req.upper_slope < 0 and req.lower_slope >= 0 else "EXPANDING"
+    freq_map = {"4": "50%", "B": "30%", "2": "20%"}
+    return {
+        "valid": True,
+        "type": tri_type,
+        "frequency": freq_map[req.wave_slot],
+        "trendline_status": "VALID" if req.touches >= 2 else ("WEAK" if req.touches == 1 else "INVALID"),
+        "next_wave": "WAVE_5" if req.wave_slot == "4" else ("WAVE_C" if req.wave_slot == "B" else "WAVE_3")
+    }
+\`\`\`
+
+## ۴. مرجع پیاده‌سازی Frontend (Nuxt 4 + TypeScript)
+\`\`\`vue
+<template>
+  <UCard class="bg-default border border-muted" dir="rtl">
+    <template #header>
+      <div class="flex items-center justify-between">
+        <span class="font-bold">بازرس مثلث A-B-C-D-E (جلسه ۱۴)</span>
+        <UBadge :color="report.tradabilityStatus === 'TRADABLE' ? 'success' : 'warning'">
+          {{ report.tradabilityLabelFa }}
+        </UBadge>
+      </div>
+    </template>
+    <div class="grid grid-cols-3 gap-3 text-xs font-mono">
+      <div>نوع: {{ report.triangleType }}</div>
+      <div>زیرموج‌ها: {{ report.subwaveSignature }}</div>
+      <div>فراوانی موج: {{ report.frequencyPct }}</div>
+    </div>
+  </UCard>
+</template>
+\`\`\`
 `;
 
   const sessions9to19Markdown = `# مفاهیم استخراج‌شده جلسات ۹ تا ۱۹، شاخه‌های SDD (008..018) و پایپ‌لاین گام ۰ تا ۱۱
@@ -920,6 +995,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION14')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION14'
+                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۴ (013 — مثلث)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -983,6 +1070,8 @@ const runAnalysis = async () => {
               ? session12Markdown
               : activeTab === 'SESSION13'
               ? session13Markdown
+              : activeTab === 'SESSION14'
+              ? session14Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -1008,6 +1097,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSION11' ||
           activeTab === 'SESSION12' ||
           activeTab === 'SESSION13' ||
+          activeTab === 'SESSION14' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -1020,6 +1110,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSION11' && session11Markdown}
         {activeTab === 'SESSION12' && session12Markdown}
         {activeTab === 'SESSION13' && session13Markdown}
+        {activeTab === 'SESSION14' && session14Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

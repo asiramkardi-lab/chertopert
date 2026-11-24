@@ -30,6 +30,7 @@ import { TargetProjectionPanel } from './TargetProjectionPanel';
 import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import { RulesEngineComplianceCard } from './RulesEngineComplianceCard';
 import { FlatPatternInspector } from './FlatSidebarVisualizer';
+import { TrianglePatternInspector } from './TrianglePatternInspector';
 import { 
   Cpu, 
   GitBranch, 
@@ -39,6 +40,7 @@ import {
   ShieldCheck,
   CornerDownLeft,
   Layers,
+  Triangle,
   Crosshair,
   ArrowUpLeft,
   Sparkles,
@@ -50,7 +52,7 @@ import {
 const FLAT_MARKET_PHASE_TOOLTIP =
   "Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase.";
 
-export type SidebarTab = 'COPILOT' | 'FLAT_ANALYSIS' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
+export type SidebarTab = 'COPILOT' | 'FLAT_ANALYSIS' | 'TRIANGLE_ANALYSIS' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
 
 interface SleekSidebarProps {
   activeScenario: WaveScenario;
@@ -135,6 +137,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
   const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'CONFLUENCE' | 'PRZ'>('RADAR');
   const [showInlineFlatToggle, setShowInlineFlatToggle] = useState<boolean>(false);
+  const [showInlineTriangleToggle, setShowInlineTriangleToggle] = useState<boolean>(false);
 
   const liveFlatFlag = useMemo(
     () =>
@@ -147,6 +150,26 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
     [activeScenario.patternType, activeScenario.vertices, activeScenario.direction, candles]
   );
 
+  const liveTriangleValidation = useMemo(
+    () =>
+      RulesEngine.TrianglePatternValidator(
+        activeScenario.patternType,
+        activeScenario.vertices,
+        activeScenario.direction,
+        drillContext?.role || 'ROOT',
+        drillContext?.waveLabel || '',
+        candles
+      ),
+    [
+      activeScenario.patternType,
+      activeScenario.vertices,
+      activeScenario.direction,
+      drillContext?.role,
+      drillContext?.waveLabel,
+      candles
+    ]
+  );
+
   useEffect(() => {
     if (drillContext?.key) {
       setActiveTab('SCENARIOS');
@@ -154,10 +177,15 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   }, [drillContext?.key]);
 
   const is335Identified = Boolean(liveFlatFlag?.isStructure335) || activeScenario.patternType.startsWith('FLAT_');
+  const isTriangleIdentified = Boolean(liveTriangleValidation.isTriangleScenario);
 
   useEffect(() => {
     setShowInlineFlatToggle(is335Identified);
   }, [is335Identified, activeScenario.id]);
+
+  useEffect(() => {
+    setShowInlineTriangleToggle(isTriangleIdentified);
+  }, [isTriangleIdentified, activeScenario.id]);
 
   const scenarioPhaseWarningsById = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -186,6 +214,12 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
       icon: Layers,
       badge: liveFlatFlag ? `${liveFlatFlag.bRetracePct}%` : '۳-۳-۵'
     },
+    {
+      id: 'TRIANGLE_ANALYSIS' as SidebarTab,
+      label: 'بازرس مثلث A-B-C-D-E',
+      icon: Triangle,
+      badge: liveTriangleValidation.report.frequencyPct || 'A-E'
+    },
     { id: 'ANGLE_TARGETS' as SidebarTab, label: 'زوایا و اهداف', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
     { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch, badge: '۴ درجه' },
     {
@@ -207,10 +241,17 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           const isFlatTabAlert = tab.id === 'FLAT_ANALYSIS' && is335Identified && !isActive;
+          const isTriangleTabAlert = tab.id === 'TRIANGLE_ANALYSIS' && isTriangleIdentified && !isActive;
           return (
             <button
               key={tab.id}
-              data-testid={tab.id === 'FLAT_ANALYSIS' ? 'flat-pattern-inspector-tab' : undefined}
+              data-testid={
+                tab.id === 'FLAT_ANALYSIS'
+                  ? 'flat-pattern-inspector-tab'
+                  : tab.id === 'TRIANGLE_ANALYSIS'
+                  ? 'triangle-pattern-inspector-tab'
+                  : undefined
+              }
               onClick={() => {
                 setActiveTab(tab.id);
                 if (tab.id !== 'SCENARIOS') onHoverScenario?.(null);
@@ -220,10 +261,12 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                   ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
                   : isFlatTabAlert
                   ? 'bg-amber-950/40 border border-amber-500/45 text-amber-200 hover:bg-amber-950/60'
+                  : isTriangleTabAlert
+                  ? 'bg-emerald-950/40 border border-emerald-500/45 text-emerald-200 hover:bg-emerald-950/60'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : isFlatTabAlert ? 'text-amber-300' : 'text-slate-400'}`} />
+              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : isFlatTabAlert ? 'text-amber-300' : isTriangleTabAlert ? 'text-emerald-300' : 'text-slate-400'}`} />
               <span>{tab.label}</span>
               {'hasWarning' in tab && tab.hasWarning && (
                 <span
@@ -318,6 +361,65 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                 {showInlineFlatToggle && (
                   <div className="p-2.5 pt-0 border-t border-slate-800/80">
                     <FlatPatternInspector
+                      scenario={activeScenario}
+                      candles={candles}
+                      parentRole={drillContext?.role || 'ROOT'}
+                      parentWaveLabel={drillContext?.waveLabel || ''}
+                      onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Studio Sidebar Triangle Pattern Inspector (Activates when a Triangle A-B-C-D-E scenario is selected) */}
+            {isTriangleIdentified && (
+              <div className="rounded-xl bg-[#0b1324] border border-emerald-500/40 overflow-hidden">
+                <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowInlineTriangleToggle(prev => !prev)}
+                    aria-expanded={showInlineTriangleToggle}
+                    className="flex items-center gap-2 min-w-0 text-right flex-1"
+                  >
+                    <Triangle className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                        <span>بازرس الگوی مثلث (A-B-C-D-E)</span>
+                        {liveTriangleValidation.isValidTriangle && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        )}
+                      </div>
+                      <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
+                        {liveTriangleValidation.report.subwaveSignature || '3-3-3-3-3'} ·{' '}
+                        {liveTriangleValidation.report.positionSlotLabelFa} ·{' '}
+                        {liveTriangleValidation.report.frequencyPct}
+                      </div>
+                    </div>
+                  </button>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowInlineTriangleToggle(prev => !prev)}
+                      className="px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 bg-emerald-600/30 border-emerald-500/60 text-emerald-100"
+                    >
+                      {showInlineTriangleToggle ? 'بستن' : 'نمایش'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('TRIANGLE_ANALYSIS')}
+                      className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
+                      title="باز کردن تب کامل بازرس الگوی مثلث A-B-C-D-E"
+                    >
+                      <ArrowUpLeft className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {showInlineTriangleToggle && (
+                  <div className="p-2.5 pt-0 border-t border-slate-800/80">
+                    <TrianglePatternInspector
                       scenario={activeScenario}
                       candles={candles}
                       parentRole={drillContext?.role || 'ROOT'}
@@ -434,6 +536,40 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'TRIANGLE_ANALYSIS' && (
+          <div className="space-y-4">
+            {!isTriangleIdentified && (
+              <div
+                data-testid="triangle-inspector-inactive-notice"
+                className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-2 flex-wrap"
+              >
+                <div className="space-y-0.5 min-w-0">
+                  <div className="font-bold text-emerald-300">سناریوی فعلی مثلث نیست (شبیه‌سازی جلسه ۱۴ فعال است)</div>
+                  <p className="text-[10.5px] text-slate-400">
+                    می‌توانید قوانین جلسه ۱۴ (موقعیت ۴/B/۲، ساختار ۳-۳-۳-۳-۳، برخورد خطوط و مثال ذوب) را در شبیه‌ساز زیر آزمون کنید.
+                  </p>
+                </div>
+                {!activeScenario.isLocked && (
+                  <button
+                    type="button"
+                    onClick={() => onPatternChange('TRIANGLE_CONVERGING', activeScenario.id)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-500/45 text-emerald-100 text-[10.5px] font-bold whitespace-nowrap shrink-0"
+                  >
+                    تبدیل به مثلث مانع
+                  </button>
+                )}
+              </div>
+            )}
+            <TrianglePatternInspector
+              scenario={activeScenario}
+              candles={candles}
+              parentRole={drillContext?.role || 'ROOT'}
+              parentWaveLabel={drillContext?.waveLabel || ''}
+              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+            />
           </div>
         )}
 

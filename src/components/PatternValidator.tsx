@@ -17,6 +17,7 @@ import { PatternEngines } from '../engine/patternEngines';
 import { AllPatternsEvaluationMatrix } from './AllPatternsEvaluationMatrix';
 import { UnifiedPatternDetectionSummary } from './UnifiedPatternDetectionSummary';
 import { FlatPatternPanel } from './FlatPatternPanel';
+import { TrianglePatternInspector } from './TrianglePatternInspector';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -1082,17 +1083,14 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
               )}
 
               {auditResult.specializedReport.kind === 'TRIANGLE' && (
-                <div className="space-y-1 text-slate-300">
-                  <div className="flex items-center justify-between font-semibold text-white">
-                    <span>{auditResult.specializedReport.data.triangleTypeLabelFa}</span>
-                    <span className="font-mono text-emerald-300">
-                      فراوانی {auditResult.specializedReport.data.frequencyPct}
-                    </span>
-                  </div>
-                  <p className="text-slate-400 leading-relaxed">
-                    {auditResult.specializedReport.data.positionSlotLabelFa} · {auditResult.specializedReport.data.tradingApproachFa}
-                  </p>
-                </div>
+                <TrianglePatternInspector
+                  scenario={scenario}
+                  candles={candles}
+                  parentRole={parentRole}
+                  parentWaveLabel={parentWaveLabel}
+                  onApplyPattern={onApplyPattern}
+                  compact
+                />
               )}
 
               {auditResult.specializedReport.kind === 'COMPLEX' && (
