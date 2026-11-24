@@ -516,14 +516,16 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
         <div
           data-testid="rules-engine-flat-indicator"
           className={`px-3.5 py-2 border-t border-slate-800/80 space-y-1.5 text-[10.5px] ${
-            summary.flatPatternFlag.isFlaggedFlat
+            summary.flatPatternFlag.isRunningExcluded
+              ? 'bg-rose-950/30 text-rose-100'
+              : summary.flatPatternFlag.isFlaggedFlat
               ? 'bg-emerald-950/20 text-emerald-100'
               : 'bg-rose-950/20 text-rose-100'
           }`}
         >
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="flex items-center gap-1.5 font-bold">
-              {summary.flatPatternFlag.isFlaggedFlat ? (
+              {summary.flatPatternFlag.isFlaggedFlat && !summary.flatPatternFlag.isRunningExcluded ? (
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               ) : (
                 <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
@@ -531,11 +533,18 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
               <span>{summary.flatPatternFlag.labelFa}</span>
             </span>
             <span className="font-mono tabular-nums text-cyan-300">
-              B/A: {summary.flatPatternFlag.bRetracePct}% · C/B: {summary.flatPatternFlag.cPctOfB}%
+              {summary.flatPatternFlag.subtypeLabelEn} · B/A: {summary.flatPatternFlag.bRetracePct}% · C/B: {summary.flatPatternFlag.cPctOfB}%
             </span>
           </div>
+          {summary.flatPatternFlag.isRunningExcluded && summary.flatPatternFlag.exclusionReasonFa && (
+            <div className="text-[10px] font-semibold text-rose-300 flex items-center gap-1.5">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              <span>حذف فلت جاری (Running Excluded): {summary.flatPatternFlag.exclusionReasonFa}</span>
+            </div>
+          )}
           <p className="text-[10px] text-slate-300 leading-relaxed">{summary.flatPatternFlag.reasonFa}</p>
           {summary.flatPatternFlag.isFlaggedFlat &&
+            !summary.flatPatternFlag.isRunningExcluded &&
             onApplyPattern &&
             !scenario.isLocked &&
             scenario.patternType !== summary.flatPatternFlag.suggestedPattern && (
@@ -550,6 +559,38 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
                 <ArrowUpLeft className="w-3.5 h-3.5 shrink-0" />
               </button>
             )}
+        </div>
+      )}
+
+      {/* MarketTerminalValidator Visual End-Phase Warning vs Past-Market Priority Readout */}
+      {summary.marketTerminalFlag && (
+        <div
+          data-testid="rules-engine-market-terminal-warning"
+          className={`px-3.5 py-2 border-t border-slate-800/80 space-y-1 text-[10.5px] ${
+            summary.marketTerminalFlag.isFlatAtMarketEnd
+              ? 'bg-rose-950/35 text-rose-100'
+              : 'bg-slate-950/55 text-slate-300'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="flex items-center gap-1.5 font-bold">
+              {summary.marketTerminalFlag.isFlatAtMarketEnd ? (
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              )}
+              <span>{summary.marketTerminalFlag.warningLabelFa}</span>
+            </span>
+            <span className="font-mono tabular-nums text-[10px] text-slate-400">
+              فاصله تا انتهای چارت: {summary.marketTerminalFlag.distanceFromEndCandles} کندل
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-300 leading-relaxed">
+            {summary.marketTerminalFlag.warningReasonFa}
+          </p>
+          <p className="text-[9.5px] text-cyan-300/90 leading-relaxed">
+            {summary.marketTerminalFlag.countingPriorityNoteFa}
+          </p>
         </div>
       )}
 

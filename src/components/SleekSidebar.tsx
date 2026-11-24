@@ -248,12 +248,8 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                     </div>
                     <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
                       {liveFlatFlag
-                        ? `B/A: ${liveFlatFlag.bRetracePct}% · C/B: ${liveFlatFlag.cPctOfB}% · ${
-                            liveFlatFlag.macroCategory === 'REGULAR'
-                              ? 'Regular'
-                              : liveFlatFlag.macroCategory === 'IRREGULAR'
-                              ? 'Irregular'
-                              : 'Running'
+                        ? `B/A: ${liveFlatFlag.bRetracePct}% · C/B: ${liveFlatFlag.cPctOfB}% · ${liveFlatFlag.subtypeLabelEn}${
+                            liveFlatFlag.isRunningExcluded ? ' (حذف جاری)' : ''
                           }`
                         : 'با شناسایی ساختار ۳-۳-۵ به‌صورت خودکار فعال می‌شود'}
                     </div>

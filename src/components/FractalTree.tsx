@@ -185,6 +185,12 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
               rootSc.direction,
               candles
             );
+            const rootTerminalCheck = RulesEngine.MarketTerminalValidator(
+              rootSc.patternType,
+              rootSc.vertices,
+              candles,
+              rootFlatCheck.flag
+            );
             return (
               <div className="space-y-1.5 font-mono text-[10.5px]">
                 <button
@@ -196,7 +202,7 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                       : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
                   }`}
                 >
-                  <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                     <span className="truncate font-sans font-semibold">
                       کلان ({rootSc.timeframe}): {rootSc.name.split('(')[0].trim()}
                     </span>
@@ -204,9 +210,23 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                       <span
                         data-testid="tree-flat-pattern-badge"
                         title={rootFlatCheck.flag.reasonFa}
-                        className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/45 text-amber-200 font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0"
+                        className={`px-1.5 py-0.5 rounded border font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0 ${
+                          rootFlatCheck.isRunningExcluded
+                            ? 'bg-rose-500/20 border-rose-500/45 text-rose-200'
+                            : 'bg-amber-500/20 border-amber-500/45 text-amber-200'
+                        }`}
                       >
-                        احتمال فلت (Flat · {rootFlatCheck.flag.bRetracePct}%)
+                        احتمال فلت ({rootFlatCheck.flag.subtypeLabelEn} · {rootFlatCheck.flag.bRetracePct}%)
+                        {rootFlatCheck.isRunningExcluded ? ' · حذف جاری' : ''}
+                      </span>
+                    )}
+                    {rootTerminalCheck.isFlatAtMarketEnd && rootTerminalCheck.flag && (
+                      <span
+                        data-testid="tree-market-terminal-warning"
+                        title={rootTerminalCheck.flag.warningReasonFa}
+                        className="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/50 text-rose-200 font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0"
+                      >
+                        هشدار انتهای بازار (عدم معامله فلت)
                       </span>
                     )}
                   </div>
@@ -224,6 +244,9 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                   const subFlatCheck = subSc
                     ? RulesEngine.FlatPatternValidator(subSc.patternType, subSc.vertices, subSc.direction, candles)
                     : undefined;
+                  const subTerminalCheck = subSc
+                    ? RulesEngine.MarketTerminalValidator(subSc.patternType, subSc.vertices, candles, subFlatCheck?.flag)
+                    : undefined;
                   return (
                     <div key={d.key} className="mr-3 pr-2 border-r border-cyan-500/40">
                       <button
@@ -235,7 +258,7 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                             : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
                         }`}
                       >
-                        <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                           <span className="truncate font-sans">
                             {d.waveLabel} ({d.targetTimeframe}) · {d.role === 'MOTIVE' ? 'پیشرو' : 'اصلاحی'}
                           </span>
@@ -243,9 +266,23 @@ export const FractalTree: React.FC<FractalTreeProps> = ({
                             <span
                               data-testid="tree-flat-pattern-badge"
                               title={subFlatCheck.flag.reasonFa}
-                              className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/45 text-amber-200 font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0"
+                              className={`px-1.5 py-0.5 rounded border font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0 ${
+                                subFlatCheck.isRunningExcluded
+                                  ? 'bg-rose-500/20 border-rose-500/45 text-rose-200'
+                                  : 'bg-amber-500/20 border-amber-500/45 text-amber-200'
+                              }`}
                             >
-                              احتمال فلت (Flat · {subFlatCheck.flag.bRetracePct}%)
+                              احتمال فلت ({subFlatCheck.flag.subtypeLabelEn} · {subFlatCheck.flag.bRetracePct}%)
+                              {subFlatCheck.isRunningExcluded ? ' · حذف جاری' : ''}
+                            </span>
+                          )}
+                          {subTerminalCheck?.isFlatAtMarketEnd && subTerminalCheck.flag && (
+                            <span
+                              data-testid="tree-market-terminal-warning"
+                              title={subTerminalCheck.flag.warningReasonFa}
+                              className="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/50 text-rose-200 font-sans text-[9.5px] font-bold whitespace-nowrap shrink-0"
+                            >
+                              هشدار انتهای بازار
                             </span>
                           )}
                         </div>

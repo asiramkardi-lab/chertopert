@@ -14,6 +14,7 @@ import {
   Layers,
   CheckCircle2,
   ShieldAlert,
+  AlertTriangle,
   Sparkles,
   ArrowUpLeft,
   SlidersHorizontal
@@ -123,6 +124,7 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
   );
 
   const flatFlag = summary.flatPatternFlag;
+  const marketTerminalFlag = summary.marketTerminalFlag;
   const has3PlusVerts = scenario.vertices.length >= 3;
 
   // Determine effective B% and C% (live scenario or focused variant preview if < 3 verts)
@@ -209,9 +211,21 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
     scenario.patternType !== recommendedPattern;
 
   const macroSubtypeNameEn =
-    activeMacro === 'REGULAR' ? 'Regular' : activeMacro === 'IRREGULAR' ? 'Irregular' : 'Running';
+    variantFocus === 'AUTO' && flatFlag?.subtypeLabelEn
+      ? flatFlag.subtypeLabelEn
+      : activeMacro === 'REGULAR'
+      ? 'Regular'
+      : activeMacro === 'IRREGULAR'
+      ? 'Irregular'
+      : 'Running';
   const macroSubtypeNameFa =
-    activeMacro === 'REGULAR' ? 'متعارف' : activeMacro === 'IRREGULAR' ? 'نامنظم' : 'جاری';
+    variantFocus === 'AUTO' && flatFlag?.subtypeLabelFa
+      ? flatFlag.subtypeLabelFa
+      : activeMacro === 'REGULAR'
+      ? 'فلت متعارف'
+      : activeMacro === 'IRREGULAR'
+      ? 'فلت نامنظم'
+      : 'فلت جاری';
 
   return (
     <section
@@ -235,14 +249,16 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
 
         <div
           className={`flex items-center gap-1 text-[10.5px] font-bold font-mono tabular-nums shrink-0 ${
-            isFlatClassified
+            flatFlag?.isRunningExcluded
+              ? 'text-rose-400'
+              : isFlatClassified
               ? 'text-emerald-400'
               : is335Selected && !passesB618
               ? 'text-rose-400'
               : 'text-amber-300'
           }`}
         >
-          {isFlatClassified ? (
+          {isFlatClassified && !flatFlag?.isRunningExcluded ? (
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
           ) : (
             <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
@@ -256,6 +272,34 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
           </span>
         </div>
       </div>
+
+      {/* MarketTerminalValidator Visual Warning Banner + Running Flat Exclusion Notice */}
+      {(marketTerminalFlag?.isFlatAtMarketEnd || flatFlag?.isRunningExcluded) && (
+        <div
+          data-testid="sidebar-flat-terminal-warning"
+          className="px-3.5 py-2 bg-rose-950/35 text-rose-100 space-y-1 text-[10.5px]"
+        >
+          {marketTerminalFlag?.isFlatAtMarketEnd && (
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-bold text-rose-200">{marketTerminalFlag.warningLabelFa}</div>
+                <p className="text-[10px] text-rose-200/85 leading-relaxed">
+                  {marketTerminalFlag.warningReasonFa}
+                </p>
+              </div>
+            </div>
+          )}
+          {flatFlag?.isRunningExcluded && flatFlag.exclusionReasonFa && (
+            <div className="flex items-start gap-1.5 pt-1 border-t border-rose-500/20">
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+              <p className="text-[10px] font-semibold text-rose-200 leading-relaxed">
+                {flatFlag.exclusionReasonFa}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* B/A & C/B Live Ratio + Detected Sub-Type Summary Strip */}
       <div className="px-3.5 py-2 bg-slate-950/60 space-y-1.5 text-[10.5px]">
@@ -277,7 +321,7 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
             </div>
           </div>
           <div>
-            <div className="text-slate-400 text-[9.5px]">زیرنوع فلت</div>
+            <div className="text-slate-400 text-[9.5px]">زیرنوع فلت (۸گانه)</div>
             <div className="font-semibold text-amber-300 truncate mt-0.5">
               {macroSubtypeNameFa} ({macroSubtypeNameEn})
             </div>
@@ -572,6 +616,19 @@ export const FlatPatternInspector: React.FC<FlatSidebarVisualizerProps> = ({
           <p className="text-slate-400">
             {flatFlag?.reasonFa || VARIANT_REFERENCE[activeMacro].subtitleFa}
           </p>
+          {flatReport.tradingPolicyReasonFa && (
+            <p
+              className={`text-[10px] font-medium ${
+                flatReport.tradingPolicyAction === 'ALLOW_PAST_KNOT_UNTANGLING'
+                  ? 'text-emerald-300'
+                  : flatReport.tradingPolicyAction === 'ALLOW_WITH_CAUTION'
+                  ? 'text-amber-300'
+                  : 'text-rose-300'
+              }`}
+            >
+              {flatReport.tradingPolicyReasonFa}
+            </p>
+          )}
         </div>
 
         {/* One-Click Morph to Flagged Flat Pattern */}

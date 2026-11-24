@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -218,6 +218,33 @@ export const SddAndCodeViewer: React.FC = () => {
 - PatternEngines.evaluateCorrectionEvolution (T-12.1..T-12.3)
 - PatternEngines.evaluateActorStopPsychology (T-12.4..T-12.6)
 - PatternEngines.analyzeFlat با پشتیبانی FlatAnalysisOptions و تشخیص کامل ساختار، زیرگونه‌ها، فرم C و بافت بازار (T-12.7..T-12.46).
+`;
+
+  const session13Markdown = `# استخراج و تشریح کامل جلسه ۱۳ + سند SDD (012-flat-advanced-naming-rules)
+
+## ۱. جدول ۱۶ مفهوم استخراج‌شده (۱۳-۱ تا ۱۳-۱۶)
+- [۱۳-۱] عدم استفاده فلت در انتهای بازار: فلت ابزار شمارش گذشته است، نه ابزار معامله آینده؛ در گذشته بازار (ALLOW_PAST_KNOT_UNTANGLING)، در انتهای بازار با تأیید (ALLOW_WITH_CAUTION)، و در انتهای بازار بدون تأیید (FORBID_AT_MARKET_END).
+- [۱۳-۲] اولویت‌بندی شمارش گذشته و گره‌گشایی: ۱. سیکل ایده‌آل ← ۲. ترمینال / قطر ← ۳. زیگزاگ ← ۴. فلت ← ۵. ترکیبی.
+- [۱۳-۳ & ۱۳-۶..۱۳-۱۳] نام‌گذاری و محدوده‌های دقیق ۸ نوع فلت:
+  1. متعارف (Regular): B=۸۱–۱۰۰٪، C=۸۱–۱۰۰٪
+  2. ناقص B (B-Deficient): B=۶۱.۸–۸۱٪، C=۸۱–۱۰۰٪
+  3. ناقص C (C-Deficient): B=۸۱–۱۰۰٪، C=۶۱.۸–۸۱٪
+  4. ناقص دوگانه (Double-Deficient): B=۶۱.۸–۸۱٪، C=۶۱.۸–۸۱٪
+  5. نامنظم (Irregular): B=۱۰۰–۱۳۸.۲٪، C≥۸۱–۱۰۰٪
+  6. نامنظم ناقص (Irregular-Deficient): B=۱۰۰–۱۳۸.۲٪، C=۶۱.۸–۸۱٪
+  7. نامنظم کشیده (Irregular-Extended): B>۱۳۸.۲٪، C≥۱۰۰٪
+  8. جاری (Running): B>۱۰۰٪، C<۶۱.۸٪ (حذف از دوره به دلیل برهم‌زدن قواعد فرکتال)
+- [۱۳-۴ & ۱۳-۵] ساختار ثابت ۳-۳-۵ و قانون B > ۶۱.۸٪ در تمام ۸ نوع فلت.
+- [۱۳-۱۴] فلت به عنوان گره‌گشا در موج ۴: اگر موج ۴ سه‌موجی باشد نیازی به فلت نیست؛ اگر ۵+ موجی با بن‌بست شمارش در گذشته باشد فلت گره‌گشایی مجاز است؛ بدون گره باید صبر کرد.
+- [۱۳-۱۵] ساده‌شماری در عمل: ۳-۳-۳ ← زیگزاگ سیمپل، ۳-۳-۵ ← فلت، ۵+ پیچیده ← ترکیبی.
+- [۱۳-۱۶] مثال عملی W4 فلت نامنظم: بین موج ۳ و ۵ برای باز کردن گره نمودار به‌کار می‌رود.
+
+## ۲. پوشش کامل تست‌های مرزی (T-13.1 تا T-13.53)
+- PatternEngines.analyzeFlat (سیاست انتهای بازار، ۸ زیرگونه و مرزهای ۶۱.۸٪، ۸۱٪، ۱۰۰٪، ۱۳۸.۲٪)
+- PatternEngines.evaluateFlatCountingPriority (T-13.4..T-13.6)
+- PatternEngines.evaluateWave4FlatKnotUntangler (T-13.45..T-13.47)
+- PatternEngines.evaluateSimpleCountingClassification (T-13.48..T-13.50)
+- PatternEngines.evaluatePracticalWave4Flat (T-13.51..T-13.53)
 `;
 
   const sessions9to19Markdown = `# مفاهیم استخراج‌شده جلسات ۹ تا ۱۹، شاخه‌های SDD (008..018) و پایپ‌لاین گام ۰ تا ۱۱
@@ -881,6 +908,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION13')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION13'
+                ? 'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg shadow-amber-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۳ (012)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -942,6 +981,8 @@ const runAnalysis = async () => {
               ? session11Markdown
               : activeTab === 'SESSION12'
               ? session12Markdown
+              : activeTab === 'SESSION13'
+              ? session13Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -966,6 +1007,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSIONS_3_8' ||
           activeTab === 'SESSION11' ||
           activeTab === 'SESSION12' ||
+          activeTab === 'SESSION13' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -977,6 +1019,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSIONS_3_8' && sessions3to8Markdown}
         {activeTab === 'SESSION11' && session11Markdown}
         {activeTab === 'SESSION12' && session12Markdown}
+        {activeTab === 'SESSION13' && session13Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

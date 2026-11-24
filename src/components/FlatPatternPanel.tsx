@@ -280,6 +280,25 @@ export const FlatPatternPanel: React.FC<FlatPatternPanelProps> = ({ scenario, ca
         </p>
 
         <p className="text-slate-400 leading-relaxed">{report.vsSimpleZigzagFa}</p>
+
+        {report.tradingPolicyReasonFa && (
+          <div className="pt-1 border-t border-slate-800/60 flex items-center justify-between gap-2 flex-wrap">
+            <span
+              className={`font-semibold ${
+                report.tradingPolicyAction === 'ALLOW_PAST_KNOT_UNTANGLING'
+                  ? 'text-emerald-400'
+                  : report.tradingPolicyAction === 'ALLOW_WITH_CAUTION'
+                  ? 'text-amber-300'
+                  : 'text-rose-400'
+              }`}
+            >
+              {report.tradingPolicyReasonFa}
+            </span>
+            <span className="text-slate-400 text-[9.5px]">
+              اولویت ۱۳: ایده‌آل ← ترمینال/قطر ← زیگزاگ ← فلت ← ترکیبی
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Market Evolution & Actor Psychology Notes */}

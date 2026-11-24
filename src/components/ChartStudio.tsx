@@ -564,6 +564,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   );
   const liveNonIdealFlag = liveValidationForHud.nonIdealPatternFlag;
   const liveFlatFlag = liveValidationForHud.flatPatternFlag;
+  const liveMarketTerminalFlag = liveValidationForHud.marketTerminalFlag;
   const liveUnified = liveValidationForHud.unifiedDetection;
 
   // Compute next valid lower timeframe for Fractal Drill-Down
@@ -1760,7 +1761,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 title={liveFlatFlag.reasonFa}
                 data-testid="chart-flat-classification-badge"
                 className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap font-mono tabular-nums ${
-                  liveFlatFlag.macroCategory === 'RUNNING'
+                  liveFlatFlag.isRunningExcluded || liveFlatFlag.macroCategory === 'RUNNING'
                     ? 'bg-rose-950/60 hover:bg-rose-900/60 border-rose-500/50 text-rose-200'
                     : liveFlatFlag.macroCategory === 'IRREGULAR'
                     ? 'bg-amber-950/60 hover:bg-amber-900/60 border-amber-500/50 text-amber-200'
@@ -1769,14 +1770,21 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               >
                 <Layers className="w-3 h-3 shrink-0" />
                 <span>
-                  فلت ۳-۳-۵ ·{' '}
-                  {liveFlatFlag.macroCategory === 'REGULAR'
-                    ? 'متعارف'
-                    : liveFlatFlag.macroCategory === 'IRREGULAR'
-                    ? 'نامنظم'
-                    : 'جاری'}{' '}
-                  · B={liveFlatFlag.bRetracePct}%
+                  فلت ۳-۳-۵ · {liveFlatFlag.subtypeLabelFa} ({liveFlatFlag.subtypeLabelEn}) · B={liveFlatFlag.bRetracePct}%
+                  {liveFlatFlag.isRunningExcluded ? ' · حذف جاری' : ''}
                 </span>
+              </button>
+            )}
+            {liveMarketTerminalFlag?.isFlatAtMarketEnd && (
+              <button
+                type="button"
+                onClick={evaluateCurrentCount}
+                title={`${liveMarketTerminalFlag.warningReasonFa} ${liveMarketTerminalFlag.countingPriorityNoteFa}`}
+                data-testid="market-terminal-flat-warning"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg border bg-rose-950/70 hover:bg-rose-900/70 border-rose-500/60 text-rose-200 text-[10.5px] font-bold transition-colors whitespace-nowrap"
+              >
+                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                <span>هشدار انتهای بازار: عدم استفاده از فلت در فاز پایانی</span>
               </button>
             )}
             {liveNonIdealFlag?.isNonIdeal ? (

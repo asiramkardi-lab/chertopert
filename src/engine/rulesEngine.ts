@@ -81,9 +81,28 @@ export interface FlatPatternFlag {
   meetsB618Rule: boolean;
   macroCategory: 'REGULAR' | 'IRREGULAR' | 'RUNNING';
   subtype: FlatSubtype;
+  subtypeLabelFa: string;
+  subtypeLabelEn: string;
   suggestedPattern: 'FLAT_REGULAR' | 'FLAT_EXPANDED' | 'FLAT_RUNNING';
+  isRunningExcluded: boolean;
+  isSevereRunning?: boolean;
+  exclusionReasonFa?: string;
+  nonFlatStructureKind?: 'SIMPLE_ZIGZAG' | 'IDEAL_ZIGZAG' | 'ANTI_ZIGZAG' | 'OTHER';
+  borderlineNotesFa?: string[];
   labelFa: string;
   reasonFa: string;
+}
+
+export interface MarketTerminalFlag {
+  isFlatAtMarketEnd: boolean;
+  isFlatScenario: boolean;
+  terminalCandleIndex: number;
+  totalCandles: number;
+  distanceFromEndCandles: number;
+  thresholdCandles: number;
+  warningLabelFa: string;
+  warningReasonFa: string;
+  countingPriorityNoteFa: string;
 }
 
 export interface ValidationSummary {
@@ -110,6 +129,7 @@ export interface ValidationSummary {
   wave5TruncationOrTerminalHint?: boolean;
   nonIdealPatternFlag?: NonIdealPatternFlag;
   flatPatternFlag?: FlatPatternFlag;
+  marketTerminalFlag?: MarketTerminalFlag;
   unifiedDetection?: UnifiedPatternDetectionReport;
 }
 
@@ -290,7 +310,90 @@ export function classifyAntiCyclePlacement(
   };
 }
 
+const FLAT_SUBTYPE_METADATA: Record<FlatSubtype, { en: string; fa: string }> = {
+  REGULAR: { en: 'Regular', fa: 'فلت متعارف' },
+  B_DEFICIENT: { en: 'B-Deficient', fa: 'فلت B ناقص' },
+  C_DEFICIENT: { en: 'C-Deficient', fa: 'فلت C ناقص' },
+  DOUBLE_DEFICIENT: { en: 'Double-Deficient', fa: 'فلت ناقص دوگانه' },
+  IRREGULAR: { en: 'Irregular', fa: 'فلت نامنظم' },
+  IRREGULAR_DEFICIENT: { en: 'Irregular-Deficient', fa: 'فلت نامنظم ناقص' },
+  IRREGULAR_EXTENDED: { en: 'Irregular-Extended', fa: 'فلت نامنظم کشیده' },
+  RUNNING_DEPRECATED: { en: 'Running', fa: 'فلت جاری (حذف از معامله)' }
+};
+
 export class RulesEngine {
+  /**
+   * Session 13 Helper: Identifies 'Running' Flat patterns (B > 100% A and C < 61.8% B)
+   * so they can be excluded from standard counting & trading.
+   */
+  public static identifyRunningFlatForExclusion(params: {
+    bRetracePct: number;
+    cPctOfB?: number;
+    hasCVertex?: boolean;
+    pattern?: PatternFamily;
+    subtype?: FlatSubtype;
+  }): {
+    isRunningFlat: boolean;
+    shouldExclude: boolean;
+    isSevereRunning: boolean;
+    reasonFa: string;
+  } {
+    const hasC = params.hasCVertex ?? params.cPctOfB !== undefined;
+    const cPct = params.cPctOfB ?? 0;
+    const isRunningByRatios =
+      params.bRetracePct > 100.1 && (hasC ? cPct < 61.8 : params.pattern === 'FLAT_RUNNING');
+    const isRunningFlat = params.subtype === 'RUNNING_DEPRECATED' || isRunningByRatios;
+    const isSevereRunning = isRunningFlat && hasC && cPct < 45;
+
+    return {
+      isRunningFlat,
+      shouldExclude: isRunningFlat,
+      isSevereRunning,
+      reasonFa: isRunningFlat
+        ? isSevereRunning
+          ? `فلت جاری شدید (B=${params.bRetracePct}% > ۱۰۰٪ و C=${cPct}% < ۴۵٪): قوانین فرکتال را برهم می‌ریزد و برای معامله/شمارش حذف می‌شود.`
+          : `فلت جاری (Running Flat: B=${params.bRetracePct}% > ۱۰۰٪ و C=${hasC ? `${cPct}% < ۶۱.۸٪` : 'ناقص'}): طبق جلسه ۱۳ منسوخ بوده و از شمارش استاندارد مستثنی (Exclude) می‌شود.`
+        : 'الگوی جاری نیست و نیازی به حذف ندارد.'
+    };
+  }
+
+  /**
+   * Session 13 Helper: Filters a list of WaveScenarios, separating standard scenarios from
+   * 'Running' Flat scenarios flagged for exclusion.
+   */
+  public static excludeRunningFlats(
+    scenarios: WaveScenario[],
+    candles?: Candle[]
+  ): {
+    retained: WaveScenario[];
+    excluded: Array<{ scenario: WaveScenario; reasonFa: string; isSevereRunning: boolean }>;
+  } {
+    const retained: WaveScenario[] = [];
+    const excluded: Array<{ scenario: WaveScenario; reasonFa: string; isSevereRunning: boolean }> = [];
+    for (const sc of scenarios) {
+      const check = this.FlatPatternValidator(sc.patternType, sc.vertices, sc.direction, candles);
+      const ratioCheck = check.flag
+        ? this.identifyRunningFlatForExclusion({
+            bRetracePct: check.flag.bRetracePct,
+            cPctOfB: check.flag.cPctOfB,
+            hasCVertex: sc.vertices.length >= 4,
+            pattern: sc.patternType,
+            subtype: check.flag.subtype
+          })
+        : { isRunningFlat: false, shouldExclude: false, isSevereRunning: false, reasonFa: '' };
+      if (check.isRunningExcluded || ratioCheck.shouldExclude) {
+        excluded.push({
+          scenario: sc,
+          reasonFa: check.exclusionReasonFa || ratioCheck.reasonFa,
+          isSevereRunning: ratioCheck.isSevereRunning
+        });
+      } else {
+        retained.push(sc);
+      }
+    }
+    return { retained, excluded };
+  }
+
   public static evaluateFlat335Rule(
     pattern: PatternFamily,
     vertices: WaveVertex[],
@@ -362,60 +465,115 @@ export class RulesEngine {
     const suggestedPattern: FlatPatternFlag['suggestedPattern'] =
       macroCategory === 'RUNNING' ? 'FLAT_RUNNING' : macroCategory === 'IRREGULAR' ? 'FLAT_EXPANDED' : 'FLAT_REGULAR';
 
+    // Classify all 8 Session 13 Flat Sub-types with explicit Irregular (100 < B <= 138.2) vs Irregular-Extended (B > 138.2)
     let subtype: FlatSubtype = 'REGULAR';
     if (vertices.length >= 4) {
-      const tempFlat: WaveScenario = {
-        id: 'flat_flag_eval',
-        name: 'Flat Flag Eval',
-        color: '#f59e0b',
-        isPrimary: false,
-        isLocked: false,
-        isSelectedForTree: false,
-        patternType: suggestedPattern,
-        degree: 'PRIMARY',
-        direction: isBull ? 'BULLISH' : 'BEARISH',
-        vertices: vertices.slice(0, 4),
-        currentWave: 'C',
-        completionPercentage: 100,
-        validityScore: 85,
-        idealnessScore: 85,
-        confidenceScore: 85,
-        invalidationPrice: p0,
-        targets: [],
-        rulesResults: [],
-        source: 'AI',
-        timeframe: '1D'
-      };
-      const rep = PatternEngines.analyzeFlat(tempFlat, candles || [], {
-        internalSubwaves: subA && subB && subC ? [subA, subB, subC] : [3, 3, 5]
-      });
-      subtype = rep.subtype;
+      if (bRetracePct > 100.1 && cPctOfB < 61.8) {
+        subtype = 'RUNNING_DEPRECATED';
+      } else if (bRetracePct > 138.2 + 1e-4) {
+        if (cPctOfB < 81) {
+          subtype = 'IRREGULAR_DEFICIENT';
+        } else if (cPctOfB >= 100 - 1e-4) {
+          subtype = 'IRREGULAR_EXTENDED';
+        } else {
+          subtype = 'IRREGULAR';
+        }
+      } else if (bRetracePct > 100.1) {
+        subtype = cPctOfB < 81 ? 'IRREGULAR_DEFICIENT' : 'IRREGULAR';
+      } else if (bRetracePct < 81) {
+        subtype = cPctOfB < 81 ? 'DOUBLE_DEFICIENT' : 'B_DEFICIENT';
+      } else {
+        subtype = cPctOfB < 81 ? 'C_DEFICIENT' : 'REGULAR';
+      }
     } else if (macroCategory === 'RUNNING') {
       subtype = 'RUNNING_DEPRECATED';
     } else if (macroCategory === 'IRREGULAR') {
-      subtype = bRetracePct > 138.2 ? 'IRREGULAR_EXTENDED' : 'IRREGULAR';
+      subtype = bRetracePct > 138.2 + 1e-4 ? 'IRREGULAR_EXTENDED' : 'IRREGULAR';
     } else if (bRetracePct < 81) {
       subtype = 'B_DEFICIENT';
     }
+
+    const subtypeMeta = FLAT_SUBTYPE_METADATA[subtype];
+    const runningExclusion = this.identifyRunningFlatForExclusion({
+      bRetracePct,
+      cPctOfB,
+      hasCVertex: vertices.length >= 4,
+      pattern,
+      subtype
+    });
 
     const macroLabelFa =
       macroCategory === 'RUNNING'
         ? 'فلت جاری (Running Flat)'
         : macroCategory === 'IRREGULAR'
-        ? 'فلت نامنظم (Irregular Flat)'
-        : 'فلت متعارف (Regular Flat)';
+        ? subtype === 'IRREGULAR_EXTENDED'
+          ? 'فلت نامنظم کشیده (Irregular-Extended)'
+          : subtype === 'IRREGULAR_DEFICIENT'
+          ? 'فلت نامنظم ناقص (Irregular-Deficient)'
+          : 'فلت نامنظم (Irregular Flat)'
+        : `${subtypeMeta.fa} (${subtypeMeta.en})`;
+
+    const nonFlatStructureKind: FlatPatternFlag['nonFlatStructureKind'] = isStructure335
+      ? undefined
+      : structureSignature === '3-3-3'
+      ? 'SIMPLE_ZIGZAG'
+      : structureSignature === '5-3-5'
+      ? 'IDEAL_ZIGZAG'
+      : structureSignature === '3-5-5'
+      ? 'ANTI_ZIGZAG'
+      : 'OTHER';
+
+    const nonFlatDescFa =
+      nonFlatStructureKind === 'SIMPLE_ZIGZAG'
+        ? 'ساختار ۳-۳-۳ متعلق به زیگزاگ سیمپل است (نه فلت؛ تمام ۸ نوع فلت باید ۳-۳-۵ باشند)'
+        : nonFlatStructureKind === 'IDEAL_ZIGZAG'
+        ? 'ساختار ۵-۳-۵ متعلق به زیگزاگ ایده‌آل است (نه فلت؛ تمام ۸ نوع فلت باید ۳-۳-۵ باشند)'
+        : nonFlatStructureKind === 'ANTI_ZIGZAG'
+        ? 'ساختار ۳-۵-۵ متعلق به زیگزاگ آنتی‌ای است (نه فلت؛ تمام ۸ نوع فلت باید ۳-۳-۵ باشند)'
+        : `امضای درونی ${structureSignature} با ساختار الزامی ۳-۳-۵ فلت متفاوت است`;
 
     const labelFa = isFlaggedFlat
-      ? `الگوی فلت شناسایی شد: ${macroLabelFa} (۳-۳-۵)`
+      ? `الگوی فلت شناسایی شد: ${subtypeMeta.fa} (${subtypeMeta.en}) · ۳-۳-۵`
       : isStructure335 && !meetsB618Rule
       ? `ساختار ۳-۳-۵ با موج B ضعیف (${bRetracePct}٪ ≤ ۶۱.۸٪ — زیگزاگ سیمپل محتمل‌تر است)`
+      : nonFlatStructureKind === 'SIMPLE_ZIGZAG'
+      ? `ساختار ۳-۳-۳: زیگزاگ سیمپل (نه فلت)`
+      : nonFlatStructureKind === 'IDEAL_ZIGZAG'
+      ? `ساختار ۵-۳-۵: زیگزاگ ایده‌آل (نه فلت)`
+      : nonFlatStructureKind === 'ANTI_ZIGZAG'
+      ? `ساختار ۳-۵-۵: زیگزاگ آنتی‌ای (نه فلت)`
       : `ساختار ${structureSignature} (${bRetracePct > 61.8 ? 'B > ۶۱.۸٪' : 'B ≤ ۶۱.۸٪'})`;
 
     const reasonFa = isFlaggedFlat
-      ? `ساختار درونی ۳-۳-۵ و اصلاح موج B برابر ${bRetracePct}٪ (> ۶۱.۸٪ موج A) است؛ سناریو به‌طور خودکار به عنوان ${macroLabelFa} پرچم‌گذاری شد.`
+      ? runningExclusion.shouldExclude
+        ? `${runningExclusion.reasonFa} (ساختار ۳-۳-۵، B=${bRetracePct}٪، C=${cPctOfB}٪).`
+        : `ساختار درونی ۳-۳-۵ و اصلاح موج B برابر ${bRetracePct}٪ (> ۶۱.۸٪ موج A) است؛ سناریو به‌طور خودکار به عنوان ${macroLabelFa} پرچم‌گذاری شد.`
       : isStructure335
       ? `ساختار ۳-۳-۵ انتخاب شده اما اصلاح موج B برابر ${bRetracePct}٪ (کمتر یا مساوی ۶۱.۸٪ موج A) است؛ برای تایید فلت باید B > ۶۱.۸٪ باشد.`
-      : `امضای درونی ${structureSignature} با ساختار الزامی ۳-۳-۵ فلت متفاوت است.`;
+      : nonFlatDescFa;
+
+    const borderlineNotesFa: string[] = [];
+    if (Math.abs(bRetracePct - 61.8) <= 0.6) {
+      borderlineNotesFa.push('مرز B=۶۱.۸٪ (مرز فلت ناقص B و زیگزاگ سیمپل).');
+    }
+    if (Math.abs(bRetracePct - 81) <= 1.0) {
+      borderlineNotesFa.push('مرز B=۸۱٪ (مرز فلت ناقص B و فلت متعارف).');
+    }
+    if (Math.abs(bRetracePct - 100) <= 1.0) {
+      borderlineNotesFa.push('مرز B=۱۰۰٪ (مرز فلت متعارف و فلت نامنظم).');
+    }
+    if (Math.abs(bRetracePct - 138.2) <= 1.2) {
+      borderlineNotesFa.push('مرز B=۱۳۸.۲٪ (مرز فلت نامنظم و فلت نامنظم کشیده).');
+    }
+    if (vertices.length >= 4 && Math.abs(cPctOfB - 61.8) <= 2.2) {
+      borderlineNotesFa.push('مرز C=۶۱.۸٪ (مرز فلت جاری و فلت ناقص C / نامنظم ناقص).');
+    }
+    if (vertices.length >= 4 && Math.abs(cPctOfB - 81) <= 1.0) {
+      borderlineNotesFa.push('مرز C=۸۱٪ (مرز فلت ناقص C / ناقص دوگانه / نامنظم ناقص و متعارف / نامنظم).');
+    }
+    if (vertices.length >= 4 && Math.abs(cPctOfB - 100) <= 1.0) {
+      borderlineNotesFa.push('مرز C=۱۰۰٪ (مرز بالای فلت متعارف و فلت نامنظم).');
+    }
 
     return {
       isFlaggedFlat,
@@ -426,7 +584,14 @@ export class RulesEngine {
       meetsB618Rule,
       macroCategory,
       subtype,
+      subtypeLabelFa: subtypeMeta.fa,
+      subtypeLabelEn: subtypeMeta.en,
       suggestedPattern,
+      isRunningExcluded: runningExclusion.shouldExclude,
+      isSevereRunning: runningExclusion.isSevereRunning,
+      exclusionReasonFa: runningExclusion.shouldExclude ? runningExclusion.reasonFa : undefined,
+      nonFlatStructureKind,
+      borderlineNotesFa: borderlineNotesFa.length > 0 ? borderlineNotesFa : undefined,
       labelFa,
       reasonFa
     };
@@ -435,7 +600,8 @@ export class RulesEngine {
   /**
    * RulesEngine 'FlatPatternValidator' Rule:
    * Monitors any scenario with a 3-3-5 vertex structure, automatically calculates B-wave retracement,
-   * and if B > 61.8% A, flags it as a potential 'Flat' pattern (Regular, Irregular, or Running).
+   * classifies all 8 Session 13 Flat sub-types (including Irregular vs Irregular-Extended),
+   * and flags Running flats for exclusion.
    */
   public static FlatPatternValidator(
     pattern: PatternFamily,
@@ -447,6 +613,12 @@ export class RulesEngine {
     flag?: FlatPatternFlag;
     rule?: RuleValidationItem;
     isPotentialFlat: boolean;
+    subtype?: FlatSubtype;
+    subtypeLabelFa?: string;
+    subtypeLabelEn?: string;
+    isRunningExcluded: boolean;
+    isSevereRunning?: boolean;
+    exclusionReasonFa?: string;
   } {
     const evaluatedFlat = this.evaluateFlat335Rule(
       pattern,
@@ -456,7 +628,7 @@ export class RulesEngine {
       internalSubwaves
     );
     if (!evaluatedFlat) {
-      return { isPotentialFlat: false };
+      return { isPotentialFlat: false, isRunningExcluded: false, isSevereRunning: false };
     }
 
     const alreadyFlat =
@@ -466,15 +638,21 @@ export class RulesEngine {
       return {
         flag: evaluatedFlat,
         isPotentialFlat: true,
+        subtype: evaluatedFlat.subtype,
+        subtypeLabelFa: evaluatedFlat.subtypeLabelFa,
+        subtypeLabelEn: evaluatedFlat.subtypeLabelEn,
+        isRunningExcluded: evaluatedFlat.isRunningExcluded,
+        isSevereRunning: evaluatedFlat.isSevereRunning,
+        exclusionReasonFa: evaluatedFlat.exclusionReasonFa,
         rule: {
           ruleId: 'FlatPatternValidator',
           name: 'FlatPatternValidator',
-          nameFa: 'اعتبارسنج الگوی فلت (FlatPatternValidator): ساختار ۳-۳-۵ و موج B > ۶۱.۸٪',
+          nameFa: `اعتبارسنج الگوی فلت (FlatPatternValidator): ${evaluatedFlat.subtypeLabelFa} (${evaluatedFlat.subtypeLabelEn})`,
           type: 'STRUCTURE',
-          passed: alreadyFlat,
-          score: alreadyFlat ? 100 : 48,
+          passed: alreadyFlat && !evaluatedFlat.isRunningExcluded,
+          score: evaluatedFlat.isRunningExcluded ? 30 : alreadyFlat ? 100 : 48,
           conceptId: 'C23',
-          details: evaluatedFlat.macroCategory,
+          details: `${evaluatedFlat.macroCategory}:${evaluatedFlat.subtype}`,
           messageFa: evaluatedFlat.reasonFa,
           canBeSolvedByAlternate: alreadyFlat ? undefined : evaluatedFlat.suggestedPattern
         }
@@ -489,6 +667,11 @@ export class RulesEngine {
       return {
         flag: evaluatedFlat,
         isPotentialFlat: false,
+        subtype: evaluatedFlat.subtype,
+        subtypeLabelFa: evaluatedFlat.subtypeLabelFa,
+        subtypeLabelEn: evaluatedFlat.subtypeLabelEn,
+        isRunningExcluded: evaluatedFlat.isRunningExcluded,
+        exclusionReasonFa: evaluatedFlat.exclusionReasonFa,
         rule: {
           ruleId: 'FlatPatternValidator',
           name: 'FlatPatternValidator',
@@ -504,7 +687,360 @@ export class RulesEngine {
       };
     }
 
-    return { flag: evaluatedFlat, isPotentialFlat: false };
+    if (alreadyFlat && !evaluatedFlat.isStructure335) {
+      return {
+        flag: evaluatedFlat,
+        isPotentialFlat: false,
+        subtype: evaluatedFlat.subtype,
+        subtypeLabelFa: evaluatedFlat.subtypeLabelFa,
+        subtypeLabelEn: evaluatedFlat.subtypeLabelEn,
+        isRunningExcluded: evaluatedFlat.isRunningExcluded,
+        exclusionReasonFa: evaluatedFlat.exclusionReasonFa,
+        rule: {
+          ruleId: 'FlatPatternValidator',
+          name: 'FlatPatternValidator',
+          nameFa: 'اعتبارسنج الگوی فلت (FlatPatternValidator): الزام ساختار ۳-۳-۵ در همه انواع فلت',
+          type: 'STRUCTURE',
+          passed: false,
+          score: 30,
+          conceptId: 'C23',
+          details: `NON_335:${evaluatedFlat.structureSignature}`,
+          messageFa: evaluatedFlat.reasonFa,
+          canBeSolvedByAlternate:
+            evaluatedFlat.nonFlatStructureKind === 'SIMPLE_ZIGZAG' ||
+            evaluatedFlat.nonFlatStructureKind === 'IDEAL_ZIGZAG'
+              ? 'ZIGZAG'
+              : 'COMPLEX_COMBINATION'
+        }
+      };
+    }
+
+    return {
+      flag: evaluatedFlat,
+      isPotentialFlat: false,
+      subtype: evaluatedFlat.subtype,
+      subtypeLabelFa: evaluatedFlat.subtypeLabelFa,
+      subtypeLabelEn: evaluatedFlat.subtypeLabelEn,
+      isRunningExcluded: evaluatedFlat.isRunningExcluded,
+      exclusionReasonFa: evaluatedFlat.exclusionReasonFa
+    };
+  }
+
+  /**
+   * RulesEngine 'MarketTerminalValidator' Rule (Session 13 §2.1 & §2.2):
+   * Flags any scenario containing a Flat pattern if its terminal vertex is close to the end of
+   * the current market data chart, warning that Flat patterns must NOT be used in the end-phase
+   * for trading (only in past market history as a last-resort knot-untangler after Ideal/Diag/Zigzag).
+   */
+  public static MarketTerminalValidator(
+    pattern: PatternFamily,
+    vertices: WaveVertex[],
+    candles?: Candle[],
+    flatFlag?: FlatPatternFlag,
+    options?: { terminalWindowCandles?: number }
+  ): {
+    flag?: MarketTerminalFlag;
+    rule?: RuleValidationItem;
+    isFlatAtMarketEnd: boolean;
+  } {
+    const isFlatScenario =
+      pattern === 'FLAT_REGULAR' ||
+      pattern === 'FLAT_EXPANDED' ||
+      pattern === 'FLAT_RUNNING' ||
+      Boolean(flatFlag?.isFlaggedFlat);
+
+    if (!isFlatScenario || vertices.length < 3 || !candles || candles.length === 0) {
+      return { isFlatAtMarketEnd: false };
+    }
+
+    const totalCandles = candles.length;
+    const lastVertex = vertices[vertices.length - 1];
+    const terminalCandleIndex = lastVertex.candleIndex;
+    const distanceFromEndCandles = Math.max(0, totalCandles - 1 - terminalCandleIndex);
+    const thresholdCandles = options?.terminalWindowCandles ?? 5;
+    const isFlatAtMarketEnd = distanceFromEndCandles <= thresholdCandles;
+
+    const countingPriorityNoteFa =
+      'اولویت شمارش گذشته (بخش ۱۳-۲): ۱. سیکل ایده‌آل ← ۲. ترمینال/قطر ← ۳. زیگزاگ ← ۴. فلت (باز کردن گره) ← ۵. ترکیبی.';
+
+    const warningLabelFa = isFlatAtMarketEnd
+      ? 'هشدار انتهای بازار: فلت ابزار گره‌گشایی گذشته است و نباید در فاز پایانی بدون احتیاط شدید استفاده شود'
+      : 'فلت در گذشته بازار: مجاز فقط برای باز کردن گره شمارش';
+
+    const warningReasonFa = isFlatAtMarketEnd
+      ? `راس پایانی فلت (کندل ${terminalCandleIndex}، فاصله ${distanceFromEndCandles} کندل تا انتهای چارت) در فاز پایانی بازار فعلی قرار دارد؛ طبق جلسه ۱۳ (۲-۱ و ۲-۲)، الگوهای فلت عمدتاً ابزار باز کردن گره‌های گذشته بازار هستند و در فاز پایانی بازار فعلی نباید بدون احتیاط شدید و تأیید قوی برای معامله استفاده شوند.`
+      : `راس پایانی فلت در گذشته بازار قرار دارد (فاصله ${distanceFromEndCandles} کندل تا انتهای چارت) و تنها به‌عنوان ابزار گره‌گشایی زمانی مجاز است که سیکل ایده‌آل، ترمینال/قطر و زیگزاگ قادر به توضیح شمارش نباشند.`;
+
+    const flag: MarketTerminalFlag = {
+      isFlatAtMarketEnd,
+      isFlatScenario,
+      terminalCandleIndex,
+      totalCandles,
+      distanceFromEndCandles,
+      thresholdCandles,
+      warningLabelFa,
+      warningReasonFa,
+      countingPriorityNoteFa
+    };
+
+    const rule: RuleValidationItem = {
+      ruleId: 'MarketTerminalValidator',
+      name: 'MarketTerminalValidator',
+      nameFa: isFlatAtMarketEnd
+        ? 'هشدار انتهای بازار فلت (MarketTerminalValidator): ممنوعیت استفاده در فاز پایانی'
+        : 'جایگاه زمانی فلت (MarketTerminalValidator): گره‌گشایی در گذشته بازار',
+      type: 'STRUCTURE',
+      passed: !isFlatAtMarketEnd,
+      score: isFlatAtMarketEnd ? 35 : 100,
+      conceptId: 'C23',
+      details: isFlatAtMarketEnd ? 'FLAT_AT_MARKET_END' : 'FLAT_IN_PAST_MARKET',
+      messageFa: `${warningReasonFa} ${countingPriorityNoteFa}`
+    };
+
+    return {
+      flag,
+      rule,
+      isFlatAtMarketEnd
+    };
+  }
+
+  /**
+   * Session 13 §2.14 (T-13.45..T-13.47): Evaluates whether a Flat pattern (often deficient)
+   * should be used as a past-market Knot-Untangler when Wave 4 has 5+ subwaves and counting hits a dead end.
+   */
+  public static evaluateWave4FlatKnotUntangler(params: {
+    wave4SubwaveCount: number;
+    hasCountingDeadEnd: boolean;
+    isPastMarket?: boolean;
+  }): {
+    action: 'NO_FLAT_NEEDED' | 'USE_FLAT_KNOT_UNTANGLER' | 'WAIT_COUNT_MAY_BE_WRONG';
+    useFlat: boolean;
+    reasonFa: string;
+    rule: RuleValidationItem;
+  } {
+    const inPast = params.isPastMarket ?? true;
+    if (params.wave4SubwaveCount <= 3) {
+      const reasonFa = 'موج ۴ ساختار سه‌موجی استاندارد دارد؛ نیازی به فلت گره‌گشا نیست (از زیگزاگ/الگوی استاندارد استفاده کنید).';
+      return {
+        action: 'NO_FLAT_NEEDED',
+        useFlat: false,
+        reasonFa,
+        rule: {
+          ruleId: 'WAVE4_FLAT_KNOT_UNTANGLER',
+          name: 'Wave 4 Flat Knot-Untangler (Session 13 §2.14)',
+          nameFa: 'گره‌گشایی موج ۴ با فلت (بخش ۱۳-۱۴): ساختار سه‌موجی استاندارد',
+          type: 'STRUCTURE',
+          passed: true,
+          score: 100,
+          conceptId: 'C23',
+          details: 'NO_FLAT_NEEDED',
+          messageFa: reasonFa
+        }
+      };
+    }
+
+    if (params.hasCountingDeadEnd && inPast) {
+      const reasonFa =
+        'موج ۴ در گذشته بازار دارای ۵+ زیرموج و بن‌بست شمارش است؛ استفاده از فلت (به‌ویژه فلت ناقص) به‌عنوان گره‌گشا مجاز است تا موج ۵ شتابدار شمارش شود.';
+      return {
+        action: 'USE_FLAT_KNOT_UNTANGLER',
+        useFlat: true,
+        reasonFa,
+        rule: {
+          ruleId: 'WAVE4_FLAT_KNOT_UNTANGLER',
+          name: 'Wave 4 Flat Knot-Untangler (Session 13 §2.14)',
+          nameFa: 'گره‌گشایی موج ۴ با فلت (بخش ۱۳-۱۴): تایید گره‌گشا در گذشته بازار',
+          type: 'STRUCTURE',
+          passed: true,
+          score: 92,
+          conceptId: 'C23',
+          details: 'USE_FLAT_KNOT_UNTANGLER',
+          messageFa: reasonFa,
+          canBeSolvedByAlternate: 'FLAT_REGULAR'
+        }
+      };
+    }
+
+    const reasonFa = !inPast
+      ? 'موج ۴ در انتهای بازار قرار دارد؛ طبق جلسه ۱۳ فلت نباید در فاز پایانی استفاده شود — صبر کنید.'
+      : 'موج ۴ دارای ۵+ زیرموج بدون گره شمارش است؛ فلت استفاده نکنید و صبر کنید زیرا احتمال اشتباه در شمارش بالاست.';
+    return {
+      action: 'WAIT_COUNT_MAY_BE_WRONG',
+      useFlat: false,
+      reasonFa,
+      rule: {
+        ruleId: 'WAVE4_FLAT_KNOT_UNTANGLER',
+        name: 'Wave 4 Flat Knot-Untangler (Session 13 §2.14)',
+        nameFa: 'گره‌گشایی موج ۴ با فلت (بخش ۱۳-۱۴): هشدار صبر و بازبینی شمارش',
+        type: 'STRUCTURE',
+        passed: false,
+        score: 40,
+        conceptId: 'C23',
+        details: 'WAIT_COUNT_MAY_BE_WRONG',
+        messageFa: reasonFa
+      }
+    };
+  }
+
+  /**
+   * Session 13 §2.15 (T-13.48..T-13.50): Practical Simple Counting priority order:
+   * 1. First Zigzag (3-3-3) -> 2. Flat (3-3-5) -> 3. Complex Combination (5+ / complex C).
+   */
+  public static evaluateSimpleCountingClassification(params: {
+    subwaves: [number, number, number];
+    isComplexWaveC?: boolean;
+  }): {
+    classification: 'SIMPLE_ZIGZAG' | 'FLAT' | 'COMPLEX_COMBINATION';
+    priorityStep: 1 | 2 | 3;
+    reasonFa: string;
+    rule: RuleValidationItem;
+  } {
+    const [a, b, c] = params.subwaves;
+    if (a === 3 && b === 3 && c === 3 && !params.isComplexWaveC) {
+      const reasonFa = 'ساده‌شماری مرحله ۱ (۳-۳-۳): ابتدا زیگزاگ سیمپل انتخاب می‌شود (اولویت بر فلت).';
+      return {
+        classification: 'SIMPLE_ZIGZAG',
+        priorityStep: 1,
+        reasonFa,
+        rule: {
+          ruleId: 'SIMPLE_COUNTING_PRIORITY',
+          name: 'Simple Counting Priority (Session 13 §2.15)',
+          nameFa: 'ساده‌شماری تشخیص اصلاح (بخش ۱۳-۱۵): اولویت ۱ — زیگزاگ سیمپل',
+          type: 'STRUCTURE',
+          passed: true,
+          score: 100,
+          conceptId: 'C23',
+          details: 'STEP_1_SIMPLE_ZIGZAG',
+          messageFa: reasonFa,
+          canBeSolvedByAlternate: 'ZIGZAG'
+        }
+      };
+    }
+
+    if (a === 3 && b === 3 && c === 5 && !params.isComplexWaveC) {
+      const reasonFa = 'ساده‌شماری مرحله ۲ (۳-۳-۵): ساختار با زیگزاگ ۳-۳-۳ جور درنیامد؛ فلت (A=۳، B=۳، C=۵) تشخیص داده می‌شود.';
+      return {
+        classification: 'FLAT',
+        priorityStep: 2,
+        reasonFa,
+        rule: {
+          ruleId: 'SIMPLE_COUNTING_PRIORITY',
+          name: 'Simple Counting Priority (Session 13 §2.15)',
+          nameFa: 'ساده‌شماری تشخیص اصلاح (بخش ۱۳-۱۵): اولویت ۲ — فلت (۳-۳-۵)',
+          type: 'STRUCTURE',
+          passed: true,
+          score: 88,
+          conceptId: 'C23',
+          details: 'STEP_2_FLAT',
+          messageFa: reasonFa,
+          canBeSolvedByAlternate: 'FLAT_REGULAR'
+        }
+      };
+    }
+
+    const reasonFa =
+      'ساده‌شماری مرحله ۳: ساختار C پیچیده یا ۵+ موجی است و در قالب ۳-۳-۳ یا ۳-۳-۵ قرار نمی‌گیرد ← الگوی ترکیبی.';
+    return {
+      classification: 'COMPLEX_COMBINATION',
+      priorityStep: 3,
+      reasonFa,
+      rule: {
+        ruleId: 'SIMPLE_COUNTING_PRIORITY',
+        name: 'Simple Counting Priority (Session 13 §2.15)',
+        nameFa: 'ساده‌شماری تشخیص اصلاح (بخش ۱۳-۱۵): اولویت ۳ — الگوی ترکیبی',
+        type: 'STRUCTURE',
+        passed: true,
+        score: 75,
+        conceptId: 'C23',
+        details: 'STEP_3_COMPLEX_COMBINATION',
+        messageFa: reasonFa,
+        canBeSolvedByAlternate: 'COMPLEX_COMBINATION'
+      }
+    };
+  }
+
+  /**
+   * Session 13 §2.16 (T-13.51..T-13.53): Practical Wave 4 Irregular Flat example
+   * (W3 = 5-wave, W4 = Irregular Flat with 3-3-5 & B > 100% & C >= 81%, W5 = 5-wave impulsive).
+   */
+  public static evaluatePracticalWave4Flat(params: {
+    w4Pattern: 'STANDARD_ZIGZAG' | 'IRREGULAR_FLAT' | 'DOUBLE_DEFICIENT_FLAT';
+    bPctOfA?: number;
+    cPctOfB?: number;
+    subwaves?: [number, number, number];
+  }): {
+    decision: 'DIRECT_ZIGZAG' | 'COUNT_WITH_IRREGULAR_FLAT' | 'COUNT_WITH_COMBINATION';
+    practicalStepsOk: boolean;
+    reasonFa: string;
+    rule: RuleValidationItem;
+  } {
+    if (params.w4Pattern === 'STANDARD_ZIGZAG') {
+      const reasonFa = 'موج ۴ زیگزاگ استاندارد است؛ شمارش مستقیم بدون نیاز به فلت انجام می‌شود.';
+      return {
+        decision: 'DIRECT_ZIGZAG',
+        practicalStepsOk: true,
+        reasonFa,
+        rule: {
+          ruleId: 'PRACTICAL_W4_IRREGULAR_FLAT',
+          name: 'Practical Wave 4 Irregular Flat Check (Session 13 §2.16)',
+          nameFa: 'مثال عملی موج ۴ (بخش ۱۳-۱۶): شمارش مستقیم زیگزاگ',
+          type: 'STRUCTURE',
+          passed: true,
+          score: 100,
+          conceptId: 'C23',
+          details: 'DIRECT_ZIGZAG',
+          messageFa: reasonFa,
+          canBeSolvedByAlternate: 'ZIGZAG'
+        }
+      };
+    }
+
+    if (params.w4Pattern === 'IRREGULAR_FLAT') {
+      const has335 = !params.subwaves || (params.subwaves[0] === 3 && params.subwaves[1] === 3 && params.subwaves[2] === 5);
+      const hasBOver100 = params.bPctOfA === undefined || params.bPctOfA > 100;
+      const hasCOver81 = params.cPctOfB === undefined || params.cPctOfB >= 81;
+      const practicalStepsOk = has335 && hasBOver100 && hasCOver81;
+      const reasonFa = practicalStepsOk
+        ? 'موج ۴ فلت نامنظم (۳-۳-۵، B > ۱۰۰٪ و C ≥ ۸۱٪) است؛ جایگزین زیگزاگ شده و گره بین موج ۳ و موج ۵ شتابدار را باز می‌کند.'
+        : 'موج ۴ با فرض فلت نامنظم بررسی شد اما گام‌های عملی (۳-۳-۵، B > ۱۰۰٪، C ≥ ۸۱٪) به‌طور کامل احراز نشد.';
+      return {
+        decision: 'COUNT_WITH_IRREGULAR_FLAT',
+        practicalStepsOk,
+        reasonFa,
+        rule: {
+          ruleId: 'PRACTICAL_W4_IRREGULAR_FLAT',
+          name: 'Practical Wave 4 Irregular Flat Check (Session 13 §2.16)',
+          nameFa: 'مثال عملی موج ۴ (بخش ۱۳-۱۶): گره‌گشایی با فلت نامنظم',
+          type: 'STRUCTURE',
+          passed: practicalStepsOk,
+          score: practicalStepsOk ? 90 : 55,
+          conceptId: 'C23',
+          details: 'COUNT_WITH_IRREGULAR_FLAT',
+          messageFa: reasonFa,
+          canBeSolvedByAlternate: 'FLAT_EXPANDED'
+        }
+      };
+    }
+
+    const reasonFa =
+      'موج ۴ فلت ناقص دوگانه است (بسیار پرریسک)؛ به جای فلت به‌عنوان الگوی ترکیبی شمارش می‌شود.';
+    return {
+      decision: 'COUNT_WITH_COMBINATION',
+      practicalStepsOk: true,
+      reasonFa,
+      rule: {
+        ruleId: 'PRACTICAL_W4_IRREGULAR_FLAT',
+        name: 'Practical Wave 4 Irregular Flat Check (Session 13 §2.16)',
+        nameFa: 'مثال عملی موج ۴ (بخش ۱۳-۱۶): شمارش با الگوی ترکیبی (ناقص دوگانه)',
+        type: 'STRUCTURE',
+        passed: true,
+        score: 70,
+        conceptId: 'C23',
+        details: 'COUNT_WITH_COMBINATION',
+        messageFa: reasonFa,
+        canBeSolvedByAlternate: 'COMPLEX_COMBINATION'
+      }
+    };
   }
 
   /**
@@ -524,6 +1060,7 @@ export class RulesEngine {
     let alternativeReason: string | undefined;
     let nonIdealPatternFlag: NonIdealPatternFlag | undefined;
     let flatPatternFlag: FlatPatternFlag | undefined;
+    let marketTerminalFlag: MarketTerminalFlag | undefined;
 
     if (vertices.length < 2) {
       return {
@@ -2113,6 +2650,20 @@ export class RulesEngine {
           alternativeReason = flatValidation.flag.reasonFa;
         }
       }
+
+      // Session 13 MarketTerminalValidator: flag Flat patterns whose terminal vertex sits at current market end-phase
+      const marketTermValidation = this.MarketTerminalValidator(
+        pattern,
+        vertices,
+        candles,
+        flatPatternFlag
+      );
+      if (marketTermValidation.flag) {
+        marketTerminalFlag = marketTermValidation.flag;
+      }
+      if (marketTermValidation.rule) {
+        rules.push(marketTermValidation.rule);
+      }
     }
 
     let unifiedDetection: UnifiedPatternDetectionReport | undefined;
@@ -2514,6 +3065,7 @@ export class RulesEngine {
       wave5TruncationOrTerminalHint,
       nonIdealPatternFlag,
       flatPatternFlag,
+      marketTerminalFlag,
       unifiedDetection
     };
   }

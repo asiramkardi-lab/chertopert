@@ -242,6 +242,12 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
         nodeScenario.direction,
         candles
       );
+      const nodeTerminalCheck = RulesEngine.MarketTerminalValidator(
+        nodeScenario.patternType,
+        nodeScenario.vertices,
+        candles,
+        nodeFlatCheck.flag
+      );
 
       return (
         <div key={node.id} className={depth > 0 ? 'mr-3 pr-2.5 border-r border-indigo-500/30 space-y-1.5' : 'space-y-2'}>
@@ -298,9 +304,23 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                   <span
                     data-testid="wizard-tree-flat-badge"
                     title={nodeFlatCheck.flag.reasonFa}
-                    className="px-1.5 py-0.2 rounded text-[9.5px] font-bold border bg-amber-500/15 border-amber-500/45 text-amber-200 font-mono tabular-nums whitespace-nowrap"
+                    className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold border font-mono tabular-nums whitespace-nowrap ${
+                      nodeFlatCheck.isRunningExcluded
+                        ? 'bg-rose-500/15 border-rose-500/45 text-rose-200'
+                        : 'bg-amber-500/15 border-amber-500/45 text-amber-200'
+                    }`}
                   >
-                    احتمال فلت (Flat · {nodeFlatCheck.flag.bRetracePct}%)
+                    احتمال فلت ({nodeFlatCheck.flag.subtypeLabelEn} · {nodeFlatCheck.flag.bRetracePct}%)
+                    {nodeFlatCheck.isRunningExcluded ? ' · حذف جاری' : ''}
+                  </span>
+                )}
+                {nodeTerminalCheck.isFlatAtMarketEnd && nodeTerminalCheck.flag && (
+                  <span
+                    data-testid="wizard-tree-terminal-warning"
+                    title={nodeTerminalCheck.flag.warningReasonFa}
+                    className="px-1.5 py-0.2 rounded text-[9.5px] font-bold border bg-rose-500/20 border-rose-500/50 text-rose-200 whitespace-nowrap"
+                  >
+                    هشدار انتهای بازار
                   </span>
                 )}
               </div>
@@ -777,6 +797,12 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 sc.direction,
                 candles
               );
+              const scTerminalCheck = RulesEngine.MarketTerminalValidator(
+                sc.patternType,
+                sc.vertices,
+                candles,
+                scFlatCheck.flag
+              );
 
               return (
                 <div key={sc.id} className="space-y-2">
@@ -813,9 +839,23 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                               <span
                                 data-testid="wizard-tree-flat-badge"
                                 title={scFlatCheck.flag.reasonFa}
-                                className="px-1.5 py-0.2 rounded text-[9.5px] font-bold border bg-amber-500/15 border-amber-500/45 text-amber-200 font-mono tabular-nums whitespace-nowrap"
+                                className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold border font-mono tabular-nums whitespace-nowrap ${
+                                  scFlatCheck.isRunningExcluded
+                                    ? 'bg-rose-500/15 border-rose-500/45 text-rose-200'
+                                    : 'bg-amber-500/15 border-amber-500/45 text-amber-200'
+                                }`}
                               >
-                                احتمال فلت (Flat · {scFlatCheck.flag.bRetracePct}%)
+                                احتمال فلت ({scFlatCheck.flag.subtypeLabelEn} · {scFlatCheck.flag.bRetracePct}%)
+                                {scFlatCheck.isRunningExcluded ? ' · حذف جاری' : ''}
+                              </span>
+                            )}
+                            {scTerminalCheck.isFlatAtMarketEnd && scTerminalCheck.flag && (
+                              <span
+                                data-testid="wizard-tree-terminal-warning"
+                                title={scTerminalCheck.flag.warningReasonFa}
+                                className="px-1.5 py-0.2 rounded text-[9.5px] font-bold border bg-rose-500/20 border-rose-500/50 text-rose-200 whitespace-nowrap"
+                              >
+                                هشدار انتهای بازار
                               </span>
                             )}
                           </div>

@@ -298,7 +298,25 @@ export interface FlatAnalysisReport {
     | 'INVALID';
   bOver618Valid: boolean;
   isBorderlineB618?: boolean;
+  isBorderline81?: boolean;
+  isBorderline100?: boolean;
+  isBorderline1382?: boolean;
+  isBorderlineC618?: boolean;
   isSevereRunning?: boolean;
+  isSevereIrregularExtended?: boolean;
+  isRunningDeprecatedCourse?: boolean;
+  tradingPolicyAction?:
+    | 'ALLOW_PAST_KNOT_UNTANGLING'
+    | 'ALLOW_WITH_CAUTION'
+    | 'FORBID_AT_MARKET_END'
+    | 'DEPRECATE_REMOVE';
+  tradingPolicyReasonFa?: string;
+  recommendedCountingPriority?:
+    | 'IDEAL_CYCLE'
+    | 'TERMINAL_OR_DIAGONAL'
+    | 'ZIGZAG'
+    | 'FLAT'
+    | 'COMPLEX_COMBINATION';
   usableAtCurrentContext: boolean;
   contextCredibilityTier: 'HIGH' | 'MEDIUM' | 'LOW';
   cSubStructure: 'IDEAL' | 'DIAGONAL' | 'TERMINAL';

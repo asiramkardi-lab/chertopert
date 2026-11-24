@@ -1783,7 +1783,8 @@ export class PatternEngines {
     } else {
       if (cPctOfB < 81) {
         subtype = 'C_DEFICIENT';
-        subtypeLabelFa = 'فلت C ناقص (C-Deficient: C=۶۱.۸–۸۱٪)';
+        subtypeLabelFa = 'فلت C ناقص (C-Deficient: C=۶۱.۸–۸۱٪ — پرریسک)';
+        warnings.push('بخش ۱۳-۸: فلت ناقص C پرریسک است؛ به‌دلیل کوتاه ماندن موج C ممکن است بازار به‌جای ادامه حرکت، معکوس شود.');
       } else {
         subtype = 'REGULAR';
         subtypeLabelFa = 'فلت متعارف (Regular Flat: B و C در بازه ۸۱–۱۰۰٪)';
@@ -1814,7 +1815,9 @@ export class PatternEngines {
     const hasConfirmation =
       options?.hasConfirmation !== undefined ? options.hasConfirmation : scenario.validityScore >= 75;
     const usableAtCurrentContext =
-      subtype === 'RUNNING_DEPRECATED' ? !isMarketEnd : !isMarketEnd || hasConfirmation;
+      subtype === 'RUNNING_DEPRECATED' || subtype === 'DOUBLE_DEFICIENT'
+        ? !isMarketEnd
+        : !isMarketEnd || hasConfirmation;
 
     let confidence = 0.8;
     let contextCredibilityTier: FlatAnalysisReport['contextCredibilityTier'] = 'HIGH';
@@ -1829,7 +1832,7 @@ export class PatternEngines {
       } else if (subtype === 'DOUBLE_DEFICIENT') {
         confidence = 0.3;
         contextCredibilityTier = 'LOW';
-        warnings.push('جدول ۷ (۷.۱۳): فلت ناقص دوگانه در انتهای بازار اعتبار بسیار پایینی (۰.۳۰) دارد.');
+        warnings.push('جدول ۷ (۷.۱۳) / بخش ۱۳-۹: فلت ناقص دوگانه در انتهای بازار اعتبار بسیار پایینی (۰.۳۰) دارد و نباید استفاده شود.');
       } else if (hasConfirmation) {
         confidence = 0.6;
         contextCredibilityTier = 'MEDIUM';
@@ -1843,18 +1846,52 @@ export class PatternEngines {
       contextCredibilityTier = confidence >= 0.72 ? 'HIGH' : 'MEDIUM';
     }
 
+    const isSevereIrregularExtended = bPctOfA >= 180 && cPctOfB >= 100;
+    const isRunningDeprecatedCourse = subtype === 'RUNNING_DEPRECATED';
+
+    let tradingPolicyAction: FlatAnalysisReport['tradingPolicyAction'] = 'ALLOW_PAST_KNOT_UNTANGLING';
+    let tradingPolicyReasonFa = 'فلت در گذشته بازار برای باز کردن گره‌های شمارش مجاز است (ابزار شمارش گذشته).';
+    if (isRunningDeprecatedCourse) {
+      tradingPolicyAction = 'DEPRECATE_REMOVE';
+      tradingPolicyReasonFa = 'بخش ۱۳-۱۳: فلت جاری قوانین فرکتال را برهم می‌ریزد و برای معامله/شمارش استاندارد حذف شده است.';
+    } else if (isMarketEnd) {
+      if (subtype === 'DOUBLE_DEFICIENT') {
+        tradingPolicyAction = 'FORBID_AT_MARKET_END';
+        tradingPolicyReasonFa = 'بخش ۱۳-۹: فلت ناقص دوگانه بسیار پرریسک است (احتمال تبدیل به مثلث/ترکیبی) و در انتهای بازار نباید استفاده شود.';
+      } else if (hasConfirmation) {
+        tradingPolicyAction = 'ALLOW_WITH_CAUTION';
+        tradingPolicyReasonFa = 'بخش ۱۳-۱: فلت در انتهای بازار با تأیید قوی فقط با احتیاط مجاز است.';
+      } else {
+        tradingPolicyAction = 'FORBID_AT_MARKET_END';
+        tradingPolicyReasonFa = 'بخش ۱۳-۱: استفاده از فلت در انتهای بازار بدون تأیید ممنوع است؛ منتظر الگوی واضح‌تر بمانید.';
+      }
+    }
+
+    const isBorderline81 =
+      Math.abs(bPctOfA - 81) <= 1.0 || Math.abs(cPctOfB - 81) <= 1.0;
+    const isBorderline100 =
+      Math.abs(bPctOfA - 100) <= 1.5 || Math.abs(cPctOfB - 100) <= 1.5;
+    const isBorderline1382 = Math.abs(bPctOfA - 138.2) <= 1.5;
+    const isBorderlineC618 = Math.abs(cPctOfB - 61.8) <= 2.2;
+
     const borderlineNotesFa: string[] = [];
     if (isBorderlineB618) {
-      borderlineNotesFa.push('جدول ۷ (۱۲-۴): B ≈ ۶۱.۸٪ موج A (مرز فلت و زیگزاگ سیمپل).');
+      borderlineNotesFa.push('جدول ۷ (۱۲-۴ / ۱۳-۵): B ≈ ۶۱.۸٪ موج A (مرز فلت ناقص B و زیگزاگ سیمپل).');
     }
-    if (Math.abs(bPctOfA - 81) <= 1.0 && Math.abs(cPctOfB - 81) <= 1.0) {
-      borderlineNotesFa.push('بخش ۱۲-۸: B ≈ ۸۱٪ و C ≈ ۸۱٪ (فلت متعارف مرزی).');
+    if (isBorderline81) {
+      borderlineNotesFa.push('بخش ۱۳-۶..۱۳-۹: مقدار ≈ ۸۱٪ (مرز فلت متعارف و فلت ناقص B / ناقص C / ناقص دوگانه).');
     }
-    if (Math.abs(bPctOfA - 100) <= 1.5 && Math.abs(cPctOfB - 100) <= 1.5) {
-      borderlineNotesFa.push('جدول ۷ (۱۲-۸): B ≈ ۱۰۰٪ و C ≈ ۱۰۰٪ (فلت متعارف ایده‌آل/مرزی).');
+    if (isBorderline100) {
+      borderlineNotesFa.push('بخش ۱۳-۶ / ۱۳-۱۰ / ۱۳-۱۱: مقدار ≈ ۱۰۰٪ (مرز فلت متعارف و فلت نامنظم).');
     }
-    if (Math.abs(bPctOfA - 138.2) <= 1.5) {
-      borderlineNotesFa.push('جدول ۷ (۱۲-۱۰): B ≈ ۱۳۸.۲٪ موج A (مرز فلت نامنظم و نامنظم کشیده).');
+    if (isBorderline1382) {
+      borderlineNotesFa.push('بخش ۱۳-۱۰..۱۳-۱۲: B ≈ ۱۳۸.۲٪ موج A (مرز فلت نامنظم و نامنظم کشیده).');
+    }
+    if (isBorderlineC618) {
+      borderlineNotesFa.push('بخش ۱۳-۸ / ۱۳-۱۳: C ≈ ۶۱.۸٪ موج B (مرز فلت جاری و ناقص C / نامنظم ناقص).');
+    }
+    if (isSevereIrregularExtended) {
+      notes.push('بخش ۱۳-۱۲: فلت نامنظم کشیده شدید (B ≥ ۱۸۰٪).');
     }
     notes.push(...borderlineNotesFa);
     if (evolutionInfo) notes.push(evolutionInfo.labelFa);
@@ -1863,9 +1900,9 @@ export class PatternEngines {
     const knotUntanglerRecommended = !isMarketEnd && bOver618Valid && scenario.validityScore < 75;
     const isWave4KnotUntangler = estimatedSc === 5 || knotUntanglerRecommended;
     if (isWave4KnotUntangler) {
-      notes.push('جدول ۷ (فلت گره‌گشا vs صبر بدون گره): در صورت وجود ۵+ زیرموج و بن‌بست شمارش گذشته، فلت گره‌گشایی است.');
+      notes.push('جدول ۷ / بخش ۱۳-۱۴: در صورت وجود ۵+ زیرموج و بن‌بست شمارش گذشته، فلت گره‌گشایی است.');
     }
-    notes.push('اولویت شمارش جلسه ۱۳: ایده‌آل ← قطر ← ترمینال ← زیگزاگ ← فلت ← مثلث ← ترکیبی.');
+    notes.push('اولویت شمارش جلسه ۱۳: ایده‌آل ← ترمینال/قطر ← زیگزاگ ← فلت ← ترکیبی.');
 
     return {
       detected: disambiguationKind === 'FLAT' && bOver618Valid,
@@ -1879,7 +1916,16 @@ export class PatternEngines {
       disambiguationKind,
       bOver618Valid,
       isBorderlineB618,
+      isBorderline81,
+      isBorderline100,
+      isBorderline1382,
+      isBorderlineC618,
       isSevereRunning,
+      isSevereIrregularExtended,
+      isRunningDeprecatedCourse,
+      tradingPolicyAction,
+      tradingPolicyReasonFa,
+      recommendedCountingPriority: 'FLAT',
       usableAtCurrentContext,
       contextCredibilityTier,
       cSubStructure,
@@ -1893,6 +1939,147 @@ export class PatternEngines {
       confidence: Math.max(0, Math.min(1, confidence)),
       warnings,
       notes
+    };
+  }
+
+  /**
+   * Session 13 (Concept 13-2: Past-Market Counting Priority):
+   * Priority: 1) Ideal Cycle -> 2) Terminal / Diagonal -> 3) Zigzag -> 4) Flat -> 5) Combination.
+   */
+  public static evaluateFlatCountingPriority(params: {
+    zigzagCountable: boolean;
+    flatCountable: boolean;
+    combinationCountable?: boolean;
+  }): {
+    recommendedChoice: 'ZIGZAG' | 'FLAT' | 'COMPLEX_COMBINATION' | 'WAIT';
+    useFlat: boolean;
+    priorityOrder: Array<'IDEAL_CYCLE' | 'TERMINAL_OR_DIAGONAL' | 'ZIGZAG' | 'FLAT' | 'COMPLEX_COMBINATION'>;
+    reasonFa: string;
+  } {
+    const priorityOrder: Array<'IDEAL_CYCLE' | 'TERMINAL_OR_DIAGONAL' | 'ZIGZAG' | 'FLAT' | 'COMPLEX_COMBINATION'> = [
+      'IDEAL_CYCLE',
+      'TERMINAL_OR_DIAGONAL',
+      'ZIGZAG',
+      'FLAT',
+      'COMPLEX_COMBINATION'
+    ];
+    if (params.zigzagCountable) {
+      return {
+        recommendedChoice: 'ZIGZAG',
+        useFlat: false,
+        priorityOrder,
+        reasonFa: 'شمارش با زیگزاگ ممکن است؛ طبق اولویت جلسه ۱۳ از فلت استفاده نکنید.'
+      };
+    }
+    if (params.flatCountable) {
+      return {
+        recommendedChoice: 'FLAT',
+        useFlat: true,
+        priorityOrder,
+        reasonFa: 'شمارش با زیگزاگ ممکن نیست اما فلت گره را باز می‌کند؛ فلت را انتخاب کنید.'
+      };
+    }
+    if (params.combinationCountable) {
+      return {
+        recommendedChoice: 'COMPLEX_COMBINATION',
+        useFlat: false,
+        priorityOrder,
+        reasonFa: 'زیگزاگ و فلت پاسخ نمی‌دهند؛ بالاجبار از الگوی ترکیبی استفاده کنید.'
+      };
+    }
+    return {
+      recommendedChoice: 'WAIT',
+      useFlat: false,
+      priorityOrder,
+      reasonFa: 'هیچ‌یک از الگوهای اصلاحی تایید نشدند؛ منتظر تکمیل ساختار بمانید.'
+    };
+  }
+
+  /**
+   * Session 13 (Concept 13-14: Flat as Knot-Untangler in Wave 4):
+   */
+  public static evaluateWave4FlatKnotUntangler(params: {
+    wave4SubwaveCount: number;
+    hasCountingDeadEnd: boolean;
+  }): {
+    action: 'NO_FLAT_NEEDED' | 'USE_FLAT_KNOT_UNTANGLER' | 'WAIT_COUNT_MAY_BE_WRONG';
+    useFlat: boolean;
+    reasonFa: string;
+  } {
+    if (params.wave4SubwaveCount <= 3) {
+      return {
+        action: 'NO_FLAT_NEEDED',
+        useFlat: false,
+        reasonFa: 'موج ۴ ساختار سه‌موجی استاندارد دارد؛ نیازی به فلت گره‌گشا نیست.'
+      };
+    }
+    if (params.hasCountingDeadEnd) {
+      return {
+        action: 'USE_FLAT_KNOT_UNTANGLER',
+        useFlat: true,
+        reasonFa: 'موج ۴ دارای ۵+ موج و بن‌بست شمارش در گذشته بازار است؛ فلت گره‌گشایی مجاز است.'
+      };
+    }
+    return {
+      action: 'WAIT_COUNT_MAY_BE_WRONG',
+      useFlat: false,
+      reasonFa: 'موج ۴ دارای ۵+ موج بدون گره شمارش است؛ صبر کنید زیرا احتمال اشتباه در شمارش بالاست.'
+    };
+  }
+
+  /**
+   * Session 13 (Concept 13-15: Practical Simple Counting Decision):
+   */
+  public static evaluateSimpleCountingClassification(params: {
+    subwaves: [number, number, number];
+    isComplexWaveC?: boolean;
+  }): {
+    classification: 'SIMPLE_ZIGZAG' | 'FLAT' | 'COMPLEX_COMBINATION';
+    reasonFa: string;
+  } {
+    const [a, b, c] = params.subwaves;
+    if (a === 3 && b === 3 && c === 3 && !params.isComplexWaveC) {
+      return {
+        classification: 'SIMPLE_ZIGZAG',
+        reasonFa: 'ساده‌شماری ۳-۳-۳: اول زیگزاگ سیمپل تشخیص داده می‌شود.'
+      };
+    }
+    if (a === 3 && b === 3 && c === 5 && !params.isComplexWaveC) {
+      return {
+        classification: 'FLAT',
+        reasonFa: 'ساده‌شماری ۳-۳-۵: ساختار فلت (A=۳، B=۳، C=۵) تشخیص داده می‌شود.'
+      };
+    }
+    return {
+      classification: 'COMPLEX_COMBINATION',
+      reasonFa: 'ساختار پیچیده (۵+ موج در C یا غیر ۳-۳-۵): به‌عنوان الگوی ترکیبی دسته‌بندی می‌شود.'
+    };
+  }
+
+  /**
+   * Session 13 (Concept 13-16: Practical Wave 4 Irregular Flat Example):
+   */
+  public static evaluatePracticalWave4Flat(params: {
+    w4Pattern: 'STANDARD_ZIGZAG' | 'IRREGULAR_FLAT' | 'DOUBLE_DEFICIENT_FLAT';
+  }): {
+    decision: 'DIRECT_ZIGZAG' | 'COUNT_WITH_IRREGULAR_FLAT' | 'COUNT_WITH_COMBINATION';
+    reasonFa: string;
+  } {
+    if (params.w4Pattern === 'STANDARD_ZIGZAG') {
+      return {
+        decision: 'DIRECT_ZIGZAG',
+        reasonFa: 'موج ۴ زیگزاگ استاندارد است؛ شمارش مستقیم بدون فلت انجام می‌شود.'
+      };
+    }
+    if (params.w4Pattern === 'IRREGULAR_FLAT') {
+      return {
+        decision: 'COUNT_WITH_IRREGULAR_FLAT',
+        reasonFa: 'موج ۴ فلت نامنظم است (B > A)؛ از فلت نامنظم برای باز کردن گره بین موج ۳ و ۵ استفاده می‌شود.'
+      };
+    }
+    return {
+      decision: 'COUNT_WITH_COMBINATION',
+      reasonFa: 'فلت ناقص دوگانه در موج ۴ پرریسک است و به دلیل احتمال تبدیل بالا به‌عنوان ترکیبی شمارش می‌شود.'
     };
   }
 
