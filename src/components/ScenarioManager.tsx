@@ -86,10 +86,18 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
       }
       eMap[sc.id] = Boolean(sc.isExcludedRunningFlat) || isExcludedFlat(sc, candles);
       const term = RulesEngine.MarketTerminalValidator(sc.patternType, sc.vertices, candles, res.flag);
+      const hasMetaPhaseWarning = Boolean(sc.marketPhaseWarning || sc.metadata?.marketPhaseWarning);
       if (term.isFlatAtMarketEnd && term.flag) {
         tMap[sc.id] = term.flag;
       } else if (sc.marketTerminalWarning?.isFlatAtMarketEnd) {
         tMap[sc.id] = sc.marketTerminalWarning;
+      } else if (hasMetaPhaseWarning) {
+        tMap[sc.id] = {
+          warningLabelFa: 'هشدار انتهای بازار: فلت ابزار گره‌گشایی گذشته است و نباید در فاز پایانی بدون احتیاط شدید استفاده شود',
+          warningReasonFa:
+            "Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase.",
+          distanceFromEndCandles: 0
+        };
       }
     });
     return { flatFlagsById: fMap, terminalWarningsById: tMap, excludedRunningById: eMap };
@@ -358,7 +366,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                       {terminalWarningsById[sc.id] && (
                         <span
                           data-testid="scenario-market-terminal-warning"
-                          title={terminalWarningsById[sc.id]!.warningReasonFa}
+                          title="Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase."
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold border bg-rose-500/20 border-rose-500/50 text-rose-200"
                         >
                           <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />

@@ -787,14 +787,30 @@ export class RulesEngine {
   ): WaveScenario {
     const warningMeta = this.buildMarketTerminalWarningMetadata(summary.marketTerminalFlag);
     const isExcluded = this.isExcludedFlat(scenario, candles);
+    const nextMetadata = { ...(scenario.metadata ?? {}) };
+    if (warningMeta) {
+      nextMetadata.marketPhaseWarning = true;
+      nextMetadata.marketTerminalWarning = warningMeta;
+    } else {
+      delete nextMetadata.marketPhaseWarning;
+      delete nextMetadata.marketTerminalWarning;
+    }
+    if (summary.flatPatternFlag?.subtype) {
+      nextMetadata.flatSubtype = summary.flatPatternFlag.subtype;
+    }
+    nextMetadata.isExcludedFlat = isExcluded;
+
     const next: WaveScenario = {
       ...scenario,
-      isExcludedRunningFlat: isExcluded
+      isExcludedRunningFlat: isExcluded,
+      metadata: nextMetadata
     };
     if (warningMeta) {
+      next.marketPhaseWarning = true;
       next.marketTerminalWarning = warningMeta;
-    } else if ('marketTerminalWarning' in next) {
-      delete next.marketTerminalWarning;
+    } else {
+      if ('marketPhaseWarning' in next) delete next.marketPhaseWarning;
+      if ('marketTerminalWarning' in next) delete next.marketTerminalWarning;
     }
     return next;
   }
@@ -866,8 +882,13 @@ export class RulesEngine {
       Boolean(resolvedFlatFlag?.isFlaggedFlat);
 
     if (!isFlatScenario || vertices.length < 3 || !candles || candles.length === 0) {
-      if (targetScenario && 'marketTerminalWarning' in targetScenario) {
-        delete targetScenario.marketTerminalWarning;
+      if (targetScenario) {
+        if ('marketPhaseWarning' in targetScenario) delete targetScenario.marketPhaseWarning;
+        if ('marketTerminalWarning' in targetScenario) delete targetScenario.marketTerminalWarning;
+        if (targetScenario.metadata) {
+          delete targetScenario.metadata.marketPhaseWarning;
+          delete targetScenario.metadata.marketTerminalWarning;
+        }
       }
       return {
         isFlatAtMarketEnd: false,
@@ -879,7 +900,8 @@ export class RulesEngine {
     const lastVertex = vertices[vertices.length - 1];
     const terminalCandleIndex = lastVertex.candleIndex;
     const distanceFromEndCandles = Math.max(0, totalCandles - 1 - terminalCandleIndex);
-    const thresholdCandles = resolvedOptions?.terminalWindowCandles ?? 5;
+    // Within the last 10 candles of active chart data (indices length-10 .. length-1 -> distance <= 9)
+    const thresholdCandles = resolvedOptions?.terminalWindowCandles ?? 9;
     const isFlatAtMarketEnd = distanceFromEndCandles <= thresholdCandles;
 
     const countingPriorityNoteFa =
@@ -890,7 +912,7 @@ export class RulesEngine {
       : 'فلت در گذشته بازار: مجاز فقط برای باز کردن گره شمارش';
 
     const warningReasonFa = isFlatAtMarketEnd
-      ? `راس پایانی فلت (کندل ${terminalCandleIndex}، فاصله ${distanceFromEndCandles} کندل تا انتهای چارت) در فاز پایانی بازار فعلی قرار دارد؛ طبق جلسه ۱۳ (۲-۱ و ۲-۲)، الگوهای فلت عمدتاً ابزار باز کردن گره‌های گذشته بازار هستند و در فاز پایانی بازار فعلی نباید بدون احتیاط شدید و تأیید قوی برای معامله استفاده شوند.`
+      ? `راس پایانی فلت (کندل ${terminalCandleIndex}، فاصله ${distanceFromEndCandles} کندل تا انتهای چارت) در ۱۰ کندل پایانی بازار فعلی قرار دارد؛ طبق جلسه ۱۳ (۲-۱ و ۲-۲)، الگوهای فلت عمدتاً ابزار باز کردن گره‌های گذشته بازار هستند و در فاز پایانی بازار فعلی نباید بدون احتیاط شدید و تأیید قوی برای معامله استفاده شوند.`
       : `راس پایانی فلت در گذشته بازار قرار دارد (فاصله ${distanceFromEndCandles} کندل تا انتهای چارت) و تنها به‌عنوان ابزار گره‌گشایی زمانی مجاز است که سیکل ایده‌آل، ترمینال/قطر و زیگزاگ قادر به توضیح شمارش نباشند.`;
 
     const flag: MarketTerminalFlag = {
@@ -907,10 +929,17 @@ export class RulesEngine {
 
     const warningMetadata = this.buildMarketTerminalWarningMetadata(flag);
     if (targetScenario) {
+      targetScenario.metadata = { ...(targetScenario.metadata ?? {}) };
       if (warningMetadata) {
+        targetScenario.marketPhaseWarning = true;
         targetScenario.marketTerminalWarning = warningMetadata;
+        targetScenario.metadata.marketPhaseWarning = true;
+        targetScenario.metadata.marketTerminalWarning = warningMetadata;
       } else {
+        delete targetScenario.marketPhaseWarning;
         delete targetScenario.marketTerminalWarning;
+        delete targetScenario.metadata.marketPhaseWarning;
+        delete targetScenario.metadata.marketTerminalWarning;
       }
     }
 

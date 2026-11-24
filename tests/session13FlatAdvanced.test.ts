@@ -619,25 +619,46 @@ describe('Session 13 Flat Advanced Naming, Rules & Knot-Untangler Engine (T-13.1
     expect(normalZigzagEnd.marketTerminalFlag).toBeUndefined();
     expect(normalZigzagEnd.rules.some(r => r.ruleId === 'MarketTerminalValidator')).toBe(false);
 
-    // 5) Direct scenario overload injects & clears scenario.marketTerminalWarning metadata
+    // 5) Direct scenario overload injects & clears scenario.marketPhaseWarning + scenario.marketTerminalWarning metadata (within last 10 candles)
     const endScenario = makeFlatScenario([200, 100, 190, 105], {
       patternType: 'FLAT_REGULAR',
       candleIndices: [18, 24, 31, 38]
     });
     const injectedRes = RulesEngine.MarketTerminalValidator(endScenario, candles40);
     expect(injectedRes.isFlatAtMarketEnd).toBe(true);
+    expect(endScenario.marketPhaseWarning).toBe(true);
+    expect(endScenario.metadata?.marketPhaseWarning).toBe(true);
     expect(endScenario.marketTerminalWarning?.isFlatAtMarketEnd).toBe(true);
     expect(endScenario.marketTerminalWarning?.code).toBe('FLAT_AT_MARKET_END');
     expect(endScenario.marketTerminalWarning?.distanceFromEndCandles).toBe(1);
     expect(endScenario.marketTerminalWarning?.warningLabelFa).toContain('فاز پایانی');
 
+    // Exact 10-candle boundary: 40 candles -> last 10 candles start at index 30 (distance 9 <= 9)
+    const boundaryInside10 = makeFlatScenario([200, 100, 190, 105], {
+      patternType: 'FLAT_REGULAR',
+      candleIndices: [12, 18, 24, 30]
+    });
+    expect(RulesEngine.MarketTerminalValidator(boundaryInside10, candles40).isFlatAtMarketEnd).toBe(true);
+    expect(boundaryInside10.marketPhaseWarning).toBe(true);
+
+    const boundaryOutside10 = makeFlatScenario([200, 100, 190, 105], {
+      patternType: 'FLAT_REGULAR',
+      candleIndices: [11, 17, 23, 29]
+    });
+    expect(RulesEngine.MarketTerminalValidator(boundaryOutside10, candles40).isFlatAtMarketEnd).toBe(false);
+    expect(boundaryOutside10.marketPhaseWarning).toBeUndefined();
+
     const pastScenario = makeFlatScenario([200, 100, 190, 105], {
       patternType: 'FLAT_REGULAR',
       candleIndices: [2, 6, 11, 16]
     });
+    pastScenario.marketPhaseWarning = true;
     pastScenario.marketTerminalWarning = endScenario.marketTerminalWarning;
+    pastScenario.metadata = { marketPhaseWarning: true, marketTerminalWarning: endScenario.marketTerminalWarning };
     const clearedRes = RulesEngine.MarketTerminalValidator(pastScenario, candles40);
     expect(clearedRes.isFlatAtMarketEnd).toBe(false);
+    expect(pastScenario.marketPhaseWarning).toBeUndefined();
+    expect(pastScenario.metadata?.marketPhaseWarning).toBeUndefined();
     expect(pastScenario.marketTerminalWarning).toBeUndefined();
   });
 });

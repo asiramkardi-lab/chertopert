@@ -728,8 +728,15 @@ export interface WaveScenario {
   parentNodeId?: string;
   parentLegLabel?: string; // e.g. "موج 1" or "موج 3"
   notes?: string;
+  marketPhaseWarning?: boolean;
   marketTerminalWarning?: MarketTerminalScenarioWarning;
   isExcludedRunningFlat?: boolean;
+  metadata?: {
+    marketPhaseWarning?: boolean;
+    marketTerminalWarning?: MarketTerminalScenarioWarning;
+    flatSubtype?: FlatSubtype;
+    isExcludedFlat?: boolean;
+  };
 }
 
 export interface TimeframeEvaluation {

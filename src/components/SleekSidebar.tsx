@@ -15,7 +15,7 @@ import {
   WaveVertex,
   TimeframeBoundaryReport 
 } from '../types/elliott';
-import { RulesEngine, ValidationSummary } from '../engine/rulesEngine';
+import { RulesEngine, ValidationSummary, isExcludedFlat } from '../engine/rulesEngine';
 import { ChartInteractionMode } from './ChartStudio';
 import { ExplainabilityPanel } from './ExplainabilityPanel';
 import { PatternValidator } from './PatternValidator';
@@ -42,8 +42,13 @@ import {
   Crosshair,
   ArrowUpLeft,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
+
+const FLAT_MARKET_PHASE_TOOLTIP =
+  "Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase.";
 
 export type SidebarTab = 'COPILOT' | 'FLAT_ANALYSIS' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
 
@@ -154,6 +159,25 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
     setShowInlineFlatToggle(is335Identified);
   }, [is335Identified, activeScenario.id]);
 
+  const scenarioPhaseWarningsById = useMemo(() => {
+    const map: Record<string, boolean> = {};
+    scenarios.forEach(sc => {
+      const flaggedByValidator = RulesEngine.MarketTerminalValidator(sc, candles).isFlatAtMarketEnd;
+      map[sc.id] = Boolean(
+        sc.marketPhaseWarning ||
+          sc.metadata?.marketPhaseWarning ||
+          sc.marketTerminalWarning?.isFlatAtMarketEnd ||
+          flaggedByValidator
+      );
+    });
+    return map;
+  }, [scenarios, candles]);
+
+  const anyMarketPhaseWarning = useMemo(
+    () => Object.values(scenarioPhaseWarningsById).some(Boolean),
+    [scenarioPhaseWarningsById]
+  );
+
   const tabs = [
     { id: 'COPILOT' as SidebarTab, label: 'دستیار هوشمند و قوانین', icon: Cpu, badge: `${activeScenario.validityScore}%` },
     {
@@ -164,7 +188,13 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
     },
     { id: 'ANGLE_TARGETS' as SidebarTab, label: 'زوایا و اهداف', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
     { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch, badge: '۴ درجه' },
-    { id: 'SCENARIOS' as SidebarTab, label: 'سناریوهای موازی', icon: FolderGit2, badge: `${scenarios.length}` },
+    {
+      id: 'SCENARIOS' as SidebarTab,
+      label: 'سناریوهای موازی',
+      icon: FolderGit2,
+      badge: `${scenarios.length}`,
+      hasWarning: anyMarketPhaseWarning
+    },
     { id: 'TF_BOUNDARY' as SidebarTab, label: 'محدوده تایم‌فریم', icon: Compass },
     { id: 'SDD_CODE' as SidebarTab, label: 'سند SDD و کدها', icon: FileCode2 }
   ];
@@ -195,6 +225,15 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
             >
               <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : isFlatTabAlert ? 'text-amber-300' : 'text-slate-400'}`} />
               <span>{tab.label}</span>
+              {'hasWarning' in tab && tab.hasWarning && (
+                <span
+                  data-testid="sidebar-scenarios-tab-warning"
+                  title={FLAT_MARKET_PHASE_TOOLTIP}
+                  className="inline-flex items-center text-rose-300"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                </span>
+              )}
               {tab.badge && (
                 <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono tabular-nums ${
                   isActive ? 'bg-indigo-900/60 text-white' : isFlatTabAlert ? 'bg-amber-900/50 text-amber-200' : 'bg-slate-800 text-slate-400'
@@ -506,6 +545,83 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
             ) : (
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
                 <strong>جهان سناریوها:</strong> برای بررسی ساختار درونی هر موج، روی خط آن موج در نمودار کلیک کنید تا داده‌های تایم‌فریم پایین‌تر و سناریوهای آن بارگذاری شوند.
+              </div>
+            )}
+
+            {/* Quick SleekSidebar Scenario List with End-Phase Flat Warning Badges */}
+            {scenarios.length > 0 && (
+              <div
+                data-testid="sleek-sidebar-scenario-list"
+                className="rounded-xl bg-slate-950/70 border border-slate-800/90 p-2.5 space-y-1.5"
+              >
+                <div className="flex items-center justify-between text-[10.5px] text-slate-400 px-1">
+                  <span>لیست سریع سناریوها</span>
+                  <span className="font-mono tabular-nums">{scenarios.length}</span>
+                </div>
+                <div className="space-y-1">
+                  {scenarios.map(sc => {
+                    const isSelected = sc.id === activeScenarioId;
+                    const hasPhaseWarn = scenarioPhaseWarningsById[sc.id];
+                    const runningExcluded = isExcludedFlat(sc, candles);
+                    return (
+                      <div
+                        key={sc.id}
+                        className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors ${
+                          isSelected
+                            ? 'bg-indigo-950/45 border-indigo-500/60 text-white'
+                            : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelectScenario(sc.id)}
+                          className="flex items-center gap-1.5 min-w-0 flex-1 text-right"
+                        >
+                          <span
+                            className="w-2 h-2 rounded-sm shrink-0"
+                            style={{ backgroundColor: sc.color || '#38bdf8' }}
+                          />
+                          <span className="truncate font-semibold">{sc.name}</span>
+                          {hasPhaseWarn && (
+                            <span
+                              data-testid="sidebar-scenario-market-phase-warning"
+                              title={FLAT_MARKET_PHASE_TOOLTIP}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/50 text-rose-200 text-[9.5px] font-bold shrink-0"
+                            >
+                              <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span>فلت انتهای بازار</span>
+                            </span>
+                          )}
+                          {runningExcluded && (
+                            <span
+                              title="Running Flat excluded per Session 13 — flagged for removal"
+                              className="px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0"
+                            >
+                              حذف جاری
+                            </span>
+                          )}
+                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {runningExcluded && scenarios.length > 1 && (
+                            <button
+                              type="button"
+                              data-testid="sidebar-remove-running-flat"
+                              onClick={() => onDeleteScenario(sc.id)}
+                              title="Remove excluded Running Flat scenario to keep tree clean"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/45 text-rose-200 text-[9.5px] font-bold transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3 shrink-0" />
+                              <span>حذف</span>
+                            </button>
+                          )}
+                          <span className="font-mono tabular-nums text-[10px] text-slate-400 shrink-0">
+                            {sc.validityScore}%
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
