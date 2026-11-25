@@ -466,4 +466,158 @@ describe('Session 16 Complex Patterns Engine & SDD 015 (T-16.1..T-16.43)', () =>
     expect(resRestricted.report.xWaveValid).toBe(false);
     expect(resRestricted.report.isMarketEndRestricted).toBe(true);
   });
+
+  it('RulesEngine.XWaveValidator enforces >= 3 candles and allowed forms (Zigzag, Impulsive, Simple 3-candle) & blocks invalid creation', () => {
+    const candles = makeCandles(40);
+
+    // Valid Simple 3-candle X-Wave
+    const validSimple3 = RulesEngine.XWaveValidator({ kind: 'SIMPLE_3_CANDLE', candleCount: 3 });
+    expect(validSimple3.isValid).toBe(true);
+    expect(validSimple3.xWaveForm).toBe('SIMPLE_3_CANDLE');
+    expect(validSimple3.minCandlesRequired).toBe(3);
+
+    // Valid Zigzag X-Wave
+    const validZigzag = RulesEngine.XWaveValidator({ kind: 'ZIGZAG', candleCount: 8 });
+    expect(validZigzag.isValid).toBe(true);
+    expect(validZigzag.xWaveForm).toBe('ZIGZAG');
+
+    // Valid Impulsive X-Wave
+    const validImpulsive = RulesEngine.XWaveValidator({ kind: 'IMPULSIVE', candleCount: 5 });
+    expect(validImpulsive.isValid).toBe(true);
+    expect(validImpulsive.xWaveForm).toBe('IMPULSIVE');
+
+    // Invalid < 3 candles
+    const invalidShort = RulesEngine.XWaveValidator({ kind: 'SIMPLE_3_CANDLE', candleCount: 2 });
+    expect(invalidShort.isValid).toBe(false);
+    expect(invalidShort.xWaveForm).toBe('INVALID');
+    expect(invalidShort.rule.passed).toBe(false);
+
+    // Invalid form rejected
+    const invalidForm = RulesEngine.XWaveValidator({ kind: 'TRIANGLE', candleCount: 6 });
+    expect(invalidForm.isValid).toBe(false);
+
+    // Scenario creation flow blocks invalid X-Wave (< 3 candles between W and X)
+    const invalidWxyScenario = makeComplexScenario([100, 160, 130, 190], {
+      labels: ['0', 'W', 'X', 'Y'],
+      candleIndices: [0, 6, 8, 16] // X-wave span = 8 - 6 = 2 candles (< 3)
+    });
+    const blockedCreation = RulesEngine.validateScenarioCreation(
+      { patternType: 'COMPLEX_COMBINATION', vertices: invalidWxyScenario.vertices },
+      candles
+    );
+    expect(blockedCreation.allowed).toBe(false);
+    expect(blockedCreation.xWaveValidation?.isValid).toBe(false);
+
+    // Valid >= 3 candle X-Wave passes scenario creation guard
+    const validWxyScenario = makeComplexScenario([100, 160, 130, 190], {
+      labels: ['0', 'W', 'X', 'Y'],
+      candleIndices: [0, 6, 9, 16] // X-wave span = 9 - 6 = 3 candles (>= 3)
+    });
+    const allowedCreation = RulesEngine.validateScenarioCreation(
+      { patternType: 'COMPLEX_COMBINATION', vertices: validWxyScenario.vertices },
+      candles
+    );
+    expect(allowedCreation.allowed).toBe(true);
+    expect(allowedCreation.xWaveValidation?.isValid).toBe(true);
+
+    // generateCandidateScenarios skips COMPLEX_COMBINATION when X-Wave span < 3 candles
+    const tightCandles = makeCandles(12);
+    const candidates = RulesEngine.generateCandidateScenarios(
+      tightCandles,
+      '1D',
+      'PRIMARY',
+      0,
+      'CORRECTIVE',
+      'BULLISH',
+      undefined,
+      'موج 4',
+      4
+    );
+    const anyInvalidXInCandidates = candidates
+      .filter(c => c.patternType === 'COMPLEX_COMBINATION')
+      .some(c => !RulesEngine.XWaveValidator(c, tightCandles).isValid);
+    expect(anyInvalidXInCandidates).toBe(false);
+  });
+
+  it('RulesEngine.ComplexPatternEngine links two simple patterns via X-Wave, detects all 9 standard combinations, and validates the 3 core rules', () => {
+    const engine = RulesEngine.ComplexPatternEngine;
+
+    // 1. All 9 standard combinations detected
+    expect(engine.STANDARD_9_COMBINATIONS).toHaveLength(9);
+    for (const sig of ['Z-X-Z', 'Z-X-F', 'Z-X-T', 'F-X-Z', 'F-X-F', 'F-X-T', 'T-X-Z', 'T-X-F', 'T-X-T']) {
+      const det = engine.detectStandardCombination(sig);
+      expect(det.detected).toBe(true);
+      expect(det.isStandard9).toBe(true);
+    }
+
+    // 2. Link two simple patterns (Zigzag + Flat) using an X-Wave (>= 3 candles)
+    const linked = engine.linkPatterns({
+      firstPattern: 'ZIGZAG',
+      secondPattern: 'FLAT_REGULAR',
+      xWave: { kind: 'ZIGZAG', candleCount: 6 },
+      waveMeasurements: {
+        wave1Len: 100,
+        wave2RetracePctOf1: 50,
+        wave3Len: 150,
+        wave4RetracePctOf3: 45,
+        wave5Len: 110
+      }
+    });
+    expect(linked.linked).toBe(true);
+    expect(linked.isValid).toBe(true);
+    expect(linked.signature).toBe('Z-X-F');
+    expect(linked.isStandard9).toBe(true);
+    expect(linked.coreRules.passed).toBe(true);
+    expect(linked.scenario?.patternType).toBe('COMPLEX_COMBINATION');
+
+    // 3. Linking fails when X-Wave < 3 candles
+    const failedX = engine.linkPatterns({
+      firstPattern: 'ZIGZAG',
+      secondPattern: 'ZIGZAG',
+      xWave: { kind: 'SIMPLE_3_CANDLE', candleCount: 2 }
+    });
+    expect(failedX.linked).toBe(false);
+    expect(failedX.xWaveValidation.isValid).toBe(false);
+
+    // 4. Core Rule 1 violation: Wave 2 exceeds Wave 1 (>= 100%)
+    const failRule1 = engine.linkPatterns({
+      firstPattern: 'ZIGZAG',
+      secondPattern: 'FLAT_REGULAR',
+      xWave: { kind: 'SIMPLE_3_CANDLE', candleCount: 4 },
+      waveMeasurements: {
+        wave1Len: 100,
+        wave2Len: 105,
+        wave3Len: 150,
+        wave4Len: 60,
+        wave5Len: 110
+      }
+    });
+    expect(failRule1.linked).toBe(false);
+    expect(failRule1.coreRules.rule1Passed).toBe(false);
+    expect(failRule1.coreRules.violatedRules).toContain(1);
+
+    // 5. Core Rule 2 violation: Wave 3 is the shortest
+    const failRule2 = engine.validateCoreRules({
+      wave1Len: 120,
+      wave2Len: 50,
+      wave3Len: 80,
+      wave4Len: 30,
+      wave5Len: 110
+    });
+    expect(failRule2.passed).toBe(false);
+    expect(failRule2.rule2Passed).toBe(false);
+    expect(failRule2.violatedRules).toContain(2);
+
+    // 6. Core Rule 3 violation: Wave 4 exceeds Wave 3 (>= 100%)
+    const failRule3 = engine.validateCoreRules({
+      wave1Len: 100,
+      wave2Len: 50,
+      wave3Len: 120,
+      wave4Len: 125,
+      wave5Len: 110
+    });
+    expect(failRule3.passed).toBe(false);
+    expect(failRule3.rule3Passed).toBe(false);
+    expect(failRule3.violatedRules).toContain(3);
+  });
 });

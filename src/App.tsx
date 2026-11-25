@@ -100,6 +100,7 @@ export default function App() {
       ? { savedAt: initialSavedDraft.savedAt }
       : null
   );
+  const [scenarioCreationError, setScenarioCreationError] = useState<string | null>(null);
 
   const currentAsset = useMemo(() => {
     return SUPPORTED_ASSETS.find(a => a.id === selectedAssetId) || SUPPORTED_ASSETS[0];
@@ -657,6 +658,18 @@ export default function App() {
 
   const handlePatternChange = (newPattern: PatternFamily, targetScenarioId?: string) => {
     const targetId = targetScenarioId || effectiveActiveScenario.id;
+    const targetSc = effectiveScenarios.find(s => s.id === targetId);
+    if (targetSc && newPattern === 'COMPLEX_COMBINATION' && targetSc.vertices.length >= 3) {
+      const xCreationCheck = RulesEngine.validateScenarioCreation(
+        { patternType: newPattern, vertices: targetSc.vertices },
+        effectiveCandles
+      );
+      if (!xCreationCheck.allowed) {
+        setScenarioCreationError(xCreationCheck.reasonFa);
+        return;
+      }
+    }
+    setScenarioCreationError(null);
     if (currentStudioDrill) {
       if (!isPatternAllowedForRole(newPattern, currentStudioDrill.role)) return;
       const list = studioSubScenariosByKey[currentStudioDrill.key] || [];
@@ -856,6 +869,18 @@ export default function App() {
   };
 
   const handleBranchScenario = (branchName: string, degree: WaveDegree) => {
+    const creationCheck = RulesEngine.validateScenarioCreation(
+      {
+        patternType: effectiveActiveScenario.patternType,
+        vertices: effectiveActiveScenario.vertices
+      },
+      effectiveCandles
+    );
+    if (!creationCheck.allowed) {
+      setScenarioCreationError(creationCheck.reasonFa);
+      return;
+    }
+    setScenarioCreationError(null);
     const newId = `sc_branch_${Date.now()}`;
     const newScenario: WaveScenario = {
       ...effectiveActiveScenario,
@@ -878,6 +903,15 @@ export default function App() {
   const handleDuplicateScenario = (id: string) => {
     const target = effectiveScenarios.find(s => s.id === id);
     if (!target) return;
+    const creationCheck = RulesEngine.validateScenarioCreation(
+      { patternType: target.patternType, vertices: target.vertices },
+      effectiveCandles
+    );
+    if (!creationCheck.allowed) {
+      setScenarioCreationError(creationCheck.reasonFa);
+      return;
+    }
+    setScenarioCreationError(null);
     const newId = `sc_${Date.now()}`;
     const copy: WaveScenario = {
       ...target,
@@ -914,6 +948,20 @@ export default function App() {
     const parentRole = currentStudioDrill?.role || 'ROOT';
     const parentDir = currentStudioDrill?.direction || 'BULLISH';
     const defaultPattern: PatternFamily = parentRole === 'CORRECTIVE' ? 'ZIGZAG' : 'IDEAL_CYCLE';
+    if (!scratch && verts.length >= 3) {
+      const creationCheck = RulesEngine.validateScenarioCreation(
+        {
+          patternType: effectiveActiveScenario.patternType === 'COMPLEX_COMBINATION' ? 'COMPLEX_COMBINATION' : defaultPattern,
+          vertices: verts
+        },
+        effectiveCandles
+      );
+      if (!creationCheck.allowed) {
+        setScenarioCreationError(creationCheck.reasonFa);
+        return;
+      }
+    }
+    setScenarioCreationError(null);
     const val = currentStudioDrill
       ? RulesEngine.validateStructure(defaultPattern, verts, parentDir, parentRole, currentStudioDrill.waveLabel)
       : RulesEngine.validateStructure(defaultPattern, verts, parentDir);
@@ -1100,7 +1148,23 @@ export default function App() {
 
       {appMode === 'STUDIO' && (
         <main className="flex-1 flex flex-col lg:flex-row gap-3 p-3 overflow-hidden">
-          <section className="flex-1 h-full flex flex-col min-w-0">
+          <section className="flex-1 h-full flex flex-col min-w-0 gap-2">
+            {scenarioCreationError && (
+              <div
+                data-testid="xwave-creation-blocked-alert"
+                role="alert"
+                className="px-3.5 py-2 rounded-xl bg-rose-950/50 border border-rose-500/55 text-rose-200 text-xs flex items-center justify-between gap-2 shrink-0"
+              >
+                <span>{scenarioCreationError}</span>
+                <button
+                  type="button"
+                  onClick={() => setScenarioCreationError(null)}
+                  className="px-2 py-0.5 rounded bg-rose-900/60 hover:bg-rose-800/70 text-[11px] font-bold shrink-0"
+                >
+                  بستن
+                </button>
+              </div>
+            )}
             <ChartStudio
               candles={effectiveCandles}
               activeScenario={effectiveActiveScenario}

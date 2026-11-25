@@ -1194,6 +1194,612 @@ export class RulesEngine {
   }
 
   /**
+   * RulesEngine 'XWaveValidator':
+   * Enforces the X-Wave requirement of having at least 3 candles (>= 3)
+   * and allows it to take the form of a Zigzag, Impulsive wave, or a Simple 3-candle leg.
+   */
+  public static XWaveValidator(
+    scenarioOrParams:
+      | WaveScenario
+      | {
+          vertices?: WaveVertex[];
+          candles?: Candle[];
+          candleCount?: number;
+          xWaveCandles?: number;
+          kind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'SIMPLE_3_CANDLE' | 'AUTO' | string;
+          subwaves?: number[];
+          patternType?: PatternFamily;
+        },
+    candlesArg: Candle[] = [],
+    optionsArg?: {
+      kind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'SIMPLE_3_CANDLE' | 'AUTO' | string;
+      xWaveCandles?: number;
+      candleCount?: number;
+      subwaves?: number[];
+    }
+  ): {
+    isValid: boolean;
+    candleCount: number;
+    minCandlesRequired: 3;
+    xWaveForm: 'ZIGZAG' | 'IMPULSIVE' | 'SIMPLE_3_CANDLE' | 'INVALID';
+    xWaveType: ComplexPatternReport['xWaveType'];
+    allowedForms: readonly ['ZIGZAG', 'IMPULSIVE', 'SIMPLE_3_CANDLE'];
+    reasonFa: string;
+    reasonEn: string;
+    rule: RuleValidationItem;
+  } {
+    const allowedForms = ['ZIGZAG', 'IMPULSIVE', 'SIMPLE_3_CANDLE'] as const;
+    const isScenarioInput =
+      typeof scenarioOrParams === 'object' &&
+      scenarioOrParams !== null &&
+      'patternType' in scenarioOrParams &&
+      'vertices' in scenarioOrParams &&
+      'id' in scenarioOrParams;
+
+    const vertices: WaveVertex[] = isScenarioInput
+      ? (scenarioOrParams as WaveScenario).vertices
+      : ((scenarioOrParams as { vertices?: WaveVertex[] }).vertices ?? []);
+    const candles: Candle[] = isScenarioInput
+      ? candlesArg
+      : ((scenarioOrParams as { candles?: Candle[] }).candles ?? candlesArg);
+    const opts = isScenarioInput
+      ? (optionsArg ?? {})
+      : (scenarioOrParams as {
+          kind?: string;
+          xWaveCandles?: number;
+          candleCount?: number;
+          subwaves?: number[];
+        });
+
+    const explicitCandles = opts.candleCount ?? opts.xWaveCandles;
+    let candleCount = 0;
+
+    if (explicitCandles !== undefined) {
+      candleCount = Math.max(0, Math.round(explicitCandles));
+    } else if (vertices.length >= 3) {
+      const xSpans: number[] = [];
+      for (let i = 1; i < vertices.length; i++) {
+        const lbl = (vertices[i].label || '').trim().toUpperCase();
+        if (lbl === 'X' || lbl === 'XX' || lbl === 'X1' || lbl === 'X2') {
+          xSpans.push(Math.abs(vertices[i].candleIndex - vertices[i - 1].candleIndex));
+        }
+      }
+      if (xSpans.length > 0) {
+        candleCount = Math.min(...xSpans);
+      } else {
+        candleCount = Math.abs(vertices[2].candleIndex - vertices[1].candleIndex);
+      }
+    }
+
+    const rawKind = (opts.kind ?? 'AUTO').toString().trim().toUpperCase();
+    const mappedKind: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'AUTO' | 'UNSUPPORTED' =
+      rawKind === 'ZIGZAG'
+        ? 'ZIGZAG'
+        : rawKind === 'IMPULSIVE'
+        ? 'IMPULSIVE'
+        : rawKind === 'SINGLE' || rawKind === 'SIMPLE_3_CANDLE' || rawKind === 'SIMPLE'
+        ? 'SINGLE'
+        : rawKind === 'AUTO'
+        ? 'AUTO'
+        : 'UNSUPPORTED';
+
+    if (mappedKind === 'UNSUPPORTED') {
+      const reasonEn = `Unsupported X-Wave structure "${opts.kind}". Allowed forms: Zigzag, Impulsive, or Simple 3-candle leg.`;
+      const reasonFa = `ساختار "${opts.kind}" برای موج رابط X مجاز نیست؛ موج X فقط می‌تواند زیگزاگ، شتاب‌دار یا تک‌موج حداقل ۳ کندلی باشد.`;
+      return {
+        isValid: false,
+        candleCount,
+        minCandlesRequired: 3,
+        xWaveForm: 'INVALID',
+        xWaveType: 'INVALID',
+        allowedForms,
+        reasonFa,
+        reasonEn,
+        rule: {
+          ruleId: 'X_WAVE_MIN_3_CANDLES',
+          name: 'X-Wave Minimum 3 Candles & Allowed Forms (C26)',
+          nameFa: 'اعتبار موج رابط X (حداقل ۳ کندل و فرم مجاز)',
+          type: 'HARD',
+          passed: false,
+          score: 0,
+          conceptId: 'C26',
+          messageFa: reasonFa,
+          canBeSolvedByAlternate: 'ZIGZAG'
+        }
+      };
+    }
+
+    const xEval = PatternEngines.evaluateXWave({
+      kind: mappedKind,
+      candleCount,
+      subwaves: opts.subwaves
+    });
+
+    const isValid = xEval.isValid;
+    const xWaveForm: 'ZIGZAG' | 'IMPULSIVE' | 'SIMPLE_3_CANDLE' | 'INVALID' = !isValid
+      ? 'INVALID'
+      : xEval.xWaveType === 'IMPULSIVE'
+      ? 'IMPULSIVE'
+      : xEval.xWaveType === 'ZIGZAG_IDEAL' || xEval.xWaveType === 'ZIGZAG_SIMPLE'
+      ? 'ZIGZAG'
+      : 'SIMPLE_3_CANDLE';
+
+    const reasonEn = isValid
+      ? `Valid X-Wave (${xWaveForm}) with ${candleCount} candles (>= 3 required).`
+      : `Invalid X-Wave: requires at least 3 candles (got ${candleCount}). Allowed forms: Zigzag, Impulsive, or Simple 3-candle leg.`;
+
+    return {
+      isValid,
+      candleCount,
+      minCandlesRequired: 3,
+      xWaveForm,
+      xWaveType: xEval.xWaveType,
+      allowedForms,
+      reasonFa: xEval.labelFa,
+      reasonEn,
+      rule: {
+        ruleId: 'X_WAVE_MIN_3_CANDLES',
+        name: 'X-Wave Minimum 3 Candles & Allowed Forms (C26)',
+        nameFa: 'قانون موج رابط X (حداقل ۳ کندل)',
+        type: 'HARD',
+        passed: isValid,
+        score: isValid ? 100 : 0,
+        conceptId: 'C26',
+        messageFa: xEval.labelFa,
+        canBeSolvedByAlternate: isValid ? undefined : 'ZIGZAG'
+      }
+    };
+  }
+
+  /**
+   * Guards scenario creation & branching flows against invalid X-Wave structures.
+   */
+  public static validateScenarioCreation(
+    input: {
+      patternType: PatternFamily;
+      vertices: WaveVertex[];
+      xWaveKind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'SIMPLE_3_CANDLE' | 'AUTO' | string;
+      xWaveCandles?: number;
+    },
+    candles: Candle[] = []
+  ): {
+    allowed: boolean;
+    requiresXWaveCheck: boolean;
+    xWaveValidation?: ReturnType<typeof RulesEngine.XWaveValidator>;
+    reasonFa: string;
+    reasonEn: string;
+  } {
+    const hasExplicitXLabels = input.vertices.some(v => {
+      const lbl = (v.label || '').trim().toUpperCase();
+      return lbl === 'X' || lbl === 'XX' || lbl === 'X1' || lbl === 'X2';
+    });
+    const requiresXWaveCheck =
+      input.patternType === 'COMPLEX_COMBINATION' ||
+      (hasExplicitXLabels && input.vertices.length >= 3);
+
+    if (!requiresXWaveCheck) {
+      return {
+        allowed: true,
+        requiresXWaveCheck: false,
+        reasonFa: 'ایجاد سناریو مجاز است.',
+        reasonEn: 'Scenario creation allowed.'
+      };
+    }
+
+    const xWaveValidation = this.XWaveValidator(
+      {
+        vertices: input.vertices,
+        candles,
+        kind: input.xWaveKind,
+        xWaveCandles: input.xWaveCandles
+      },
+      candles
+    );
+
+    if (!xWaveValidation.isValid) {
+      return {
+        allowed: false,
+        requiresXWaveCheck: true,
+        xWaveValidation,
+        reasonFa: `ایجاد سناریوی ترکیبی مسدود شد: ${xWaveValidation.reasonFa}`,
+        reasonEn: `Scenario creation blocked: ${xWaveValidation.reasonEn}`
+      };
+    }
+
+    return {
+      allowed: true,
+      requiresXWaveCheck: true,
+      xWaveValidation,
+      reasonFa: `سناریوی موج رابط X معتبر است (${xWaveValidation.candleCount} کندل).`,
+      reasonEn: xWaveValidation.reasonEn
+    };
+  }
+
+  /**
+   * RulesEngine 'ComplexPatternEngine' Module:
+   * Links two simple patterns using an X-Wave, detects the 9 standard combinations
+   * (Z-X-Z, Z-X-F, Z-X-T, F-X-Z, F-X-F, F-X-T, T-X-Z, T-X-F, T-X-T),
+   * and validates the 3 core rules:
+   * 1. Wave 2 does not exceed Wave 1
+   * 2. Wave 3 is not the shortest wave
+   * 3. Wave 4 does not exceed Wave 3
+   */
+  public static readonly ComplexPatternEngine = {
+    STANDARD_9_COMBINATIONS: [
+      'Z-X-Z',
+      'Z-X-F',
+      'Z-X-T',
+      'F-X-Z',
+      'F-X-F',
+      'F-X-T',
+      'T-X-Z',
+      'T-X-F',
+      'T-X-T'
+    ] as const,
+
+    normalizePatternCode(
+      pattern:
+        | PatternFamily
+        | 'Z'
+        | 'F'
+        | 'T'
+        | 'I'
+        | 'G'
+        | 'ZIGZAG'
+        | 'FLAT'
+        | 'TRIANGLE'
+        | 'IDEAL'
+        | 'DIAGONAL'
+        | string
+    ): 'Z' | 'F' | 'T' | 'I' | 'G' {
+      const upper = String(pattern || 'Z').trim().toUpperCase();
+      if (upper === 'Z' || upper === 'ZIGZAG') return 'Z';
+      if (upper === 'F' || upper === 'FLAT' || upper.startsWith('FLAT_')) return 'F';
+      if (
+        upper === 'T' ||
+        upper === 'TRI' ||
+        upper === 'TRIANGLE' ||
+        upper.startsWith('TRIANGLE_') ||
+        upper === 'TERMINAL' ||
+        upper === 'ANTI_TERMINAL'
+      ) {
+        return 'T';
+      }
+      if (upper === 'I' || upper === 'IDEAL' || upper === 'IDEAL_CYCLE') return 'I';
+      if (upper === 'G' || upper === 'D' || upper.includes('DIAGONAL')) return 'G';
+      return 'Z';
+    },
+
+    detectStandardCombination(
+      signatureOrScenario: string | WaveScenario,
+      candles: Candle[] = []
+    ): {
+      detected: boolean;
+      isStandard9: boolean;
+      isStandardCombination: boolean;
+      signature: string;
+      firstCode: string;
+      secondCode: string;
+      combinationCategory: ComplexPatternReport['combinationCategory'];
+      rarityStatus: ComplexPatternReport['rarityStatus'];
+      labelFa: string;
+    } {
+      const rawSig =
+        typeof signatureOrScenario === 'string'
+          ? signatureOrScenario
+          : PatternEngines.analyzeComplexPattern(signatureOrScenario, candles).patternSignature;
+      const evalSig = PatternEngines.evaluateComplexCombinationSignature(rawSig);
+      const isStandard9 = (
+        RulesEngine.ComplexPatternEngine.STANDARD_9_COMBINATIONS as readonly string[]
+      ).includes(evalSig.signature);
+
+      return {
+        detected: evalSig.isComplex && evalSig.isStandard,
+        isStandard9,
+        isStandardCombination: evalSig.isStandard,
+        signature: evalSig.signature,
+        firstCode: evalSig.parts[0] || evalSig.signature,
+        secondCode: evalSig.parts[1] || '',
+        combinationCategory: evalSig.combinationCategory,
+        rarityStatus: evalSig.rarityStatus,
+        labelFa: evalSig.labelFa
+      };
+    },
+
+    validateCoreRules(params: {
+      wave1Len?: number;
+      wave2Len?: number;
+      wave2RetracePctOf1?: number;
+      wave3Len?: number;
+      wave4Len?: number;
+      wave4RetracePctOf3?: number;
+      wave5Len?: number;
+      vertices?: WaveVertex[];
+      direction?: WaveDirection;
+    }): {
+      passed: boolean;
+      rule1Passed: boolean;
+      rule2Passed: boolean;
+      rule3Passed: boolean;
+      violatedRules: number[];
+      rules: RuleValidationItem[];
+      reasonFa: string;
+    } {
+      let len1 = params.wave1Len ?? 100;
+      let len3 = params.wave3Len ?? 140;
+      let len5 = params.wave5Len ?? 110;
+      let w2Pct =
+        params.wave2RetracePctOf1 ??
+        (params.wave2Len !== undefined && len1 > 0 ? (params.wave2Len / len1) * 100 : 50);
+      let w4Pct =
+        params.wave4RetracePctOf3 ??
+        (params.wave4Len !== undefined && len3 > 0 ? (params.wave4Len / len3) * 100 : 50);
+
+      if (params.vertices && params.vertices.length >= 3) {
+        const verts = params.vertices;
+        len1 = Math.max(0.0001, Math.abs(verts[1].price - verts[0].price));
+        const len2 = Math.abs(verts[2].price - verts[1].price);
+        if (params.wave2RetracePctOf1 === undefined && params.wave2Len === undefined) {
+          w2Pct = (len2 / len1) * 100;
+        }
+        if (verts.length >= 4) {
+          len3 = Math.max(0.0001, Math.abs(verts[3].price - verts[2].price));
+        }
+        if (verts.length >= 5) {
+          const len4 = Math.abs(verts[4].price - verts[3].price);
+          if (params.wave4RetracePctOf3 === undefined && params.wave4Len === undefined) {
+            w4Pct = (len4 / len3) * 100;
+          }
+        }
+        if (verts.length >= 6) {
+          len5 = Math.max(0.0001, Math.abs(verts[5].price - verts[4].price));
+        }
+      }
+
+      const evalCard = PatternEngines.evaluateComplexThreeCardinalRules({
+        wave2RetracePctOf1: w2Pct,
+        wave1Len: len1,
+        wave3Len: len3,
+        wave5Len: len5,
+        wave4RetracePctOf3: w4Pct
+      });
+
+      const rule1Passed = !evalCard.violatedRules.includes(1);
+      const rule2Passed = !evalCard.violatedRules.includes(2);
+      const rule3Passed = !evalCard.violatedRules.includes(3);
+
+      const rules: RuleValidationItem[] = [
+        {
+          ruleId: 'COMPLEX_CORE_RULE_1',
+          name: 'Wave 2 does not exceed Wave 1',
+          nameFa: 'قانون ۱: موج ۲ از ۱۰۰٪ موج ۱ فراتر نرود',
+          type: 'HARD',
+          passed: rule1Passed,
+          score: rule1Passed ? 100 : 0,
+          conceptId: 'C07',
+          messageFa: rule1Passed
+            ? `موج ۲ (${Math.round(w2Pct * 10) / 10}٪) از موج ۱ فراتر نرفته است.`
+            : `نقض قانون ۱: موج ۲ (${Math.round(w2Pct * 10) / 10}٪) از ۱۰۰٪ موج ۱ فراتر رفته است.`
+        },
+        {
+          ruleId: 'COMPLEX_CORE_RULE_2',
+          name: 'Wave 3 is not the shortest wave',
+          nameFa: 'قانون ۲: موج ۳ کوتاه‌ترین موج نباشد',
+          type: 'HARD',
+          passed: rule2Passed,
+          score: rule2Passed ? 100 : 0,
+          conceptId: 'C07',
+          messageFa: rule2Passed
+            ? 'موج ۳ کوتاه‌ترین موج میان امواج اصلی نیست.'
+            : 'نقض قانون ۲: موج ۳ کوتاه‌ترین موج است.'
+        },
+        {
+          ruleId: 'COMPLEX_CORE_RULE_3',
+          name: 'Wave 4 does not exceed Wave 3',
+          nameFa: 'قانون ۳: موج ۴ از ۱۰۰٪ موج ۳ فراتر نرود',
+          type: 'HARD',
+          passed: rule3Passed,
+          score: rule3Passed ? 100 : 0,
+          conceptId: 'C07',
+          messageFa: rule3Passed
+            ? `موج ۴ (${Math.round(w4Pct * 10) / 10}٪) از موج ۳ فراتر نرفته است.`
+            : `نقض قانون ۳: موج ۴ (${Math.round(w4Pct * 10) / 10}٪) از ۱۰۰٪ موج ۳ فراتر رفته است.`
+        }
+      ];
+
+      return {
+        passed: evalCard.passed,
+        rule1Passed,
+        rule2Passed,
+        rule3Passed,
+        violatedRules: evalCard.violatedRules,
+        rules,
+        reasonFa: evalCard.reasonFa
+      };
+    },
+
+    linkPatterns(input: {
+      firstPattern: PatternFamily | string;
+      secondPattern: PatternFamily | string;
+      xWave?: {
+        kind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'SIMPLE_3_CANDLE' | 'AUTO' | string;
+        candleCount?: number;
+        subwaves?: number[];
+        vertices?: WaveVertex[];
+      };
+      direction?: WaveDirection;
+      waveMeasurements?: {
+        wave1Len: number;
+        wave2Len?: number;
+        wave2RetracePctOf1?: number;
+        wave3Len: number;
+        wave4Len?: number;
+        wave4RetracePctOf3?: number;
+        wave5Len: number;
+      };
+      vertices?: WaveVertex[];
+      candles?: Candle[];
+      timeframe?: string;
+      degree?: WaveDegree;
+    }): {
+      linked: boolean;
+      isValid: boolean;
+      signature: string;
+      isStandard9: boolean;
+      isMainIncluded: boolean;
+      rarityStatus: ComplexPatternReport['rarityStatus'];
+      xWaveValidation: ReturnType<typeof RulesEngine.XWaveValidator>;
+      coreRules: ReturnType<typeof RulesEngine.ComplexPatternEngine.validateCoreRules>;
+      scenario?: WaveScenario;
+      reasonFa: string;
+    } {
+      const code1 = RulesEngine.ComplexPatternEngine.normalizePatternCode(input.firstPattern);
+      const code2 = RulesEngine.ComplexPatternEngine.normalizePatternCode(input.secondPattern);
+      const signature = `${code1}-X-${code2}`;
+      const comboDetect = RulesEngine.ComplexPatternEngine.detectStandardCombination(signature);
+
+      const xCandles = input.xWave?.candleCount ?? (input.vertices && input.vertices.length >= 3 ? undefined : 4);
+      const xWaveValidation = RulesEngine.XWaveValidator(
+        {
+          vertices: input.xWave?.vertices ?? input.vertices,
+          candles: input.candles,
+          candleCount: xCandles,
+          kind: input.xWave?.kind ?? 'AUTO',
+          subwaves: input.xWave?.subwaves
+        },
+        input.candles
+      );
+
+      const coreRules = RulesEngine.ComplexPatternEngine.validateCoreRules(
+        input.waveMeasurements
+          ? {
+              wave1Len: input.waveMeasurements.wave1Len,
+              wave2Len: input.waveMeasurements.wave2Len,
+              wave2RetracePctOf1: input.waveMeasurements.wave2RetracePctOf1,
+              wave3Len: input.waveMeasurements.wave3Len,
+              wave4Len: input.waveMeasurements.wave4Len,
+              wave4RetracePctOf3: input.waveMeasurements.wave4RetracePctOf3,
+              wave5Len: input.waveMeasurements.wave5Len
+            }
+          : {
+              vertices: input.vertices,
+              direction: input.direction ?? 'BULLISH'
+            }
+      );
+
+      const linked = xWaveValidation.isValid && coreRules.passed && comboDetect.isStandardCombination;
+      const isValid = linked;
+      const isMainIncluded = comboDetect.combinationCategory === 'MAIN_INCLUDED';
+
+      let scenario: WaveScenario | undefined;
+      if (linked) {
+        const baseTs = input.candles?.[0]?.timestamp ?? 1746057600;
+        const xSpan = Math.max(3, xWaveValidation.candleCount);
+        const dir = input.direction ?? 'BULLISH';
+        const sign = dir === 'BULLISH' ? 1 : -1;
+        const synthVertices: WaveVertex[] =
+          input.vertices && input.vertices.length >= 4
+            ? input.vertices
+            : [
+                { label: '0', price: 100, candleIndex: 0, timestamp: baseTs, isConfirmed: true },
+                { label: 'W', price: 100 + sign * 60, candleIndex: 6, timestamp: baseTs + 6 * 86400, isConfirmed: true },
+                {
+                  label: 'X',
+                  price: 100 + sign * 30,
+                  candleIndex: 6 + xSpan,
+                  timestamp: baseTs + (6 + xSpan) * 86400,
+                  isConfirmed: true
+                },
+                {
+                  label: 'Y',
+                  price: 100 + sign * 110,
+                  candleIndex: 12 + xSpan,
+                  timestamp: baseTs + (12 + xSpan) * 86400,
+                  isConfirmed: true
+                }
+              ];
+
+        scenario = {
+          id: `sc_complex_${signature.toLowerCase()}_${Date.now()}`,
+          name: `الگوی ترکیبی ${signature}`,
+          color: '#8b5cf6',
+          isPrimary: false,
+          isLocked: false,
+          isSelectedForTree: true,
+          patternType: 'COMPLEX_COMBINATION',
+          degree: input.degree ?? 'PRIMARY',
+          direction: dir,
+          vertices: synthVertices,
+          currentWave: 'Y',
+          completionPercentage: 100,
+          validityScore: 85,
+          idealnessScore: comboDetect.rarityStatus === 'RARE' ? 74 : 82,
+          confidenceScore: 76,
+          invalidationPrice: synthVertices[0].price,
+          targets: [],
+          rulesResults: [xWaveValidation.rule, ...coreRules.rules],
+          source: 'AI',
+          timeframe: input.timeframe ?? '1D',
+          metadata: {
+            complexSignature: signature,
+            isStandard9: comboDetect.isStandard9,
+            xWaveForm: xWaveValidation.xWaveForm,
+            xWaveCandles: xWaveValidation.candleCount
+          }
+        };
+      }
+
+      const reasonFa = !xWaveValidation.isValid
+        ? `پیوند نامعتبر به دلیل موج رابط X: ${xWaveValidation.reasonFa}`
+        : !coreRules.passed
+        ? `پیوند نامعتبر به دلیل نقض قوانین بنیادین: ${coreRules.reasonFa}`
+        : `پیوند موفق الگوی ${signature} (${comboDetect.isStandard9 ? 'جزو ۹ ترکیب استاندارد اصلاحی' : 'ترکیب استاندارد با الگوی اصلی'}) با موج رابط ${xWaveValidation.candleCount} کندلی.`;
+
+      return {
+        linked,
+        isValid,
+        signature,
+        isStandard9: comboDetect.isStandard9,
+        isMainIncluded,
+        rarityStatus: comboDetect.rarityStatus,
+        xWaveValidation,
+        coreRules,
+        ...(scenario ? { scenario } : {}),
+        reasonFa
+      };
+    },
+
+    analyze(
+      scenario: WaveScenario,
+      candles: Candle[] = [],
+      options?: ComplexAnalysisOptions
+    ) {
+      const report = PatternEngines.analyzeComplexPattern(scenario, candles, options);
+      const detection = RulesEngine.ComplexPatternEngine.detectStandardCombination(
+        report.patternSignature
+      );
+      const xWaveValidation = RulesEngine.XWaveValidator(scenario, candles, {
+        kind: options?.xWaveKind,
+        xWaveCandles: options?.xWaveCandles
+      });
+      const coreRules = RulesEngine.ComplexPatternEngine.validateCoreRules({
+        vertices: scenario.vertices,
+        direction: scenario.direction,
+        wave2RetracePctOf1: options?.wave2RetracePctOf1,
+        wave4RetracePctOf3: options?.wave4RetracePctOf3
+      });
+
+      return {
+        ...detection,
+        xWaveValidation,
+        coreRules,
+        report,
+        isValid: xWaveValidation.isValid && coreRules.passed && report.isComplexPattern
+      };
+    }
+  };
+
+  /**
    * Builds scenario-level warning metadata from a MarketTerminalFlag when a Flat pattern sits at chart end.
    */
   public static buildMarketTerminalWarningMetadata(
@@ -2246,21 +2852,8 @@ export class RulesEngine {
           }
         }
       } else if (pattern === 'COMPLEX_COMBINATION' && vertices.length >= 3) {
-        const xSpan = Math.abs(vertices[2].candleIndex - vertices[1].candleIndex);
-        const xValid = xSpan >= 3;
-        rules.push({
-          ruleId: 'X_WAVE_MIN_3_CANDLES',
-          name: 'X-Wave Minimum 3 Candles (C26)',
-          nameFa: 'قانون موج رابط X (حداقل ۳ کندل)',
-          type: 'HARD',
-          passed: xValid,
-          score: xValid ? 100 : 0,
-          conceptId: 'C26',
-          messageFa: xValid
-            ? `موج رابط X دارای ${xSpan} کندل است و پیوند دو الگو را برقرار می‌کند.`
-            : `موج رابط X تنها ${xSpan} کندل دارد؛ موج X با کمتر از ۳ کندل نامعتبر است.`,
-          canBeSolvedByAlternate: xValid ? undefined : 'ZIGZAG'
-        });
+        const xCheck = this.XWaveValidator({ vertices, candles }, candles);
+        rules.push(xCheck.rule);
 
         // Table 12.12-12.14: Cardinal Rules 1, 2, 3 remain sacred even inside Complex Combinations
         if (len1 > 0) {
@@ -4197,23 +4790,27 @@ export class RulesEngine {
         );
       }
 
-      scenarios.push(
-        mkScenario(
-          `sc_wxy_${Date.now()}_4`,
-          'الگوی ترکیبی با موج رابط X (W-X-Y)',
-          SCENARIO_COLORS[4],
-          'COMPLEX_COMBINATION',
-          [
-            makeVert('0', v0.idx, v0.price),
-            makeVert(fmt('W'), a.idx, a.price),
-            makeVert(fmt('X'), b.idx, b.price),
-            makeVert(fmt('Y'), c.idx, c.price, false)
-          ],
-          `موج ${fmt('Y')} ترکیبی`,
-          false,
-          false
-        )
-      );
+      const wxyVertices = [
+        makeVert('0', v0.idx, v0.price),
+        makeVert(fmt('W'), a.idx, a.price),
+        makeVert(fmt('X'), b.idx, b.price),
+        makeVert(fmt('Y'), c.idx, c.price, false)
+      ];
+      const wxyXCheck = this.XWaveValidator({ vertices: wxyVertices, candles }, candles);
+      if (wxyXCheck.isValid) {
+        scenarios.push(
+          mkScenario(
+            `sc_wxy_${Date.now()}_4`,
+            'الگوی ترکیبی با موج رابط X (W-X-Y)',
+            SCENARIO_COLORS[4],
+            'COMPLEX_COMBINATION',
+            wxyVertices,
+            `موج ${fmt('Y')} ترکیبی`,
+            false,
+            false
+          )
+        );
+      }
       return scenarios;
     }
 
@@ -6241,3 +6838,21 @@ export function isInvalidTriangle(
 ): boolean {
   return RulesEngine.isInvalidTriangle(scenario, candles, options);
 }
+
+/**
+ * Top-level Session 16 helper: Enforces X-Wave >= 3 candles and allowed forms
+ * (Zigzag, Impulsive, or Simple 3-candle leg).
+ */
+export function XWaveValidator(
+  scenarioOrParams: Parameters<typeof RulesEngine.XWaveValidator>[0],
+  candles?: Candle[],
+  options?: Parameters<typeof RulesEngine.XWaveValidator>[2]
+) {
+  return RulesEngine.XWaveValidator(scenarioOrParams, candles, options);
+}
+
+/**
+ * Top-level Session 16 module: ComplexPatternEngine for linking two simple patterns via X-Wave,
+ * detecting the 9 standard combinations, and validating the 3 core rules.
+ */
+export const ComplexPatternEngine = RulesEngine.ComplexPatternEngine;
