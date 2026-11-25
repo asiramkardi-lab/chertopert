@@ -70,27 +70,52 @@ function makeTriangleScenario(
 }
 
 describe('Session 15 Triangle Advanced Engine & SDD 014 (T-15.1..T-15.43)', () => {
-  it('۱۵-۱ (T-15.1..3): Distinguishes corrective vs motive slots (Wave 4 valid, Wave 3 & 5 invalid)', () => {
+  it('۱۵-۱ (T-15.1..3): Distinguishes corrective (2, 4, B) vs motive slots (1, 3, 5 -> Diagonal; A, C -> Diagonal/Zigzag)', () => {
     const candles = makeCandles(40);
     const tri = makeTriangleScenario([100, 200, 120, 185, 138, 165]);
     const opts: TriangleAnalysisOptions = { internalSubwaves: [3, 3, 3, 3, 3] };
 
-    // T-15.1: Wave 4 -> valid Triangle
+    // T-15.1: Corrective waves (4, 2, B) -> valid Triangle
     const t1 = PatternEngines.analyzeTriangle(tri, candles, 'CORRECTIVE', 'موج 4', opts);
     expect(t1.positionValid).toBe(true);
     expect(t1.isInvalidTriangle).toBe(false);
+    expect(PatternEngines.analyzeTriangle(tri, candles, 'CORRECTIVE', 'موج 2', opts).positionValid).toBe(true);
+    expect(PatternEngines.analyzeTriangle(tri, candles, 'CORRECTIVE', 'موج B', opts).positionValid).toBe(true);
 
-    // T-15.2: Wave 3 -> invalid (motive slot; Diagonal / Ideal Cycle, not Triangle)
+    // T-15.2: Wave 3 -> invalid (motive slot; Diagonal, not Triangle)
     const t2 = PatternEngines.analyzeTriangle(tri, candles, 'MOTIVE', 'موج 3', opts);
     expect(t2.positionValid).toBe(false);
     expect(t2.isInvalidTriangle).toBe(true);
-    expect(RulesEngine.isInvalidTriangle(tri, candles, { parentRole: 'MOTIVE', parentWaveLabel: 'موج 3', internalSubwaves: [3, 3, 3, 3, 3] })).toBe(true);
+    expect(t2.warnings.some(w => w.includes('قطر'))).toBe(true);
+    expect(
+      RulesEngine.isInvalidTriangle(tri, candles, {
+        parentRole: 'MOTIVE',
+        parentWaveLabel: 'موج 3',
+        internalSubwaves: [3, 3, 3, 3, 3]
+      })
+    ).toBe(true);
+
+    // Wave 1, A, C -> invalid motive slots (Diagonal / Zigzag)
+    const tW1 = PatternEngines.analyzeTriangle(tri, candles, 'MOTIVE', 'موج 1', opts);
+    expect(tW1.positionValid).toBe(false);
+    expect(tW1.isInvalidTriangle).toBe(true);
+    const tWA = PatternEngines.analyzeTriangle(tri, candles, 'MOTIVE', 'موج A', opts);
+    expect(tWA.positionValid).toBe(false);
+    expect(tWA.warnings.some(w => w.includes('قطر') || w.includes('زیگزاگ'))).toBe(true);
+    const tWC = PatternEngines.analyzeTriangle(tri, candles, 'MOTIVE', 'موج C', opts);
+    expect(tWC.positionValid).toBe(false);
 
     // T-15.3: Wave 5 -> invalid (must be Ending Diagonal)
     const t3 = PatternEngines.analyzeTriangle(tri, candles, 'MOTIVE', 'موج 5', opts);
     expect(t3.positionValid).toBe(false);
     expect(t3.endingTriangle).toBe(true);
     expect(t3.expectedReplacementPattern).toBe('ENDING_DIAGONAL');
+
+    // With-trend monotonic drift instead of counter-trend -> flagged as likely Diagonal
+    const trendingTri = makeTriangleScenario([100, 150, 130, 195, 175, 250]);
+    const trendingRes = PatternEngines.analyzeTriangle(trendingTri, candles, 'CORRECTIVE', 'موج 4', opts);
+    expect(trendingRes.isCounterTrendAligned).toBe(false);
+    expect(trendingRes.warnings.some(w => w.includes('قطر'))).toBe(true);
   });
 
   it('۱۵-۲ (T-15.4..6): Assigns exact frequencies for Wave 2 (20%), Wave 4 (50%), and Wave B (30%)', () => {

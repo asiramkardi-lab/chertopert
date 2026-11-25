@@ -2164,8 +2164,16 @@ export class PatternEngines {
         ? 'IDEAL_CYCLE'
         : null;
 
-    if (!positionValid && !endingTriangle && posChar !== 'A') {
-      warnings.push(`مثلث در موج ${posChar} (اصلی) مجاز نیست؛ شمارش اشتباه است و باید موج اصلاحی (۲، ۴ یا B) باشد.`);
+    if (!positionValid && !endingTriangle) {
+      if (posChar === 'A' || posChar === 'C') {
+        warnings.push(
+          `مثلث در موج ${posChar} (اصلی) خطا است؛ در این جایگاه الگوی قطر یا زیگزاگ بررسی شود (مثلث فقط در ۲، ۴ یا B مجاز است).`
+        );
+      } else {
+        warnings.push(
+          `مثلث در موج ${posChar} (اصلی) خطا است؛ چون هم‌جهت با روند اصلی حرکت می‌کند الگوی قطر (Diagonal) یا سیکل ایده‌آل است و مثلث فقط در امواج اصلاحی (۲، ۴ یا B) تشکیل می‌شود.`
+        );
+      }
     }
     if (endingTriangle) {
       warnings.push('مثلث در موج ۵ مجاز نیست (باید قطر پایانی باشد)؛ در حالت نادر مثلث پایانی پس از E ریزش پرقدرت رخ می‌دهد.');

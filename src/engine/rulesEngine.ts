@@ -1150,12 +1150,17 @@ export class RulesEngine {
     if (summary.flatPatternFlag?.subtype) {
       nextMetadata.flatSubtype = summary.flatPatternFlag.subtype;
     }
-    if (summary.triangleReport) {
-      nextMetadata.triangleType = summary.triangleReport.triangleType;
+    const triMetaReport =
+      summary.triangleReport ??
+      (scenario.patternType === 'TRIANGLE_CONVERGING' || scenario.patternType === 'TRIANGLE_EXPANDING'
+        ? this.TrianglePatternValidator(scenario, candles).report
+        : undefined);
+    if (triMetaReport) {
+      nextMetadata.triangleType = triMetaReport.triangleType;
       nextMetadata.triangleLabel =
-        summary.triangleReport.triangleType === 'CONTRACTING'
+        triMetaReport.triangleType === 'CONTRACTING'
           ? 'Contracting'
-          : summary.triangleReport.triangleType === 'EXPANDING'
+          : triMetaReport.triangleType === 'EXPANDING'
           ? 'Expanding'
           : 'Invalid';
     }

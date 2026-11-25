@@ -295,7 +295,12 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                   }
                   title={
                     tab.id === 'TRIANGLE_ANALYSIS'
-                      ? 'هشدار مثلث نامعتبر (موج ۱/۳/۵ یا ساختار غیر ۳-۳-۳-۳-۳)'
+                      ? liveTriangleValidation.invalidTriangleReasonFa ||
+                        'هشدار مثلث نامعتبر (موج ۱/۳/۵ یا ساختار غیر ۳-۳-۳-۳-۳)'
+                      : anyInvalidTriangle && !anyMarketPhaseWarning
+                      ? 'سناریوی مثلث نامعتبر در لیست وجود دارد (موج ۱، ۳ یا ۵ یا نقض ساختار ۳-۳-۳-۳-۳)'
+                      : anyInvalidTriangle && anyMarketPhaseWarning
+                      ? `${FLAT_MARKET_PHASE_TOOLTIP} | هشدار مثلث نامعتبر در لیست`
                       : FLAT_MARKET_PHASE_TOOLTIP
                   }
                   className="inline-flex items-center text-rose-300"
@@ -790,7 +795,9 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                       parentWaveLabel: drillContext?.waveLabel || sc.parentLegLabel
                     });
                     const triCheck =
-                      sc.patternType === 'TRIANGLE_CONVERGING' || sc.patternType === 'TRIANGLE_EXPANDING'
+                      sc.patternType === 'TRIANGLE_CONVERGING' ||
+                      sc.patternType === 'TRIANGLE_EXPANDING' ||
+                      invalidTriangle
                         ? RulesEngine.TrianglePatternValidator(
                             sc,
                             candles,
@@ -840,6 +847,11 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                           {triCheck && !invalidTriangle && triCheck.triangleLabel !== 'Invalid' && (
                             <span
                               data-testid="sidebar-triangle-type-badge"
+                              title={
+                                triCheck.isContracting
+                                  ? 'Contracting Triangle (خطوط روند همگرا — ۳-۳-۳-۳-۳)'
+                                  : 'Expanding Triangle (خطوط روند واگرا — ۳-۳-۳-۳-۳)'
+                              }
                               className={`px-1.5 py-0.5 rounded border text-[9px] font-bold shrink-0 whitespace-nowrap ${
                                 triCheck.isContracting
                                   ? 'bg-emerald-950/45 border-emerald-500/40 text-emerald-300'
@@ -852,10 +864,14 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                           {invalidTriangle && (
                             <span
                               data-testid="sidebar-invalid-triangle-badge"
-                              title="Invalid Triangle (detected in wave 1, 3, or 5 or internal structure is not 3-3-3-3-3) — flagged for removal"
-                              className="px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
+                              title={
+                                triCheck?.invalidTriangleReasonFa ||
+                                'Invalid Triangle: Triangle pattern placed in wave 1, 3, or 5 or violates 3-3-3-3-3 internal structure.'
+                              }
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
                             >
-                              مثلث نامعتبر
+                              <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span>مثلث نامعتبر</span>
                             </span>
                           )}
                         </button>
