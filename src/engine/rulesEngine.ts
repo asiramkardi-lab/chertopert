@@ -793,7 +793,9 @@ export class RulesEngine {
       .split(/[←→]/)
       .pop()
       ?.trim() || '';
-    const cleanSlot = rawWaveLabel.replace(/موج/g, '').replace(/[()VW\s]/g, '').toUpperCase();
+    const cleanSlot = normalizeLabelAscii(rawWaveLabel)
+      .replace(/ریزموج|موج|SUBWAVE|WAVE/gi, '')
+      .replace(/[()VW\s]/g, '');
     const isCorrectiveExplicitSlot =
       cleanSlot.includes('2') || cleanSlot.includes('4') || cleanSlot.includes('B');
     const isWave135Slot =
@@ -2036,10 +2038,9 @@ export class RulesEngine {
         pattern === 'TRIANGLE_EXPANDING'
       ) {
         // Triangle Position Rule: ONLY allowed in Corrective waves (2, 4, B) — NEVER in waves 1, 3, 5, A, C
-        const cleanParentTri = parentWaveLabel
-          .replace(/موج/g, '')
-          .replace(/[()VW\s]/g, '')
-          .toUpperCase();
+        const cleanParentTri = normalizeLabelAscii(parentWaveLabel)
+          .replace(/ریزموج|موج|SUBWAVE|WAVE/gi, '')
+          .replace(/[()VW\s]/g, '');
         const tailTriToken = cleanParentTri.split('→').pop() || cleanParentTri;
         const invalidTriSlot =
           ['1', '3', '5', 'A', 'C'].includes(tailTriToken) ||

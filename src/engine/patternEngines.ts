@@ -2103,7 +2103,11 @@ export class PatternEngines {
     const warnings: string[] = [];
     const notes: string[] = [];
 
-    const cleanPos = parentWaveLabel.replace(/موج/g, '').replace(/[()VW\s]/g, '').toUpperCase();
+    const normalizedPosRaw = parentWaveLabel
+      .replace(/[۰-۹]/g, ch => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(ch)))
+      .replace(/[٠-٩]/g, ch => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)))
+      .replace(/ریزموج|موج|SUBWAVE|WAVE/gi, '');
+    const cleanPos = normalizedPosRaw.replace(/[()VW\s]/g, '').toUpperCase();
     const posChar = cleanPos.includes('2')
       ? '2'
       : cleanPos.includes('B')
@@ -2112,14 +2116,14 @@ export class PatternEngines {
       ? '4'
       : cleanPos.includes('5')
       ? '5'
-      : cleanPos.includes('A')
-      ? 'A'
-      : cleanPos.includes('C')
-      ? 'C'
       : cleanPos.includes('1')
       ? '1'
       : cleanPos.includes('3')
       ? '3'
+      : cleanPos.includes('A')
+      ? 'A'
+      : cleanPos.includes('C')
+      ? 'C'
       : parentRole === 'ROOT'
       ? '4'
       : '4';

@@ -677,6 +677,28 @@ describe('Session 14 Triangle Pattern Engine & SDD 013 (T-14.1..T-14.43)', () =>
       )
     ).toBe(true);
 
+    // Invalid with Persian digits & English Wave 1/3/5 labels -> flagged true
+    expect(
+      isInvalidTriangle({ ...validContracting, parentLegLabel: 'موج ۳' }, candles, {
+        internalSubwaves: [3, 3, 3, 3, 3]
+      })
+    ).toBe(true);
+    expect(
+      isInvalidTriangle({ ...validContracting, parentLegLabel: 'Wave 1' }, candles, {
+        internalSubwaves: [3, 3, 3, 3, 3]
+      })
+    ).toBe(true);
+    expect(
+      isInvalidTriangle({ ...validContracting, parentLegLabel: 'Wave 5' }, candles, {
+        internalSubwaves: [3, 3, 3, 3, 3]
+      })
+    ).toBe(true);
+    expect(
+      isInvalidTriangle({ ...validContracting, parentLegLabel: 'Wave 4' }, candles, {
+        internalSubwaves: [3, 3, 3, 3, 3]
+      })
+    ).toBe(false);
+
     // Non-triangle patterns -> always false
     const nonTriangle = makeTriangleScenario([100, 150, 125, 220, 185, 260], {
       labels: ['0', '1', '2', '3', '4', '5'],

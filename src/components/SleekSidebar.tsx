@@ -288,8 +288,16 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               <span>{tab.label}</span>
               {'hasWarning' in tab && tab.hasWarning && (
                 <span
-                  data-testid="sidebar-scenarios-tab-warning"
-                  title={FLAT_MARKET_PHASE_TOOLTIP}
+                  data-testid={
+                    tab.id === 'TRIANGLE_ANALYSIS'
+                      ? 'sidebar-triangle-tab-warning'
+                      : 'sidebar-scenarios-tab-warning'
+                  }
+                  title={
+                    tab.id === 'TRIANGLE_ANALYSIS'
+                      ? 'هشدار مثلث نامعتبر (موج ۱/۳/۵ یا ساختار غیر ۳-۳-۳-۳-۳)'
+                      : FLAT_MARKET_PHASE_TOOLTIP
+                  }
                   className="inline-flex items-center text-rose-300"
                 >
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
