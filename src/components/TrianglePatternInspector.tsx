@@ -312,7 +312,8 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
       </div>
 
       {/* Warning Banner for Invalid Slot, Parallel Rectangle, Mixed Trendlines, or 5-Wave Diagonal Mismatch */}
-      {(!report.positionValid ||
+      {(validationResult.isInvalidTriangle ||
+        !report.positionValid ||
         report.isParallelRectangle ||
         report.isMixedTrendlines ||
         !report.subwaveStructureValid ||
@@ -321,6 +322,19 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
           data-testid="triangle-inspector-warnings"
           className="px-3.5 py-2 bg-rose-950/30 text-rose-100 space-y-1 text-[10.5px]"
         >
+          {validationResult.isInvalidTriangle && (
+            <div
+              data-testid="triangle-inspector-invalid-flag"
+              className="flex items-start gap-1.5 font-semibold text-rose-200"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+              <span>
+                پرچم حذف مثلث نامعتبر (isInvalidTriangle):{' '}
+                {validationResult.invalidTriangleReasonFa ||
+                  'مثلث در موج ۱، ۳ یا ۵ قرار دارد یا ساختار درونی ۳-۳-۳-۳-۳ نیست.'}
+              </span>
+            </div>
+          )}
           {!report.positionValid && (
             <div className="flex items-start gap-1.5">
               <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
@@ -355,22 +369,22 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
       <div className="px-3.5 py-2.5 bg-slate-950/60 space-y-2 text-[10.5px]">
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <div className="text-slate-400 text-[9.5px]">نوع مثلث</div>
+            <div className="text-slate-400 text-[9.5px]">نوع مثلث و خطوط روند</div>
             <div
               className={`font-bold mt-0.5 truncate ${
-                report.triangleType === 'CONTRACTING'
+                validationResult.isContracting
                   ? 'text-emerald-300'
-                  : report.triangleType === 'EXPANDING'
+                  : validationResult.isExpanding
                   ? 'text-amber-300'
                   : 'text-rose-300'
               }`}
             >
-              {report.isParallelRectangle
-                ? 'مستطیل (نامعتبر)'
-                : report.triangleType === 'EXPANDING'
-                ? 'گستشی (Expanding)'
-                : report.triangleType === 'CONTRACTING'
-                ? 'مانع (Contracting)'
+              {validationResult.isParallelRectangle
+                ? 'موازی: مستطیل (نامعتبر)'
+                : validationResult.isExpanding
+                ? 'واگرا: گستشی (Expanding)'
+                : validationResult.trendlinesConverge && validationResult.isContracting
+                ? 'همگرا: مانع (Contracting)'
                 : 'نامعتبر'}
             </div>
           </div>
@@ -526,6 +540,35 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
                       : opt.id === 'AUTO'
                       ? 'bg-indigo-600 text-white font-bold'
                       : 'bg-amber-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Market Indecision Psychology Selector (Session 14 §2.7) */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-slate-400 text-[10px]">روانشناسی بازار:</span>
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+            {(
+              [
+                { id: 'AUTO', label: 'خودکار' },
+                { id: 'INDECISIVE', label: 'بازار دودل (مثلث)' },
+                { id: 'CONFIDENT_TREND', label: 'روند مطمئن' }
+              ] as const
+            ).map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setMarketState(opt.id)}
+                className={`px-1.5 py-0.5 rounded text-[9.5px] transition-colors whitespace-nowrap ${
+                  marketState === opt.id
+                    ? opt.id === 'CONFIDENT_TREND'
+                      ? 'bg-rose-600 text-white font-bold'
+                      : 'bg-indigo-600 text-white font-bold'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >

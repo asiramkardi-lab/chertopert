@@ -473,6 +473,14 @@ export interface TriangleAnalysisReport {
   upperTrendlineTouches?: number;
   lowerTrendlineTouches?: number;
   trendlineStrengthStatus?: 'VALID' | 'WEAK' | 'INVALID';
+  is5WaveABCDE?: boolean;
+  is33333Subwave?: boolean;
+  trendlinesConverge?: boolean;
+  trendlinesDiverge?: boolean;
+  isContracting?: boolean;
+  isExpanding?: boolean;
+  isInvalidTriangle?: boolean;
+  invalidTriangleReasonFa?: string;
   indecisionAssessmentFa?: string;
   confidence: number;
   warnings: string[];
@@ -773,11 +781,18 @@ export interface WaveScenario {
   marketPhaseWarning?: boolean;
   marketTerminalWarning?: MarketTerminalScenarioWarning;
   isExcludedRunningFlat?: boolean;
+  isInvalidTriangle?: boolean;
+  invalidTriangleReasonFa?: string;
   metadata?: {
     marketPhaseWarning?: boolean;
     marketTerminalWarning?: MarketTerminalScenarioWarning;
     flatSubtype?: FlatSubtype;
     isExcludedFlat?: boolean;
+    isInvalidTriangle?: boolean;
+    invalidTriangleReasonFa?: string;
+    internalSubwaves?: number[];
+    triangleType?: 'CONTRACTING' | 'EXPANDING' | 'INVALID';
+    triangleLabel?: 'Contracting' | 'Expanding' | 'Invalid';
   };
 }
 

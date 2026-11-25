@@ -760,61 +760,241 @@ export class RulesEngine {
   }
 
   /**
-   * RulesEngine 'TrianglePatternValidator' (Session 14 §2.1..§2.14):
-   * Validates 5-leg A-B-C-D-E naming, 3-3-3-3-3 internal structure, corrective slot (2, 4, B only),
-   * Contracting vs Expanding vs Parallel Rectangle geometry, tradability, and trendline touches.
+   * Session 14 Helper: Returns true if a Triangle scenario is detected in wave 1, 3, or 5
+   * (motive waves where triangles are forbidden), OR if its internal structure is not 3-3-3-3-3,
+   * flagging it for potential removal from the scenario tree.
    */
+  public static isInvalidTriangle(
+    scenario: WaveScenario,
+    candles: Candle[] = [],
+    options?: {
+      parentRole?: WaveRole;
+      parentWaveLabel?: string;
+      internalSubwaves?: number[];
+    }
+  ): boolean {
+    if (!scenario) return false;
+    const verts = scenario.vertices || [];
+    const coreLabels = verts.slice(1, 6).map(v => v.label.replace(/[()VW\s]/g, '').toUpperCase());
+    const hasABCDEVerts =
+      verts.length >= 6 &&
+      coreLabels[0] === 'A' &&
+      coreLabels[1] === 'B' &&
+      coreLabels[2] === 'C' &&
+      coreLabels[3] === 'D' &&
+      coreLabels[4] === 'E';
+    const isTriScenario =
+      scenario.patternType === 'TRIANGLE_CONVERGING' ||
+      scenario.patternType === 'TRIANGLE_EXPANDING' ||
+      hasABCDEVerts;
+    if (!isTriScenario) return false;
+
+    const rawWaveLabel = (options?.parentWaveLabel ?? scenario.parentLegLabel ?? '')
+      .split(/[←→]/)
+      .pop()
+      ?.trim() || '';
+    const cleanSlot = rawWaveLabel.replace(/موج/g, '').replace(/[()VW\s]/g, '').toUpperCase();
+    const isCorrectiveExplicitSlot =
+      cleanSlot.includes('2') || cleanSlot.includes('4') || cleanSlot.includes('B');
+    const isWave135Slot =
+      cleanSlot.includes('1') ||
+      cleanSlot.includes('3') ||
+      cleanSlot.includes('5') ||
+      (options?.parentRole === 'MOTIVE' && !isCorrectiveExplicitSlot);
+
+    if (isWave135Slot) return true;
+    if (scenario.rulesResults?.some(r => r.ruleId === 'TRIANGLE_CORRECTIVE_ONLY' && !r.passed)) {
+      return true;
+    }
+
+    const explicitSubs = options?.internalSubwaves ?? scenario.metadata?.internalSubwaves;
+    if (explicitSubs && explicitSubs.length > 0) {
+      const isValid33333 = explicitSubs.length === 5 && explicitSubs.every(c => c === 3);
+      if (!isValid33333) return true;
+    }
+
+    if (scenario.rulesResults?.some(r => r.ruleId === 'TRIANGLE_SUBWAVES_33333' && !r.passed)) {
+      return true;
+    }
+
+    if (verts.length < 6) {
+      return true;
+    }
+
+    const resolvedRole: WaveRole =
+      options?.parentRole ??
+      (isCorrectiveExplicitSlot ? 'CORRECTIVE' : 'ROOT');
+    const val = this.TrianglePatternValidator(
+      scenario.patternType,
+      verts,
+      scenario.direction,
+      resolvedRole,
+      rawWaveLabel,
+      candles,
+      explicitSubs ? { internalSubwaves: explicitSubs } : undefined
+    );
+    return !val.is33333Subwave || !val.report.positionValid || Boolean(val.isInvalidTriangle);
+  }
+
+  /**
+   * RulesEngine 'TrianglePatternValidator' (Session 14 §2.1..§2.14):
+   * Identifies 5-wave structures (A-B-C-D-E) with 3-3-3-3-3 internal structure, checks whether
+   * trendlines converge (Contracting) or diverge (Expanding) vs parallel rectangle,
+   * and evaluates corrective slot validity (2, 4, B only — flagging 1, 3, 5 or non-3-3-3-3-3).
+   */
+  public static TrianglePatternValidator(
+    scenario: WaveScenario,
+    candles?: Candle[],
+    options?: TriangleAnalysisOptions,
+    parentRole?: WaveRole,
+    parentWaveLabel?: string
+  ): {
+    isTriangleScenario: boolean;
+    isValidTriangle: boolean;
+    triangleType: TriangleAnalysisReport['triangleType'];
+    triangleLabel: 'Contracting' | 'Expanding' | 'Invalid';
+    triangleTypeLabelFa: string;
+    is5WaveABCDE: boolean;
+    is33333Subwave: boolean;
+    trendlinesConverge: boolean;
+    trendlinesDiverge: boolean;
+    isContracting: boolean;
+    isExpanding: boolean;
+    isParallelRectangle: boolean;
+    isInvalidTriangle: boolean;
+    invalidTriangleReasonFa?: string;
+    labeledScenario: WaveScenario;
+    report: TriangleAnalysisReport;
+    rules: RuleValidationItem[];
+  };
   public static TrianglePatternValidator(
     pattern: PatternFamily,
     vertices: WaveVertex[],
-    direction: WaveDirection = 'BULLISH',
-    parentRole: WaveRole = 'ROOT',
-    parentWaveLabel: string = '',
-    candles: Candle[] = [],
+    direction?: WaveDirection,
+    parentRole?: WaveRole,
+    parentWaveLabel?: string,
+    candles?: Candle[],
     options?: TriangleAnalysisOptions
   ): {
     isTriangleScenario: boolean;
     isValidTriangle: boolean;
+    triangleType: TriangleAnalysisReport['triangleType'];
+    triangleLabel: 'Contracting' | 'Expanding' | 'Invalid';
+    triangleTypeLabelFa: string;
+    is5WaveABCDE: boolean;
+    is33333Subwave: boolean;
+    trendlinesConverge: boolean;
+    trendlinesDiverge: boolean;
+    isContracting: boolean;
+    isExpanding: boolean;
+    isParallelRectangle: boolean;
+    isInvalidTriangle: boolean;
+    invalidTriangleReasonFa?: string;
+    labeledScenario?: WaveScenario;
+    report: TriangleAnalysisReport;
+    rules: RuleValidationItem[];
+  };
+  public static TrianglePatternValidator(
+    patternOrScenario: PatternFamily | WaveScenario,
+    verticesOrCandles?: WaveVertex[] | Candle[],
+    directionOrOptions?: WaveDirection | TriangleAnalysisOptions,
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = '',
+    candlesArg: Candle[] = [],
+    optionsArg?: TriangleAnalysisOptions
+  ): {
+    isTriangleScenario: boolean;
+    isValidTriangle: boolean;
+    triangleType: TriangleAnalysisReport['triangleType'];
+    triangleLabel: 'Contracting' | 'Expanding' | 'Invalid';
+    triangleTypeLabelFa: string;
+    is5WaveABCDE: boolean;
+    is33333Subwave: boolean;
+    trendlinesConverge: boolean;
+    trendlinesDiverge: boolean;
+    isContracting: boolean;
+    isExpanding: boolean;
+    isParallelRectangle: boolean;
+    isInvalidTriangle: boolean;
+    invalidTriangleReasonFa?: string;
+    labeledScenario?: WaveScenario;
     report: TriangleAnalysisReport;
     rules: RuleValidationItem[];
   } {
-    const tempScenario: WaveScenario = {
-      id: 'tri_val',
-      name: 'Triangle Validation',
-      color: '#38bdf8',
-      isPrimary: false,
-      isLocked: false,
-      isSelectedForTree: false,
-      patternType: pattern,
-      degree: 'PRIMARY',
-      direction,
-      vertices,
-      currentWave: vertices[vertices.length - 1]?.label || 'E',
-      completionPercentage: 100,
-      validityScore: 80,
-      idealnessScore: 80,
-      confidenceScore: 80,
-      invalidationPrice: vertices[0]?.price ?? 0,
-      targets: [],
-      rulesResults: [],
-      source: 'AI',
-      timeframe: '1D'
-    };
+    const isScenarioInput = typeof patternOrScenario === 'object' && patternOrScenario !== null;
+    const resolvedPattern: PatternFamily = isScenarioInput
+      ? patternOrScenario.patternType
+      : patternOrScenario;
+    const resolvedVertices: WaveVertex[] = isScenarioInput
+      ? patternOrScenario.vertices
+      : ((verticesOrCandles as WaveVertex[] | undefined) ?? []);
+    const resolvedDirection: WaveDirection = isScenarioInput
+      ? patternOrScenario.direction
+      : ((directionOrOptions as WaveDirection | undefined) ?? 'BULLISH');
+    const resolvedCandles: Candle[] = isScenarioInput
+      ? ((verticesOrCandles as Candle[] | undefined) ?? [])
+      : candlesArg;
+    const resolvedOptions: TriangleAnalysisOptions | undefined = isScenarioInput
+      ? (directionOrOptions as TriangleAnalysisOptions | undefined)
+      : optionsArg;
+    const effectiveWaveLabel = parentWaveLabel || (isScenarioInput ? patternOrScenario.parentLegLabel || '' : '');
+    const effectiveRole: WaveRole =
+      parentRole !== 'ROOT'
+        ? parentRole
+        : effectiveWaveLabel
+        ? inferWaveRole(effectiveWaveLabel.split(/[←→]/).pop() || effectiveWaveLabel)
+        : 'ROOT';
+
+    const tempScenario: WaveScenario = isScenarioInput
+      ? {
+          ...patternOrScenario,
+          parentLegLabel: effectiveWaveLabel || patternOrScenario.parentLegLabel
+        }
+      : {
+          id: 'tri_val',
+          name: 'Triangle Validation',
+          color: '#38bdf8',
+          isPrimary: false,
+          isLocked: false,
+          isSelectedForTree: false,
+          patternType: resolvedPattern,
+          degree: 'PRIMARY',
+          direction: resolvedDirection,
+          vertices: resolvedVertices,
+          currentWave: resolvedVertices[resolvedVertices.length - 1]?.label || 'E',
+          completionPercentage: 100,
+          validityScore: 80,
+          idealnessScore: 80,
+          confidenceScore: 80,
+          invalidationPrice: resolvedVertices[0]?.price ?? 0,
+          targets: [],
+          rulesResults: [],
+          source: 'AI',
+          timeframe: '1D',
+          parentLegLabel: effectiveWaveLabel || undefined
+        };
 
     const report = PatternEngines.analyzeTriangle(
       tempScenario,
-      candles,
-      parentRole,
-      parentWaveLabel,
-      options
+      resolvedCandles,
+      effectiveRole,
+      effectiveWaveLabel,
+      resolvedOptions
     );
     const rules: RuleValidationItem[] = [];
+    const is5WaveABCDE = Boolean(report.is5WaveABCDE ?? report.namingPatternKind === 'TRIANGLE_ABCDE');
+    const is33333Subwave = Boolean(report.is33333Subwave ?? report.subwaveStructureValid);
+    const isContracting = Boolean(report.isContracting ?? report.triangleType === 'CONTRACTING');
+    const isExpanding = Boolean(report.isExpanding ?? report.triangleType === 'EXPANDING');
+    const trendlinesConverge = Boolean(report.trendlinesConverge ?? isContracting);
+    const trendlinesDiverge = Boolean(report.trendlinesDiverge ?? isExpanding);
+    const isParallelRectangle = Boolean(report.isParallelRectangle);
     const isTriangleScenario =
-      pattern === 'TRIANGLE_CONVERGING' ||
-      pattern === 'TRIANGLE_EXPANDING' ||
-      report.namingPatternKind === 'TRIANGLE_ABCDE';
+      resolvedPattern === 'TRIANGLE_CONVERGING' ||
+      resolvedPattern === 'TRIANGLE_EXPANDING' ||
+      is5WaveABCDE;
 
-    if (vertices.length >= 5) {
+    if (resolvedVertices.length >= 5) {
       rules.push({
         ruleId: 'TRIANGLE_NAMING_ABCDE',
         name: 'Triangle A-B-C-D-E Naming (Session 14 §2.4 & §2.6)',
@@ -832,15 +1012,90 @@ export class RulesEngine {
       });
     }
 
+    if (isTriangleScenario && resolvedVertices.length >= 5) {
+      const convergencePassed = !isParallelRectangle && !report.isMixedTrendlines && (trendlinesConverge || isExpanding);
+      rules.push({
+        ruleId: 'TRIANGLE_CONVERGENCE_CHECK',
+        name: 'Triangle Trendline Convergence (Session 14 §2.2)',
+        nameFa: 'بررسی همگرایی خطوط روند (تشخیص مثلث مانع در مقابل گستشی و مستطیل)',
+        type: 'STRUCTURE',
+        passed: convergencePassed,
+        score: isContracting ? 100 : isExpanding ? 88 : 30,
+        conceptId: 'C24',
+        details: isParallelRectangle
+          ? 'PARALLEL_RECTANGLE'
+          : isContracting
+          ? 'CONTRACTING'
+          : isExpanding
+          ? 'EXPANDING'
+          : 'INVALID',
+        messageFa: isParallelRectangle
+          ? 'خطوط روند موازی هستند — الگوی مستطیل است و مثلث محسوب نمی‌شود.'
+          : isContracting
+          ? 'خطوط روند همگرا هستند — مثلث مانع (Contracting) شناسایی شد.'
+          : isExpanding
+          ? 'خطوط روند واگرا هستند — مثلث گستشی (Expanding) شناسایی شد.'
+          : 'خطوط روند مثلث نامعتبر است.'
+      });
+    }
+
+    const isInvalidTriangleFlag =
+      Boolean(report.isInvalidTriangle) ||
+      !report.positionValid ||
+      !is33333Subwave;
+
     const isValidTriangle =
       report.detected &&
       report.positionValid &&
       report.namingValid &&
-      Boolean(report.subwaveStructureValid);
+      is33333Subwave;
+
+    const triangleLabel: 'Contracting' | 'Expanding' | 'Invalid' =
+      report.triangleType === 'CONTRACTING'
+        ? 'Contracting'
+        : report.triangleType === 'EXPANDING'
+        ? 'Expanding'
+        : 'Invalid';
+
+    const labeledScenario: WaveScenario | undefined = isScenarioInput
+      ? {
+          ...patternOrScenario,
+          patternType:
+            report.triangleType === 'EXPANDING'
+              ? 'TRIANGLE_EXPANDING'
+              : report.triangleType === 'CONTRACTING'
+              ? 'TRIANGLE_CONVERGING'
+              : patternOrScenario.patternType,
+          isInvalidTriangle: isInvalidTriangleFlag,
+          invalidTriangleReasonFa: isInvalidTriangleFlag ? report.invalidTriangleReasonFa : undefined,
+          metadata: {
+            ...(patternOrScenario.metadata ?? {}),
+            triangleType: report.triangleType,
+            triangleLabel,
+            isInvalidTriangle: isInvalidTriangleFlag,
+            ...(isInvalidTriangleFlag && report.invalidTriangleReasonFa
+              ? { invalidTriangleReasonFa: report.invalidTriangleReasonFa }
+              : {})
+          }
+        }
+      : undefined;
 
     return {
       isTriangleScenario,
       isValidTriangle,
+      triangleType: report.triangleType,
+      triangleLabel,
+      triangleTypeLabelFa: report.triangleTypeLabelFa,
+      is5WaveABCDE,
+      is33333Subwave,
+      trendlinesConverge,
+      trendlinesDiverge,
+      isContracting,
+      isExpanding,
+      isParallelRectangle,
+      isInvalidTriangle: isInvalidTriangleFlag,
+      invalidTriangleReasonFa: report.invalidTriangleReasonFa,
+      ...(labeledScenario ? { labeledScenario } : {}),
       report,
       rules
     };
@@ -867,7 +1122,8 @@ export class RulesEngine {
 
   /**
    * Returns an updated copy of a WaveScenario annotated with MarketTerminalValidator
-   * warning metadata (when Flat is near chart end) and Running Flat exclusion status.
+   * warning metadata (when Flat is near chart end), Running Flat exclusion status,
+   * and Session 14 invalid Triangle exclusion status.
    */
   public static withScenarioValidationMetadata(
     scenario: WaveScenario,
@@ -876,6 +1132,7 @@ export class RulesEngine {
   ): WaveScenario {
     const warningMeta = this.buildMarketTerminalWarningMetadata(summary.marketTerminalFlag);
     const isExcluded = this.isExcludedFlat(scenario, candles);
+    const invalidTri = this.isInvalidTriangle(scenario, candles);
     const nextMetadata = { ...(scenario.metadata ?? {}) };
     if (warningMeta) {
       nextMetadata.marketPhaseWarning = true;
@@ -887,11 +1144,31 @@ export class RulesEngine {
     if (summary.flatPatternFlag?.subtype) {
       nextMetadata.flatSubtype = summary.flatPatternFlag.subtype;
     }
+    if (summary.triangleReport) {
+      nextMetadata.triangleType = summary.triangleReport.triangleType;
+      nextMetadata.triangleLabel =
+        summary.triangleReport.triangleType === 'CONTRACTING'
+          ? 'Contracting'
+          : summary.triangleReport.triangleType === 'EXPANDING'
+          ? 'Expanding'
+          : 'Invalid';
+    }
     nextMetadata.isExcludedFlat = isExcluded;
+    if (invalidTri) {
+      nextMetadata.isInvalidTriangle = true;
+      if (summary.triangleReport?.invalidTriangleReasonFa) {
+        nextMetadata.invalidTriangleReasonFa = summary.triangleReport.invalidTriangleReasonFa;
+      }
+    } else {
+      delete nextMetadata.isInvalidTriangle;
+      delete nextMetadata.invalidTriangleReasonFa;
+    }
 
     const next: WaveScenario = {
       ...scenario,
       isExcludedRunningFlat: isExcluded,
+      isInvalidTriangle: invalidTri,
+      invalidTriangleReasonFa: invalidTri ? summary.triangleReport?.invalidTriangleReasonFa : undefined,
       metadata: nextMetadata
     };
     if (warningMeta) {
@@ -1758,14 +2035,16 @@ export class RulesEngine {
         pattern === 'TRIANGLE_CONVERGING' ||
         pattern === 'TRIANGLE_EXPANDING'
       ) {
-        // Triangle Position Rule: ONLY allowed in Corrective waves (2, 4, B, X, D) — NEVER in waves 1, 3, 5
+        // Triangle Position Rule: ONLY allowed in Corrective waves (2, 4, B) — NEVER in waves 1, 3, 5, A, C
         const cleanParentTri = parentWaveLabel
           .replace(/موج/g, '')
           .replace(/[()VW\s]/g, '')
           .toUpperCase();
         const tailTriToken = cleanParentTri.split('→').pop() || cleanParentTri;
-        const invalidTriSlot = parentRole !== 'ROOT' && ['1', '3', '5'].includes(tailTriToken);
-        if (parentRole !== 'ROOT' && tailTriToken) {
+        const invalidTriSlot =
+          ['1', '3', '5', 'A', 'C'].includes(tailTriToken) ||
+          (parentRole === 'MOTIVE' && !['2', '4', 'B'].includes(tailTriToken));
+        if ((parentRole !== 'ROOT' || ['1', '3', '5', 'A', 'C'].includes(tailTriToken)) && tailTriToken) {
           rules.push({
             ruleId: 'TRIANGLE_POSITION',
             name: 'Triangle Allowed Only in Corrective Waves (2, 4, B)',
@@ -5853,4 +6132,16 @@ export class RulesEngine {
  */
 export function isExcludedFlat(scenario: WaveScenario, candles?: Candle[]): boolean {
   return RulesEngine.isExcludedFlat(scenario, candles);
+}
+
+/**
+ * Top-level Session 14 helper: Flags invalid Triangle scenarios (detected in wave 1, 3, or 5
+ * OR internal subwave structure is not 3-3-3-3-3) for potential removal from the scenario tree.
+ */
+export function isInvalidTriangle(
+  scenario: WaveScenario,
+  candles?: Candle[],
+  options?: { parentRole?: WaveRole; parentWaveLabel?: string; internalSubwaves?: number[] }
+): boolean {
+  return RulesEngine.isInvalidTriangle(scenario, candles, options);
 }

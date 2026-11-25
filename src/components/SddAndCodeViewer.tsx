@@ -270,7 +270,7 @@ export const SddAndCodeViewer: React.FC = () => {
 - PatternEngines.evaluateTriangleCounterTrend (T-14.35..T-14.37)
 - PatternEngines.evaluateZobPracticalTriangle (T-14.38..T-14.40)
 - PatternEngines.evaluateTriangleTrendlineTouches (T-14.41..T-14.43)
-- RulesEngine.TrianglePatternValidator & TSE_ZOB
+- RulesEngine.TrianglePatternValidator, RulesEngine.isInvalidTriangle & TSE_ZOB
 
 ## ۳. مرجع پیاده‌سازی Backend (FastAPI / Pydantic v2)
 \`\`\`python

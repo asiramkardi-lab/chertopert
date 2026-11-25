@@ -2114,6 +2114,8 @@ export class PatternEngines {
       ? '5'
       : cleanPos.includes('A')
       ? 'A'
+      : cleanPos.includes('C')
+      ? 'C'
       : cleanPos.includes('1')
       ? '1'
       : cleanPos.includes('3')
@@ -2122,13 +2124,31 @@ export class PatternEngines {
       ? '4'
       : '4';
 
-    const freqMap: Record<string, string> = { '2': '۲۰٪', '4': '۵۰٪', B: '۳۰٪', '5': 'نادر', A: 'بسیار نادر' };
+    const freqMap: Record<string, string> = { '2': '۲۰٪', '4': '۵۰٪', B: '۳۰٪', '5': 'نادر', A: 'بسیار نادر', C: 'نامعتبر' };
     const freqRankMap: Record<string, TriangleAnalysisReport['frequencyRank']> = {
       '4': 'MOST_COMMON',
       B: 'COMMON',
       '2': 'LESS_COMMON'
     };
-    const positionValid = posChar === '2' || posChar === '4' || posChar === 'B' || parentRole === 'ROOT';
+    const hasExplicitSlot =
+      cleanPos.includes('2') ||
+      cleanPos.includes('B') ||
+      cleanPos.includes('4') ||
+      cleanPos.includes('5') ||
+      cleanPos.includes('A') ||
+      cleanPos.includes('C') ||
+      cleanPos.includes('1') ||
+      cleanPos.includes('3');
+    const positionValid =
+      posChar === '2' ||
+      posChar === '4' ||
+      posChar === 'B' ||
+      (!hasExplicitSlot && parentRole === 'ROOT');
+    const isInvalidMotiveSlot =
+      posChar === '1' ||
+      posChar === '3' ||
+      posChar === '5' ||
+      (!hasExplicitSlot && parentRole === 'MOTIVE');
     const frequencyPct = freqMap[posChar] || '۰٪';
     const frequencyRank: TriangleAnalysisReport['frequencyRank'] =
       positionValid ? freqRankMap[posChar] || 'MOST_COMMON' : 'INVALID';
@@ -2136,7 +2156,7 @@ export class PatternEngines {
     const expectedReplacementPattern: TriangleAnalysisReport['expectedReplacementPattern'] =
       posChar === '5'
         ? 'ENDING_DIAGONAL'
-        : posChar === '1' || posChar === '3'
+        : posChar === '1' || posChar === '3' || posChar === 'C'
         ? 'IDEAL_CYCLE'
         : null;
 
@@ -2168,11 +2188,16 @@ export class PatternEngines {
       coreLabels[1] === 'B' &&
       coreLabels[2] === 'C';
 
+    const isDeclaredTriangle =
+      scenario.patternType === 'TRIANGLE_CONVERGING' ||
+      scenario.patternType === 'TRIANGLE_EXPANDING';
     const namingValid = isABCDE;
     const namingPatternKind: TriangleAnalysisReport['namingPatternKind'] = isABCDE
       ? 'TRIANGLE_ABCDE'
       : is12345
-      ? 'MISLABELED_TRIANGLE'
+      ? isDeclaredTriangle
+        ? 'MISLABELED_TRIANGLE'
+        : 'DIAGONAL_12345'
       : is3WaveABC
       ? 'ZIGZAG_ABC'
       : 'MISLABELED_TRIANGLE';
@@ -2215,6 +2240,16 @@ export class PatternEngines {
         namingPatternKind: verts.length === 4 ? 'ZIGZAG_ABC' : namingPatternKind,
         subwaveSignature: options?.internalSubwaves?.join('-') || '3-3-3-?',
         subwaveStructureValid: false,
+        is5WaveABCDE: false,
+        is33333Subwave: false,
+        trendlinesConverge: false,
+        trendlinesDiverge: false,
+        isContracting: false,
+        isExpanding: false,
+        isInvalidTriangle: isInvalidMotiveSlot || verts.length < 5,
+        invalidTriangleReasonFa: isInvalidMotiveSlot
+          ? `مثلث در موج ${posChar} (اصلی) مجاز نیست؛ فقط در امواج اصلاحی ۲، ۴ یا B مجاز است.`
+          : 'ساختار ۵ ضلعی A-B-C-D-E با ساختار درونی ۳-۳-۳-۳-۳ تکمیل نشده است.',
         tradabilityStatus: 'NOT_TRADABLE',
         tradabilityLabelFa: 'غیرمعامله‌پذیر (ساختار ناقص بدون پایان E)',
         isTradable: false,
@@ -2244,17 +2279,23 @@ export class PatternEngines {
     const legD = Math.abs(verts[4].price - verts[3].price);
 
     // Table 8 & Session 14.5: Subwave counts across legs A..E (3-3-3-3-3 mandatory for Triangle)
-    const subwaveCounts: number[] =
+    const configuredSubwaves =
       options?.internalSubwaves && options.internalSubwaves.length === 5
-        ? [...options.internalSubwaves]
+        ? options.internalSubwaves
+        : scenario.metadata?.internalSubwaves && scenario.metadata.internalSubwaves.length === 5
+        ? scenario.metadata.internalSubwaves
+        : undefined;
+    const subwaveCounts: number[] =
+      configuredSubwaves
+        ? [...configuredSubwaves]
         : Array.from({ length: Math.min(5, verts.length - 1) }, (_, li) =>
-            estimateSubwaveCount(candles, verts[li].candleIndex, verts[li + 1].candleIndex, 3)
+            resolveVertexSubwave(verts[li + 1], candles, verts[li].candleIndex, verts[li + 1].candleIndex, 3)
           );
     const subwaveSignature = subwaveCounts.join('-');
     const all3Subwaves = subwaveCounts.length >= 4 && subwaveCounts.every(c => c === 3);
     const all5Subwaves = subwaveCounts.length >= 4 && subwaveCounts.every(c => c === 5);
     const isMixedSubwaves = subwaveCounts.length >= 4 && !all3Subwaves && !all5Subwaves;
-    const subwaveStructureValid = all3Subwaves;
+    const subwaveStructureValid = all3Subwaves && subwaveCounts.length === 5;
 
     let subwaveMismatchWarningFa: string | undefined;
     if (all5Subwaves) {
@@ -2324,20 +2365,44 @@ export class PatternEngines {
 
     const legE = verts[5] ? Math.abs(verts[5].price - verts[4].price) : legD * 0.7;
 
+    const gapAB = Math.max(0.01, upperA - lowerB);
+    const gapCD = Math.max(0.01, upperC - lowerD);
+    const upperDx = Math.max(1, verts[3].candleIndex - verts[1].candleIndex);
+    const lowerDx = Math.max(1, verts[4].candleIndex - verts[2].candleIndex);
+    const upperSlope = (upperC - upperA) / upperDx;
+    const lowerSlope = (lowerD - lowerB) / lowerDx;
+
+    const trendlinesConverge =
+      !isParallelRectangle &&
+      !isMixedTrendlines &&
+      (isConvergingSides || (gapCD < gapAB * 0.94 && upperSlope < lowerSlope));
+    const trendlinesDiverge =
+      !isParallelRectangle &&
+      !isMixedTrendlines &&
+      !trendlinesConverge &&
+      (isDivergingSides || (gapCD > gapAB * 1.06 && upperSlope > lowerSlope));
+
     const isContracting =
       !isParallelRectangle &&
       !isMixedTrendlines &&
-      (isConvergingSides || (legC < legA && (scenario.patternType === 'TRIANGLE_CONVERGING' || legE <= legC)));
+      (trendlinesConverge || (legC < legA && (scenario.patternType === 'TRIANGLE_CONVERGING' || legE <= legC)));
     const isExpanding =
       !isParallelRectangle &&
       !isMixedTrendlines &&
       !isContracting &&
-      (isDivergingSides || (legC > legA && (scenario.patternType === 'TRIANGLE_EXPANDING' || legE >= legC)));
+      (trendlinesDiverge || (legC > legA && (scenario.patternType === 'TRIANGLE_EXPANDING' || legE >= legC)));
     const triangleType: TriangleAnalysisReport['triangleType'] = isExpanding
       ? 'EXPANDING'
       : isContracting
       ? 'CONTRACTING'
       : 'INVALID';
+
+    const isInvalidTriangle = isInvalidMotiveSlot || !subwaveStructureValid;
+    const invalidTriangleReasonFa = isInvalidMotiveSlot
+      ? `مثلث در موج ${posChar} (اصلی ۱، ۳ یا ۵) نامعتبر است؛ مثلث فقط در امواج اصلاحی ۲، ۴ یا B تشکیل می‌شود.`
+      : !subwaveStructureValid
+      ? `ساختار درونی ${subwaveSignature} است و با الگوی الزامی ۳-۳-۳-۳-۳ مثلث مطابقت ندارد.`
+      : undefined;
 
     // Counter-trend alignment check (Session 14.12 & 15.1)
     const netDrift = Math.abs(verts[verts.length - 1].price - verts[0].price);
@@ -2560,6 +2625,14 @@ export class PatternEngines {
       upperTrendlineTouches,
       lowerTrendlineTouches,
       trendlineStrengthStatus,
+      is5WaveABCDE: isABCDE,
+      is33333Subwave: subwaveStructureValid,
+      trendlinesConverge: triangleType === 'CONTRACTING' ? true : trendlinesConverge,
+      trendlinesDiverge: triangleType === 'EXPANDING' ? true : trendlinesDiverge,
+      isContracting: triangleType === 'CONTRACTING',
+      isExpanding: triangleType === 'EXPANDING',
+      isInvalidTriangle,
+      invalidTriangleReasonFa,
       indecisionAssessmentFa: indecisionEval.reasonFa,
       confidence: Math.max(0.15, Math.min(0.95, confidence)),
       warnings,

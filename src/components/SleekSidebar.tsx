@@ -15,7 +15,7 @@ import {
   WaveVertex,
   TimeframeBoundaryReport 
 } from '../types/elliott';
-import { RulesEngine, ValidationSummary, isExcludedFlat } from '../engine/rulesEngine';
+import { RulesEngine, ValidationSummary, isExcludedFlat, isInvalidTriangle } from '../engine/rulesEngine';
 import { ChartInteractionMode } from './ChartStudio';
 import { ExplainabilityPanel } from './ExplainabilityPanel';
 import { PatternValidator } from './PatternValidator';
@@ -153,21 +153,27 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   const liveTriangleValidation = useMemo(
     () =>
       RulesEngine.TrianglePatternValidator(
-        activeScenario.patternType,
-        activeScenario.vertices,
-        activeScenario.direction,
+        activeScenario,
+        candles,
+        undefined,
         drillContext?.role || 'ROOT',
-        drillContext?.waveLabel || '',
-        candles
+        drillContext?.waveLabel || activeScenario.parentLegLabel || ''
       ),
     [
-      activeScenario.patternType,
-      activeScenario.vertices,
-      activeScenario.direction,
+      activeScenario,
       drillContext?.role,
       drillContext?.waveLabel,
       candles
     ]
+  );
+
+  const activeInvalidTriangle = useMemo(
+    () =>
+      isInvalidTriangle(activeScenario, candles, {
+        parentRole: drillContext?.role,
+        parentWaveLabel: drillContext?.waveLabel || activeScenario.parentLegLabel
+      }),
+    [activeScenario, candles, drillContext?.role, drillContext?.waveLabel]
   );
 
   useEffect(() => {
@@ -206,6 +212,17 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
     [scenarioPhaseWarningsById]
   );
 
+  const anyInvalidTriangle = useMemo(
+    () =>
+      scenarios.some(sc =>
+        isInvalidTriangle(sc, candles, {
+          parentRole: drillContext?.role,
+          parentWaveLabel: drillContext?.waveLabel || sc.parentLegLabel
+        })
+      ),
+    [scenarios, candles, drillContext?.role, drillContext?.waveLabel]
+  );
+
   const tabs = [
     { id: 'COPILOT' as SidebarTab, label: 'دستیار هوشمند و قوانین', icon: Cpu, badge: `${activeScenario.validityScore}%` },
     {
@@ -218,7 +235,8 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
       id: 'TRIANGLE_ANALYSIS' as SidebarTab,
       label: 'بازرس مثلث A-B-C-D-E',
       icon: Triangle,
-      badge: liveTriangleValidation.report.frequencyPct || 'A-E'
+      badge: liveTriangleValidation.report.frequencyPct || 'A-E',
+      hasWarning: activeInvalidTriangle
     },
     { id: 'ANGLE_TARGETS' as SidebarTab, label: 'زوایا و اهداف', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
     { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch, badge: '۴ درجه' },
@@ -227,7 +245,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
       label: 'سناریوهای موازی',
       icon: FolderGit2,
       badge: `${scenarios.length}`,
-      hasWarning: anyMarketPhaseWarning
+      hasWarning: anyMarketPhaseWarning || anyInvalidTriangle
     },
     { id: 'TF_BOUNDARY' as SidebarTab, label: 'محدوده تایم‌فریم', icon: Compass },
     { id: 'SDD_CODE' as SidebarTab, label: 'سند SDD و کدها', icon: FileCode2 }
@@ -299,6 +317,39 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
           parentWaveLabel={drillContext?.waveLabel || ''}
           onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
         />
+
+        {/* Session 14 isInvalidTriangle Notification Banner */}
+        {activeInvalidTriangle && (
+          <div
+            data-testid="sidebar-invalid-triangle-alert"
+            role="alert"
+            className="rounded-xl bg-rose-950/35 border border-rose-500/50 px-3.5 py-2.5 flex items-start justify-between gap-2.5 text-xs"
+          >
+            <div className="flex items-start gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="min-w-0 space-y-0.5">
+                <div className="font-bold text-rose-200">
+                  هشدار مثلث نامعتبر (isInvalidTriangle)
+                </div>
+                <p className="text-[11px] text-rose-100/90 leading-relaxed">
+                  {liveTriangleValidation.invalidTriangleReasonFa ||
+                    'مثلث در امواج اصلی (۱، ۳ یا ۵) مجاز نیست یا ساختار درونی آن ۳-۳-۳-۳-۳ نیست؛ حذف یا اصلاح این سناریو توصیه می‌شود.'}
+                </p>
+              </div>
+            </div>
+            {scenarios.length > 1 && (
+              <button
+                type="button"
+                data-testid="sidebar-alert-remove-invalid-triangle"
+                onClick={() => onDeleteScenario(activeScenario.id)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/25 hover:bg-rose-500/40 border border-rose-500/50 text-rose-100 text-[10.5px] font-bold shrink-0 whitespace-nowrap transition-colors"
+              >
+                <Trash2 className="w-3 h-3 shrink-0" />
+                <span>حذف سناریو</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {activeTab === 'COPILOT' && (
           <div className="space-y-4">
@@ -374,7 +425,11 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
             {/* Studio Sidebar Triangle Pattern Inspector (Activates when a Triangle A-B-C-D-E scenario is selected) */}
             {isTriangleIdentified && (
-              <div className="rounded-xl bg-[#0b1324] border border-emerald-500/40 overflow-hidden">
+              <div
+                className={`rounded-xl bg-[#0b1324] overflow-hidden border ${
+                  activeInvalidTriangle ? 'border-rose-500/50' : 'border-emerald-500/40'
+                }`}
+              >
                 <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
                   <button
                     type="button"
@@ -382,18 +437,28 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                     aria-expanded={showInlineTriangleToggle}
                     className="flex items-center gap-2 min-w-0 text-right flex-1"
                   >
-                    <Triangle className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <Triangle
+                      className={`w-4 h-4 shrink-0 ${
+                        activeInvalidTriangle ? 'text-rose-400' : 'text-emerald-400'
+                      }`}
+                    />
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
                         <span>بازرس الگوی مثلث (A-B-C-D-E)</span>
-                        {liveTriangleValidation.isValidTriangle && (
+                        {activeInvalidTriangle ? (
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        ) : liveTriangleValidation.isValidTriangle ? (
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        )}
+                        ) : null}
                       </div>
                       <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
-                        {liveTriangleValidation.report.subwaveSignature || '3-3-3-3-3'} ·{' '}
-                        {liveTriangleValidation.report.positionSlotLabelFa} ·{' '}
-                        {liveTriangleValidation.report.frequencyPct}
+                        {liveTriangleValidation.isContracting
+                          ? 'مانع (همگرا)'
+                          : liveTriangleValidation.isExpanding
+                          ? 'گستشی (واگرا)'
+                          : 'نامعتبر'}{' '}
+                        · {liveTriangleValidation.report.subwaveSignature || '3-3-3-3-3'} ·{' '}
+                        {liveTriangleValidation.report.positionSlotLabelFa}
                       </div>
                     </div>
                   </button>
@@ -712,6 +777,21 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                     const isSelected = sc.id === activeScenarioId;
                     const hasPhaseWarn = scenarioPhaseWarningsById[sc.id];
                     const runningExcluded = isExcludedFlat(sc, candles);
+                    const invalidTriangle = isInvalidTriangle(sc, candles, {
+                      parentRole: drillContext?.role,
+                      parentWaveLabel: drillContext?.waveLabel || sc.parentLegLabel
+                    });
+                    const triCheck =
+                      sc.patternType === 'TRIANGLE_CONVERGING' || sc.patternType === 'TRIANGLE_EXPANDING'
+                        ? RulesEngine.TrianglePatternValidator(
+                            sc,
+                            candles,
+                            undefined,
+                            drillContext?.role || 'ROOT',
+                            drillContext?.waveLabel || sc.parentLegLabel || ''
+                          )
+                        : null;
+                    const flaggedForRemoval = runningExcluded || invalidTriangle;
                     return (
                       <div
                         key={sc.id}
@@ -744,20 +824,49 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                           {runningExcluded && (
                             <span
                               title="Running Flat excluded per Session 13 — flagged for removal"
-                              className="px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0"
+                              className="px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
                             >
                               حذف جاری
                             </span>
                           )}
+                          {triCheck && !invalidTriangle && triCheck.triangleLabel !== 'Invalid' && (
+                            <span
+                              data-testid="sidebar-triangle-type-badge"
+                              className={`px-1.5 py-0.5 rounded border text-[9px] font-bold shrink-0 whitespace-nowrap ${
+                                triCheck.isContracting
+                                  ? 'bg-emerald-950/45 border-emerald-500/40 text-emerald-300'
+                                  : 'bg-amber-950/45 border-amber-500/40 text-amber-300'
+                              }`}
+                            >
+                              {triCheck.isContracting ? 'مثلث مانع' : 'مثلث گستشی'}
+                            </span>
+                          )}
+                          {invalidTriangle && (
+                            <span
+                              data-testid="sidebar-invalid-triangle-badge"
+                              title="Invalid Triangle (detected in wave 1, 3, or 5 or internal structure is not 3-3-3-3-3) — flagged for removal"
+                              className="px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
+                            >
+                              مثلث نامعتبر
+                            </span>
+                          )}
                         </button>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {runningExcluded && scenarios.length > 1 && (
+                          {flaggedForRemoval && scenarios.length > 1 && (
                             <button
                               type="button"
-                              data-testid="sidebar-remove-running-flat"
+                              data-testid={
+                                runningExcluded
+                                  ? 'sidebar-remove-running-flat'
+                                  : 'sidebar-remove-invalid-triangle'
+                              }
                               onClick={() => onDeleteScenario(sc.id)}
-                              title="Remove excluded Running Flat scenario to keep tree clean"
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/45 text-rose-200 text-[9.5px] font-bold transition-colors"
+                              title={
+                                runningExcluded
+                                  ? 'Remove excluded Running Flat scenario to keep tree clean'
+                                  : 'Remove invalid Triangle scenario (wave 1/3/5 or non-3-3-3-3-3) to keep tree clean'
+                              }
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/45 text-rose-200 text-[9.5px] font-bold transition-colors whitespace-nowrap"
                             >
                               <Trash2 className="w-3 h-3 shrink-0" />
                               <span>حذف</span>
