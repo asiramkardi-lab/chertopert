@@ -2352,20 +2352,24 @@ export class PatternEngines {
 
     const isMixedTrendlines =
       !isParallelRectangle && !isConvergingSides && !isDivergingSides;
-    const isRareWaveATriangle = posChar === 'A' || cleanPos === 'A';
+    const isRareWaveATriangle = posChar === 'A' || cleanPos === 'A' || Boolean(options?.waveAIsTriangle);
+    const isRareWaveBTriangle = Boolean(options?.waveBIsTriangle);
 
-    const scopeVariant: TriangleAnalysisReport['scopeVariant'] =
-      isRareWaveATriangle || subwaveCounts[0] === 5 ? 'UNLIMITED' : 'LIMITED';
+    const scopeEval = PatternEngines.evaluateTriangleScope({
+      waveAIsTriangle: isRareWaveATriangle || subwaveCounts[0] === 5,
+      waveBIsTriangle: isRareWaveBTriangle
+    });
+    const scopeVariant: TriangleAnalysisReport['scopeVariant'] = scopeEval.scope;
+    const unlimitedSourceWave = scopeEval.unlimitedSourceWave;
 
-    const maxLeg = Math.max(legA, legB, legC, legD);
-    const dominantWaveName: TriangleAnalysisReport['dominantWaveName'] =
-      maxLeg === legA
-        ? 'COUNTER'
-        : maxLeg === legB
-        ? 'IRREGULAR'
-        : maxLeg === legC
-        ? 'LIMITED'
-        : 'UNLIMITED';
+    const legNaming = PatternEngines.classifyTriangleByLargestWave({
+      legA,
+      legB,
+      legC,
+      legD
+    });
+    const dominantWaveName = legNaming.classification;
+    const dominantWaveLabelFa = legNaming.labelFa;
 
     const legE = verts[5] ? Math.abs(verts[5].price - verts[4].price) : legD * 0.7;
 
@@ -2471,8 +2475,10 @@ export class PatternEngines {
       : 'هندسه مثلث نیازمند بازبینی خطوط روند';
 
     const retraceRatios = [legB / Math.max(0.01, legA), legC / Math.max(0.01, legB), legD / Math.max(0.01, legC)];
-    const idealRetracement50 = retraceRatios.every(r => r >= 0.48);
-    const allUnder50 = retraceRatios.every(r => r < 0.5);
+    const retraceRatiosPct = retraceRatios.map(r => Math.round(r * 1000) / 10);
+    const retrace50Eval = PatternEngines.evaluateTriangle50Retracement(retraceRatiosPct, 48);
+    const idealRetracement50 = retrace50Eval.status === 'IDEAL';
+    const allUnder50 = retrace50Eval.status === 'WEAK';
 
     if (allUnder50) {
       warnings.push('جدول ۸ (۸.۱۴): همه اضلاع مثلث کمتر از ۵۰٪ اصلاح داشته‌اند؛ مثلث بسیار ضعیف است.');
@@ -2482,19 +2488,17 @@ export class PatternEngines {
 
     // Table 8 & Session 15.7: Ideal completion before 3rd box (< 2/3 = 0.667, inside box 3 = 0.667..0.85, after = > 0.85)
     const lastVertIdx = verts[verts.length - 1].candleIndex;
-    const timingSpanRatio =
+    const computedTimingRatio =
       candles.length > 0
         ? Math.round(((lastVertIdx - verts[0].candleIndex) / Math.max(1, candles.length - verts[0].candleIndex)) * 100) / 100
         : 0.55;
-    const timingZone: TriangleAnalysisReport['timingZone'] =
-      timingSpanRatio < 0.667
-        ? 'BEFORE_BOX_3'
-        : timingSpanRatio <= 0.85
-        ? 'INSIDE_BOX_3'
-        : 'AFTER_BOX_3';
+    const timingSpanRatio = options?.timingSpanRatio ?? computedTimingRatio;
+    const boxTimingEval = PatternEngines.evaluateTriangleBoxTiming(timingSpanRatio);
+    const timingZone = boxTimingEval.timingZone;
+    const timingQualityStatus = boxTimingEval.qualityStatus;
     const idealCompletionBeforeBox3 = timingZone === 'BEFORE_BOX_3';
     if (timingZone === 'AFTER_BOX_3') {
-      warnings.push('جدول ۸: مثلث پس از باکس سوم (نسبت زمانی > ۸۵٪) تکمیل شده است (غیرایده‌آل — احتمال ضعف پرتاب).');
+      warnings.push('جدول ۸ / ۱۵.۷: مثلث پس از باکس سوم (نسبت زمانی > ۸۵٪) تکمیل شده است (غیرایده‌آل — احتمال ضعف پرتاب).');
     }
 
     const lastClose = candles.length > 0 ? candles[candles.length - 1].close : verts[verts.length - 1].price;
@@ -2504,7 +2508,7 @@ export class PatternEngines {
       scenario.direction === 'BULLISH' ? lastClose > upperBound : lastClose < lowerBound;
     const brokeOut = options?.breakoutConfirmed ?? inferredBrokeOut;
 
-    // Session 14.14: Trendline touches (no strict rule, helper visualization; >=2 valid, 1 weak, 0 invalid)
+    // Session 14.14 & 15.12: Trendline touches (visual aid; 3+ valid / 2 moderate / 1 weak / 0 invalid)
     const computeLineTouches = (pts: Array<{ x: number; y: number }>, lineA: { x: number; y: number }, lineB: { x: number; y: number }) => {
       const dx = lineB.x - lineA.x;
       if (Math.abs(dx) < 1e-6) return 2;
@@ -2526,6 +2530,13 @@ export class PatternEngines {
     const minTouches = Math.min(upperTrendlineTouches, lowerTrendlineTouches);
     const trendlineStrengthStatus: TriangleAnalysisReport['trendlineStrengthStatus'] =
       minTouches <= 0 ? 'INVALID' : minTouches === 1 ? 'WEAK' : 'VALID';
+    const trendlineCredibilityTier = PatternEngines.evaluateTriangleTrendlineCredibility(minTouches).credibilityTier;
+
+    const rarityEval = PatternEngines.evaluateTriangleRarity({
+      triangleType,
+      isUnlimited: scopeVariant === 'UNLIMITED',
+      waveAIsTriangle: isRareWaveATriangle
+    });
 
     // Session 14.1: Tradability evaluation
     const isMarketEndCtx =
@@ -2557,11 +2568,23 @@ export class PatternEngines {
       isEComplete: definedEnd
     });
 
+    // Session 15.8: Trade Entry Risk Evaluation (Before vs After Trendline Breakout)
+    const entryEval = PatternEngines.evaluateTriangleTradingEntry({
+      entryStyle:
+        options?.entryStyle ?? (brokeOut ? 'AFTER_BREAKOUT_PULLBACK' : 'AT_E_BEFORE_BREAKOUT'),
+      beforeBox3: idealCompletionBeforeBox3
+    });
+
+    // Session 15.14: Wave 5 Ending Triangle check
+    const wave5Eval = options?.wave5Structure
+      ? PatternEngines.evaluateWave5EndingTriangle(options.wave5Structure)
+      : endingTriangle
+      ? PatternEngines.evaluateWave5EndingTriangle('TRIANGLE')
+      : undefined;
+
     const tradingApproachFa = endingTriangle
       ? 'مثلث پایانی (موج ۵): با تکمیل E آماده سیو سود فوری و خروج باشید (جدول ۱۰.۱۱ / ۱۱.۱۰).'
-      : brokeOut
-      ? 'شکست خط روند رخ داده است — بهترین ورود در پول‌بک به خط روند شکسته‌شده (ریسک کم)'
-      : 'در حال نوسان درون مثلث — منتظر شکست خط روند بمانید (ورود در E پرریسک است)';
+      : entryEval.recommendationFa;
 
     const continuationLabelFa = contEval.continuationLabelFa;
 
@@ -2595,7 +2618,11 @@ export class PatternEngines {
       triangleTypeLabelFa,
       directionalVariant,
       scopeVariant,
+      unlimitedSourceWave,
+      rarityTier: rarityEval.rarity,
+      rarityLabelFa: rarityEval.labelFa,
       dominantWaveName,
+      dominantWaveLabelFa,
       positionValid,
       positionSlotLabelFa: `موج ${posChar} (${positionValid ? 'اصلاحی مجاز' : endingTriangle ? 'پایانی' : 'نامعتبر'})`,
       frequencyPct,
@@ -2616,19 +2643,26 @@ export class PatternEngines {
       counterTrendSlopeClass,
       counterTrendVerdict,
       idealRetracement50,
+      retracement50Status: retrace50Eval.status,
+      retraceRatiosPct,
       idealCompletionBeforeBox3,
       timingZone,
+      timingQualityStatus,
       timingSpanRatio,
       subwaveCounts,
       subwaveMismatchWarningFa,
       tradingApproachFa,
+      tradingEntryRisk: entryEval.riskLevel,
+      tradingEntryLabelFa: entryEval.labelFa,
       endingTriangle,
+      endingTriangleVerdict: wave5Eval?.verdict,
       isParallelRectangle,
       isMixedTrendlines,
       isRareWaveATriangle,
       upperTrendlineTouches,
       lowerTrendlineTouches,
       trendlineStrengthStatus,
+      trendlineCredibilityTier,
       is5WaveABCDE: isABCDE,
       is33333Subwave: subwaveStructureValid,
       trendlinesConverge: triangleType === 'CONTRACTING' ? true : trendlinesConverge,
@@ -3019,6 +3053,333 @@ export class PatternEngines {
       isValid: false,
       touches,
       reasonFa: 'خط روند با ۰ برخورد نامعتبر است و مثلث را نمایش نمی‌دهد.'
+    };
+  }
+
+  /**
+   * Session 15 (§2.5 & §2.9, T-15.13..15, T-15.25..27):
+   * Evaluates Limited (simple 5-wave A-E) vs Unlimited (Wave A or Wave B is itself a Triangle).
+   */
+  public static evaluateTriangleScope(params: {
+    waveAIsTriangle?: boolean;
+    waveBIsTriangle?: boolean;
+  }): {
+    scope: 'LIMITED' | 'UNLIMITED';
+    unlimitedSourceWave: 'WAVE_A' | 'WAVE_B' | 'NONE';
+    rarityNote: 'STANDARD' | 'RARE' | 'RARER';
+    labelFa: string;
+  } {
+    if (params.waveBIsTriangle) {
+      return {
+        scope: 'UNLIMITED',
+        unlimitedSourceWave: 'WAVE_B',
+        rarityNote: 'RARER',
+        labelFa: 'مثلث نامحدود (موج B به‌صورت مثلث — نادرتر)'
+      };
+    }
+    if (params.waveAIsTriangle) {
+      return {
+        scope: 'UNLIMITED',
+        unlimitedSourceWave: 'WAVE_A',
+        rarityNote: 'RARE',
+        labelFa: 'مثلث نامحدود (موج A به‌صورت مثلث — نادر)'
+      };
+    }
+    return {
+      scope: 'LIMITED',
+      unlimitedSourceWave: 'NONE',
+      rarityNote: 'STANDARD',
+      labelFa: 'مثلث محدود (۵ موج استاندارد A-B-C-D-E)'
+    };
+  }
+
+  /**
+   * Session 15 (§2.6, T-15.16..18):
+   * 50% Retracement Feature (not a strict law):
+   * - All waves >= threshold -> IDEAL
+   * - Mixed -> NON_IDEAL
+   * - All < threshold -> WEAK
+   */
+  public static evaluateTriangle50Retracement(
+    ratiosPct: number[],
+    minThresholdPct: number = 50
+  ): {
+    status: 'IDEAL' | 'NON_IDEAL' | 'WEAK';
+    isIdeal: boolean;
+    reasonFa: string;
+  } {
+    if (!ratiosPct.length) {
+      return {
+        status: 'NON_IDEAL',
+        isIdeal: false,
+        reasonFa: 'نسبت بازگشت امواج مثلث در دسترس نیست.'
+      };
+    }
+    const allAbove = ratiosPct.every(r => r >= minThresholdPct - 1e-4);
+    const allBelow = ratiosPct.every(r => r < 50 - 1e-4);
+    if (allAbove) {
+      return {
+        status: 'IDEAL',
+        isIdeal: true,
+        reasonFa: 'تمام امواج مثلث حداقل ۵۰٪ موج قبلی را بازگشت داده‌اند (مثلث ایده‌آل).'
+      };
+    }
+    if (allBelow) {
+      return {
+        status: 'WEAK',
+        isIdeal: false,
+        reasonFa: 'تمام امواج کمتر از ۵۰٪ بازگشت داشته‌اند (مثلث ضعیف).'
+      };
+    }
+    return {
+      status: 'NON_IDEAL',
+      isIdeal: false,
+      reasonFa: 'برخی امواج کمتر از ۵۰٪ بازگشت داشته‌اند (مثلث غیرایده‌آل اما معتبر).'
+    };
+  }
+
+  /**
+   * Session 15 (§2.7, T-15.19..21):
+   * Ideal Triangle Completion Relative to 3rd Time Box:
+   * - < 0.667 -> BEFORE_BOX_3 (IDEAL — strong post-E thrust)
+   * - 0.667..0.85 -> INSIDE_BOX_3 (STANDARD)
+   * - > 0.85 -> AFTER_BOX_3 (NON_IDEAL — weaker thrust)
+   */
+  public static evaluateTriangleBoxTiming(spanRatio: number): {
+    timingZone: 'BEFORE_BOX_3' | 'INSIDE_BOX_3' | 'AFTER_BOX_3';
+    qualityStatus: 'IDEAL' | 'STANDARD' | 'NON_IDEAL';
+    strongThrustExpected: boolean;
+    labelFa: string;
+  } {
+    if (spanRatio < 0.667) {
+      return {
+        timingZone: 'BEFORE_BOX_3',
+        qualityStatus: 'IDEAL',
+        strongThrustExpected: true,
+        labelFa: 'تکمیل پیش از باکس سوم (< ۶۶.۷٪): مثلث ایده‌آل با انتظار جهش قوی'
+      };
+    }
+    if (spanRatio <= 0.85) {
+      return {
+        timingZone: 'INSIDE_BOX_3',
+        qualityStatus: 'STANDARD',
+        strongThrustExpected: false,
+        labelFa: 'تکمیل درون باکس سوم (۶۶.۷٪ تا ۸۵٪): مثلث استاندارد'
+      };
+    }
+    return {
+      timingZone: 'AFTER_BOX_3',
+      qualityStatus: 'NON_IDEAL',
+      strongThrustExpected: false,
+      labelFa: 'تکمیل پس از باکس سوم (> ۸۵٪): مثلث غیرایده‌آل / ضعیف'
+    };
+  }
+
+  /**
+   * Session 15 (§2.8, T-15.22..24):
+   * Triangle Trade Entry Approach:
+   * - AT_E_BEFORE_BREAKOUT -> HIGH risk
+   * - AFTER_BREAKOUT_PULLBACK -> LOW risk (best approach)
+   * - AFTER_BREAKOUT_NO_PULLBACK -> MEDIUM risk
+   */
+  public static evaluateTriangleTradingEntry(params: {
+    entryStyle: 'AT_E_BEFORE_BREAKOUT' | 'AFTER_BREAKOUT_PULLBACK' | 'AFTER_BREAKOUT_NO_PULLBACK';
+    beforeBox3?: boolean;
+  }): {
+    riskLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+    isBestApproach: boolean;
+    labelFa: string;
+    recommendationFa: string;
+  } {
+    if (params.entryStyle === 'AFTER_BREAKOUT_PULLBACK') {
+      return {
+        riskLevel: 'LOW',
+        isBestApproach: true,
+        labelFa: 'ورود پس از شکست خط روند + پولبک (کم‌ترین ریسک — بهترین ستاپ)',
+        recommendationFa:
+          params.beforeBox3 === false
+            ? 'شکست خط روند + پولبک با ریسک کم تایید شد؛ به زمان تکمیل در باکس سوم دقت کنید.'
+            : 'شکست خط روند + پولبک پیش از باکس سوم رخ داده است — بهترین ورود با ریسک کم.'
+      };
+    }
+    if (params.entryStyle === 'AFTER_BREAKOUT_NO_PULLBACK') {
+      return {
+        riskLevel: 'MEDIUM',
+        isBestApproach: false,
+        labelFa: 'ورود پس از شکست خط روند بدون پولبک (ریسک متوسط)',
+        recommendationFa: 'خط روند شکسته شده اما بدون پولبک است؛ ورود با ریسک متوسط و مدیریت حجم انجام شود.'
+      };
+    }
+    return {
+      riskLevel: 'HIGH',
+      isBestApproach: false,
+      labelFa: 'ورود در انتهای موج E پیش از شکست خط روند (ریسک بالا)',
+      recommendationFa: 'ورود پیش از شکست خط روند (در انتهای E) ریسک بالایی دارد؛ بهترین رویکرد صبر برای شکست + پولبک است.'
+    };
+  }
+
+  /**
+   * Session 15 (§2.10, T-15.28..30):
+   * Rarity Evaluator:
+   * - Contracting -> COMMON
+   * - Expanding -> RARE
+   * - Expanding + Wave A is Triangle -> VERY_RARE
+   */
+  public static evaluateTriangleRarity(params: {
+    triangleType: 'CONTRACTING' | 'EXPANDING' | 'INVALID';
+    isUnlimited?: boolean;
+    waveAIsTriangle?: boolean;
+  }): {
+    rarity: 'COMMON' | 'RARE' | 'VERY_RARE';
+    labelFa: string;
+  } {
+    if (params.triangleType === 'EXPANDING' && (params.waveAIsTriangle || params.isUnlimited)) {
+      return {
+        rarity: 'VERY_RARE',
+        labelFa: 'بسیار نادر (مثلث واگرای نامحدود با موج A مثلثی)'
+      };
+    }
+    if (params.triangleType === 'EXPANDING') {
+      return {
+        rarity: 'RARE',
+        labelFa: 'نادر (مثلث واگرا / گستشی کمتر در نمودار دیده می‌شود)'
+      };
+    }
+    return {
+      rarity: 'COMMON',
+      labelFa: 'رایج (مثلث همگرا / مانع استاندارد)'
+    };
+  }
+
+  /**
+   * Session 15 (§2.11, T-15.31..34):
+   * Triangle Naming Based on Largest Wave:
+   * - Wave A largest -> COUNTER
+   * - Wave B largest -> IRREGULAR
+   * - Wave C largest -> LIMITED
+   * - Wave D largest -> UNLIMITED
+   */
+  public static classifyTriangleByLargestWave(legs: {
+    legA: number;
+    legB: number;
+    legC: number;
+    legD: number;
+  }): {
+    classification: 'COUNTER' | 'IRREGULAR' | 'LIMITED' | 'UNLIMITED';
+    largestWave: 'A' | 'B' | 'C' | 'D';
+    labelFa: string;
+  } {
+    const maxLeg = Math.max(legs.legA, legs.legB, legs.legC, legs.legD);
+    if (maxLeg === legs.legA) {
+      return {
+        classification: 'COUNTER',
+        largestWave: 'A',
+        labelFa: 'کانتر (Counter — موج A بزرگ‌ترین ضلع)'
+      };
+    }
+    if (maxLeg === legs.legB) {
+      return {
+        classification: 'IRREGULAR',
+        largestWave: 'B',
+        labelFa: 'نامنظم (Irregular — موج B بزرگ‌ترین ضلع)'
+      };
+    }
+    if (maxLeg === legs.legC) {
+      return {
+        classification: 'LIMITED',
+        largestWave: 'C',
+        labelFa: 'محدود (Limited — موج C بزرگ‌ترین ضلع)'
+      };
+    }
+    return {
+      classification: 'UNLIMITED',
+      largestWave: 'D',
+      labelFa: 'نامحدود (Unlimited — موج D بزرگ‌ترین ضلع)'
+    };
+  }
+
+  /**
+   * Session 15 (§2.12, T-15.35..37):
+   * Visual Trendline Credibility Scale (non-strict helper):
+   * - 3+ touches -> VALID (معتبر)
+   * - 2 touches -> MODERATE (متوسط)
+   * - 1 touch -> WEAK (ضعیف)
+   * - 0 touches -> INVALID (نامعتبر)
+   */
+  public static evaluateTriangleTrendlineCredibility(touches: number): {
+    credibilityTier: 'VALID' | 'MODERATE' | 'WEAK' | 'INVALID';
+    isValid: boolean;
+    touches: number;
+    reasonFa: string;
+  } {
+    if (touches >= 3) {
+      return {
+        credibilityTier: 'VALID',
+        isValid: true,
+        touches,
+        reasonFa: `خط روند مثلث با ${touches} برخورد معتبر است (تأیید بصری قوی).`
+      };
+    }
+    if (touches === 2) {
+      return {
+        credibilityTier: 'MODERATE',
+        isValid: true,
+        touches,
+        reasonFa: 'خط روند مثلث با ۲ برخورد اعتبار متوسط دارد (خط روند با برخورد بیشتر معتبرتر است).'
+      };
+    }
+    if (touches === 1) {
+      return {
+        credibilityTier: 'WEAK',
+        isValid: false,
+        touches,
+        reasonFa: 'خط روند مثلث تنها ۱ برخورد دارد و ضعیف است.'
+      };
+    }
+    return {
+      credibilityTier: 'INVALID',
+      isValid: false,
+      touches,
+      reasonFa: 'خط روند با ۰ برخورد نامعتبر است.'
+    };
+  }
+
+  /**
+   * Session 15 (§2.14, T-15.41..43):
+   * Ending Triangle in Wave 5:
+   * - TRIANGLE -> ENDING_TRIANGLE (rare, similar to Ending Diagonal, sharp reversal warning)
+   * - DIAGONAL -> ENDING_DIAGONAL
+   * - IDEAL -> STANDARD_WAVE_5
+   */
+  public static evaluateWave5EndingTriangle(
+    wave5Structure: 'TRIANGLE' | 'DIAGONAL' | 'IDEAL'
+  ): {
+    verdict: 'ENDING_TRIANGLE' | 'ENDING_DIAGONAL' | 'STANDARD_WAVE_5';
+    isRare: boolean;
+    sharpReversalExpected: boolean;
+    labelFa: string;
+  } {
+    if (wave5Structure === 'TRIANGLE') {
+      return {
+        verdict: 'ENDING_TRIANGLE',
+        isRare: true,
+        sharpReversalExpected: true,
+        labelFa: 'مثلث پایانی (Ending Triangle — نادر؛ هشدار ریزش پرقدرت پس از پایان E مشابه قطر پایانی)'
+      };
+    }
+    if (wave5Structure === 'DIAGONAL') {
+      return {
+        verdict: 'ENDING_DIAGONAL',
+        isRare: false,
+        sharpReversalExpected: true,
+        labelFa: 'قطر پایانی (Ending Diagonal — الگوی استاندارد پایان روند در موج ۵)'
+      };
+    }
+    return {
+      verdict: 'STANDARD_WAVE_5',
+      isRare: false,
+      sharpReversalExpected: false,
+      labelFa: 'موج ۵ شتابدار استاندارد (سیکل ایده‌آل)'
     };
   }
 

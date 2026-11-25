@@ -42,6 +42,9 @@ type SimSubwaveMode = 'AUTO' | '3-3-3-3-3' | '5-5-5-5-5' | '3-5-3-5-3';
 type SimBreakoutMode = 'AUTO' | 'WITH_TREND' | 'NONE' | 'COUNTER_TREND';
 type SimMarketState = 'AUTO' | 'INDECISIVE' | 'CONFIDENT_TREND';
 type SimTouchesMode = 'AUTO' | 0 | 1 | 2 | 3;
+type SimScopeMode = 'AUTO' | 'LIMITED' | 'WAVE_A' | 'WAVE_B';
+type SimBoxTimingMode = 'AUTO' | 'BEFORE_BOX_3' | 'INSIDE_BOX_3' | 'AFTER_BOX_3';
+type SimEntryStyleMode = 'AUTO' | 'AT_E_BEFORE_BREAKOUT' | 'AFTER_BREAKOUT_PULLBACK' | 'AFTER_BREAKOUT_NO_PULLBACK';
 
 export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> = ({
   scenario,
@@ -56,6 +59,9 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
   const [breakoutMode, setBreakoutMode] = useState<SimBreakoutMode>('AUTO');
   const [marketState, setMarketState] = useState<SimMarketState>('AUTO');
   const [touchesMode, setTouchesMode] = useState<SimTouchesMode>('AUTO');
+  const [scopeMode, setScopeMode] = useState<SimScopeMode>('AUTO');
+  const [boxTimingMode, setBoxTimingMode] = useState<SimBoxTimingMode>('AUTO');
+  const [entryStyleMode, setEntryStyleMode] = useState<SimEntryStyleMode>('AUTO');
 
   const effectiveRole: WaveRole = useMemo(() => {
     if (slotMode === 'AUTO') return parentRole;
@@ -94,8 +100,29 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
       opts.trendlineLowerTouches = touchesMode;
       hasAny = true;
     }
+    if (scopeMode === 'WAVE_A') {
+      opts.waveAIsTriangle = true;
+      hasAny = true;
+    } else if (scopeMode === 'WAVE_B') {
+      opts.waveBIsTriangle = true;
+      hasAny = true;
+    }
+    if (boxTimingMode === 'BEFORE_BOX_3') {
+      opts.timingSpanRatio = 0.55;
+      hasAny = true;
+    } else if (boxTimingMode === 'INSIDE_BOX_3') {
+      opts.timingSpanRatio = 0.76;
+      hasAny = true;
+    } else if (boxTimingMode === 'AFTER_BOX_3') {
+      opts.timingSpanRatio = 0.92;
+      hasAny = true;
+    }
+    if (entryStyleMode !== 'AUTO') {
+      opts.entryStyle = entryStyleMode;
+      hasAny = true;
+    }
     return hasAny ? opts : undefined;
-  }, [subwaveMode, breakoutMode, marketState, touchesMode]);
+  }, [subwaveMode, breakoutMode, marketState, touchesMode, scopeMode, boxTimingMode, entryStyleMode]);
 
   const validationResult = useMemo(
     () =>
@@ -148,7 +175,10 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
     subwaveMode !== 'AUTO' ||
     breakoutMode !== 'AUTO' ||
     marketState !== 'AUTO' ||
-    touchesMode !== 'AUTO';
+    touchesMode !== 'AUTO' ||
+    scopeMode !== 'AUTO' ||
+    boxTimingMode !== 'AUTO' ||
+    entryStyleMode !== 'AUTO';
 
   // Normalized 0 -> A -> B -> C -> D -> E -> Breakout SVG geometry
   const svgGeom = useMemo(() => {
@@ -286,7 +316,7 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
           <Triangle className="w-4 h-4 text-emerald-400 shrink-0" />
           <div className="min-w-0">
             <h4 className="text-xs font-bold text-white truncate">
-              بازرس الگوی مثلث (جلسه ۱۴ — A-B-C-D-E)
+              بازرس الگوی مثلث (جلسه ۱۴ و ۱۵ — A-B-C-D-E)
             </h4>
             <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
               {report.subwaveSignature || '3-3-3-3-3'} · {report.positionSlotLabelFa} · فراوانی {report.frequencyPct}
@@ -429,16 +459,20 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
             <div className="text-slate-400 text-[9.5px]">برخورد خط روند</div>
             <div
               className={`font-mono font-bold tabular-nums mt-0.5 ${
-                report.trendlineStrengthStatus === 'VALID'
+                report.trendlineCredibilityTier === 'VALID' || report.trendlineStrengthStatus === 'VALID'
                   ? 'text-emerald-300'
+                  : report.trendlineCredibilityTier === 'MODERATE'
+                  ? 'text-cyan-300'
                   : report.trendlineStrengthStatus === 'WEAK'
                   ? 'text-amber-300'
                   : 'text-rose-400'
               }`}
             >
               {report.upperTrendlineTouches ?? 2}/{report.lowerTrendlineTouches ?? 2} برخورد (
-              {report.trendlineStrengthStatus === 'VALID'
+              {report.trendlineCredibilityTier === 'VALID'
                 ? 'معتبر'
+                : report.trendlineCredibilityTier === 'MODERATE'
+                ? 'متوسط'
                 : report.trendlineStrengthStatus === 'WEAK'
                 ? 'ضعیف'
                 : 'نامعتبر'}
@@ -458,14 +492,84 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
             </div>
           </div>
         </div>
+
+        {/* Session 15 Advanced Dimensions Row: Directional/Scope, 50% Retrace + Timing Box, Entry Risk */}
+        <div
+          data-testid="triangle-inspector-session15-metrics"
+          className="grid grid-cols-3 gap-2 pt-1.5 border-t border-slate-800/70"
+        >
+          <div>
+            <div className="text-slate-400 text-[9.5px]">جهت / محدود یا نامحدود</div>
+            <div className="font-semibold text-slate-200 mt-0.5 truncate">
+              {report.directionalVariant === 'ASCENDING'
+                ? 'صعودی'
+                : report.directionalVariant === 'DESCENDING'
+                ? 'نزولی'
+                : 'متقارن'}{' '}
+              · {report.scopeVariant === 'UNLIMITED' ? 'نامحدود' : 'محدود'}
+            </div>
+          </div>
+          <div>
+            <div className="text-slate-400 text-[9.5px]">قاعده ۵۰٪ و باکس زمانی</div>
+            <div
+              className={`font-semibold mt-0.5 truncate ${
+                report.retracement50Status === 'IDEAL' && report.timingQualityStatus === 'IDEAL'
+                  ? 'text-emerald-300'
+                  : report.retracement50Status === 'WEAK' || report.timingQualityStatus === 'NON_IDEAL'
+                  ? 'text-amber-300'
+                  : 'text-cyan-300'
+              }`}
+            >
+              {report.retracement50Status === 'IDEAL'
+                ? '۵۰٪ ایده‌آل'
+                : report.retracement50Status === 'WEAK'
+                ? '۵۰٪ ضعیف'
+                : '۵۰٪ غیرایده‌آل'}{' '}
+              ·{' '}
+              {report.timingZone === 'BEFORE_BOX_3'
+                ? '< باکس۳'
+                : report.timingZone === 'INSIDE_BOX_3'
+                ? 'در باکس۳'
+                : '> باکس۳'}
+            </div>
+          </div>
+          <div>
+            <div className="text-slate-400 text-[9.5px]">نام غالب / ریسک ورود</div>
+            <div className="font-semibold text-slate-200 mt-0.5 truncate">
+              {report.dominantWaveName === 'COUNTER'
+                ? 'کانتر'
+                : report.dominantWaveName === 'IRREGULAR'
+                ? 'نامنظم'
+                : report.dominantWaveName === 'LIMITED'
+                ? 'محدود'
+                : 'نامحدود'}{' '}
+              ·{' '}
+              <span
+                className={
+                  report.tradingEntryRisk === 'LOW'
+                    ? 'text-emerald-300'
+                    : report.tradingEntryRisk === 'HIGH'
+                    ? 'text-rose-300'
+                    : 'text-amber-300'
+                }
+              >
+                {report.tradingEntryRisk === 'LOW'
+                  ? 'کم‌ریسک'
+                  : report.tradingEntryRisk === 'HIGH'
+                  ? 'پرریسک'
+                  : 'متوسط'}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Interactive Session 14 Simulator Controls */}
+      {/* Interactive Session 14 & 15 Simulator Controls */}
       <div className="px-3.5 py-2.5 space-y-2 text-[10.5px]">
         <div className="flex items-center justify-between gap-2">
           <span className="text-slate-300 font-semibold flex items-center gap-1.5">
             <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span>شبیه‌ساز قوانین جلسه ۱۴:</span>
+            <span>شبیه‌ساز قوانین جلسه ۱۴ و ۱۵:</span>
           </span>
           {isSimulationActive && (
             <button
@@ -476,6 +580,9 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
                 setBreakoutMode('AUTO');
                 setMarketState('AUTO');
                 setTouchesMode('AUTO');
+                setScopeMode('AUTO');
+                setBoxTimingMode('AUTO');
+                setEntryStyleMode('AUTO');
               }}
               className="inline-flex items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200 whitespace-nowrap"
             >
@@ -608,7 +715,8 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
             {(
               [
                 { id: 'AUTO', label: 'برخورد: خودکار' },
-                { id: 2, label: '۲+' },
+                { id: 3, label: '۳+' },
+                { id: 2, label: '۲' },
                 { id: 1, label: '۱' },
                 { id: 0, label: '۰' }
               ] as const
@@ -620,6 +728,88 @@ export const TrianglePatternInspector: React.FC<TrianglePatternInspectorProps> =
                 className={`px-1.5 py-0.5 rounded text-[9.5px] font-mono transition-colors whitespace-nowrap ${
                   touchesMode === opt.id
                     ? 'bg-indigo-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Session 15 Scope, Box 3 Timing, & Entry Approach Row */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+            {(
+              [
+                { id: 'AUTO', label: 'دامنه: خودکار' },
+                { id: 'LIMITED', label: 'محدود' },
+                { id: 'WAVE_A', label: 'A مثلث' },
+                { id: 'WAVE_B', label: 'B مثلث' }
+              ] as const
+            ).map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setScopeMode(opt.id)}
+                className={`px-1.5 py-0.5 rounded text-[9.5px] transition-colors whitespace-nowrap ${
+                  scopeMode === opt.id
+                    ? 'bg-amber-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+            {(
+              [
+                { id: 'AUTO', label: 'باکس۳: خودکار' },
+                { id: 'BEFORE_BOX_3', label: 'پیش از ۳' },
+                { id: 'INSIDE_BOX_3', label: 'درون ۳' },
+                { id: 'AFTER_BOX_3', label: 'پس از ۳' }
+              ] as const
+            ).map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setBoxTimingMode(opt.id)}
+                className={`px-1.5 py-0.5 rounded text-[9.5px] transition-colors whitespace-nowrap ${
+                  boxTimingMode === opt.id
+                    ? 'bg-emerald-600 text-white font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-slate-400 text-[10px]">استراتژی ورود:</span>
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+            {(
+              [
+                { id: 'AUTO', label: 'خودکار' },
+                { id: 'AT_E_BEFORE_BREAKOUT', label: 'در E (پرریسک)' },
+                { id: 'AFTER_BREAKOUT_PULLBACK', label: 'شکست+پولبک' },
+                { id: 'AFTER_BREAKOUT_NO_PULLBACK', label: 'بدون پولبک' }
+              ] as const
+            ).map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setEntryStyleMode(opt.id)}
+                className={`px-1.5 py-0.5 rounded text-[9.5px] transition-colors whitespace-nowrap ${
+                  entryStyleMode === opt.id
+                    ? opt.id === 'AFTER_BREAKOUT_PULLBACK'
+                      ? 'bg-emerald-600 text-white font-bold'
+                      : opt.id === 'AT_E_BEFORE_BREAKOUT'
+                      ? 'bg-rose-600 text-white font-bold'
+                      : 'bg-indigo-600 text-white font-bold'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >

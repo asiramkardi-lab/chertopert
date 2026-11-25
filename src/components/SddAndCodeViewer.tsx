@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -316,6 +316,81 @@ def validate_triangle(req: TriangleValidateRequest) -> Dict[str, Any]:
       <div>نوع: {{ report.triangleType }}</div>
       <div>زیرموج‌ها: {{ report.subwaveSignature }}</div>
       <div>فراوانی موج: {{ report.frequencyPct }}</div>
+    </div>
+  </UCard>
+</template>
+\`\`\`
+`;
+
+  const session15Markdown = `# استخراج و تشریح کامل جلسه ۱۵ + سند SDD (014-triangle-advanced-engine)
+
+## ۱. جدول ۱۴ مفهوم استخراج‌شده جلسه ۱۵ (۱۵-۱ تا ۱۵-۱۴)
+- [۱۵-۱] تفاوت مثلث در روند اصلی vs اصلاحی: مثلث همیشه در اصلاحی (۲، ۴، B) است؛ هم‌جهت با روند اصلی (۱، ۳، ۵، A، C) خطا است و قطر (Diagonal) محسوب می‌شود.
+- [۱۵-۲] فراوانی جایگاه مثلث: موج ۴ (۵۰٪ رایج‌ترین) > موج B (۳۰٪ رایج) > موج ۲ (۲۰٪ کمتر رایج).
+- [۱۵-۳] مثلث همگرا (Contracting — رایج) در برابر واگرا (Expanding — نادر) و رد خطوط موازی (مستطیل).
+- [۱۵-۴] مثلث جهت‌دار صعودی (Ascending: خط بالا افقی + پایین صعودی) و نزولی (Descending: خط پایین افقی + بالا نزولی) و متقارن (Symmetric).
+- [۱۵-۵ & ۱۵-۹] مثلث محدود (Limited: ۵ موج A-E ساده) در برابر مثلث نامحدود (Unlimited: موج A یا موج B خودش یک مثلث است — نادر/نادرتر).
+- [۱۵-۶] ویژگی بازگشت ۵۰٪ هر موج: همه امواج ≥ ۵۰٪ = IDEAL؛ برخی < ۵۰٪ = NON_IDEAL؛ همه < ۵۰٪ = WEAK.
+- [۱۵-۷] مثلث ایده‌آل و باکس سوم زمانی: پایان پیش از باکس سوم (< ۶۶.۷٪ = IDEAL با جهش قوی)؛ درون باکس سوم (۶۶.۷–۸۵٪ = STANDARD)؛ پس از باکس سوم (> ۸۵٪ = NON_IDEAL).
+- [۱۵-۸] معامله در مثلث: ورود در E پیش از شکست = ریسک بالا؛ پس از شکست بدون پولبک = ریسک متوسط؛ پس از شکست + پولبک (بهتر پیش از باکس سوم) = ریسک کم (بهترین ستاپ).
+- [۱۵-۱۰] نایابی مثلث واگرا: همگرا (COMMON)؛ واگرا (RARE)؛ واگرای نامحدود با موج A مثلث (VERY_RARE).
+- [۱۵-۱۱] نام‌گذاری بر اساس بزرگ‌ترین موج: موج A بزرگ‌ترین = Counter؛ موج B = Irregular؛ موج C = Limited؛ موج D = Unlimited.
+- [۱۵-۱۲] خطوط روند مثلث بدون قانون ریاضی سخت (تأیید بصری): ۳+ برخورد = VALID؛ ۲ برخورد = MODERATE؛ ۱ برخورد = WEAK؛ ۰ برخورد = INVALID.
+- [۱۵-۱۳] مثال عملی ذوب‌آهن اصفهان (TSE_ZOB): موج ۴ مثلث همگرا/گستشی (۳-۳-۳-۳-۳) منتهی به موج ۵؛ در موج ۵ خطا و قطر پایانی است.
+- [۱۵-۱۴] مثلث پایانی (Ending Triangle) در موج ۵: موج ۵ = مثلث ← ریزش پرقدرت مشابه قطر پایانی (Ending Diagonal).
+
+## ۲. پوشش کامل تست‌های مرزی (T-15.1 تا T-15.43)
+- PatternEngines.analyzeTriangle & RulesEngine.TrianglePatternValidator (T-15.1..T-15.12)
+- PatternEngines.evaluateTriangleScope (T-15.13..T-15.15, T-15.25..T-15.27)
+- PatternEngines.evaluateTriangle50Retracement (T-15.16..T-15.18)
+- PatternEngines.evaluateTriangleBoxTiming (T-15.19..T-15.21)
+- PatternEngines.evaluateTriangleTradingEntry (T-15.22..T-15.24)
+- PatternEngines.evaluateTriangleRarity (T-15.28..T-15.30)
+- PatternEngines.classifyTriangleByLargestWave (T-15.31..T-15.34)
+- PatternEngines.evaluateTriangleTrendlineCredibility (T-15.35..T-15.37)
+- PatternEngines.evaluateZobPracticalTriangle (T-15.38..T-15.40)
+- PatternEngines.evaluateWave5EndingTriangle (T-15.41..T-15.43)
+
+## ۳. مرجع پیاده‌سازی Backend (FastAPI / Pydantic v2)
+\`\`\`python
+class AdvancedTriangleRequest(BaseModel):
+    triangle_type: Literal["CONTRACTING", "EXPANDING"]
+    directional: Literal["ASCENDING", "DESCENDING", "SYMMETRIC"] = "SYMMETRIC"
+    wave_a_is_triangle: bool = False
+    wave_b_is_triangle: bool = False
+    retrace_ratios_pct: List[float]
+    box_span_ratio: float
+    entry_style: Literal["AT_E_BEFORE_BREAKOUT", "AFTER_BREAKOUT_PULLBACK", "AFTER_BREAKOUT_NO_PULLBACK"]
+    leg_lengths: Dict[Literal["A", "B", "C", "D"], float]
+    touches: int = 3
+
+def evaluate_advanced_triangle(req: AdvancedTriangleRequest) -> Dict[str, Any]:
+    scope = "UNLIMITED" if (req.wave_a_is_triangle or req.wave_b_is_triangle) else "LIMITED"
+    rarity = "VERY_RARE" if (req.triangle_type == "EXPANDING" and scope == "UNLIMITED") else ("RARE" if req.triangle_type == "EXPANDING" else "COMMON")
+    retrace_status = "IDEAL" if all(r >= 50 for r in req.retrace_ratios_pct) else ("WEAK" if all(r < 50 for r in req.retrace_ratios_pct) else "NON_IDEAL")
+    box_quality = "IDEAL" if req.box_span_ratio < 0.667 else ("STANDARD" if req.box_span_ratio <= 0.85 else "NON_IDEAL")
+    entry_risk = "LOW" if req.entry_style == "AFTER_BREAKOUT_PULLBACK" else ("MEDIUM" if req.entry_style == "AFTER_BREAKOUT_NO_PULLBACK" else "HIGH")
+    largest = max(req.leg_lengths, key=req.leg_lengths.get)
+    naming = {"A": "COUNTER", "B": "IRREGULAR", "C": "LIMITED", "D": "UNLIMITED"}[largest]
+    return {"scope": scope, "rarity": rarity, "retrace_status": retrace_status, "box_quality": box_quality, "entry_risk": entry_risk, "dominant_name": naming}
+\`\`\`
+
+## ۴. مرجع پیاده‌سازی Frontend (Nuxt 4 + TypeScript)
+\`\`\`vue
+<template>
+  <UCard class="bg-default border border-muted" dir="rtl">
+    <template #header>
+      <div class="flex items-center justify-between">
+        <span class="font-bold">مثلث پیشرفته (جلسه ۱۵)</span>
+        <UBadge :color="report.tradingEntryRisk === 'LOW' ? 'success' : 'warning'">
+          {{ report.scopeVariant }} · {{ report.directionalVariant }}
+        </UBadge>
+      </div>
+    </template>
+    <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+      <div>نام غالب: {{ report.dominantWaveName }}</div>
+      <div>قانون ۵۰٪: {{ report.retracement50Status }}</div>
+      <div>باکس ۳: {{ report.timingZone }}</div>
     </div>
   </UCard>
 </template>
@@ -1007,6 +1082,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION15')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION15'
+                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۵ (014 — مثلث پیشرفته)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -1072,6 +1159,8 @@ const runAnalysis = async () => {
               ? session13Markdown
               : activeTab === 'SESSION14'
               ? session14Markdown
+              : activeTab === 'SESSION15'
+              ? session15Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -1098,6 +1187,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSION12' ||
           activeTab === 'SESSION13' ||
           activeTab === 'SESSION14' ||
+          activeTab === 'SESSION15' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -1111,6 +1201,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSION12' && session12Markdown}
         {activeTab === 'SESSION13' && session13Markdown}
         {activeTab === 'SESSION14' && session14Markdown}
+        {activeTab === 'SESSION15' && session15Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

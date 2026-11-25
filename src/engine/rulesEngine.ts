@@ -805,7 +805,11 @@ export class RulesEngine {
       (options?.parentRole === 'MOTIVE' && !isCorrectiveExplicitSlot);
 
     if (isWave135Slot) return true;
-    if (scenario.rulesResults?.some(r => r.ruleId === 'TRIANGLE_CORRECTIVE_ONLY' && !r.passed)) {
+    if (
+      scenario.rulesResults?.some(
+        r => (r.ruleId === 'TRIANGLE_POSITION' || r.ruleId === 'TRIANGLE_CORRECTIVE_ONLY') && !r.passed
+      )
+    ) {
       return true;
     }
 

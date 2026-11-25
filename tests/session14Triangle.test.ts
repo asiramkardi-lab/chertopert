@@ -698,6 +698,25 @@ describe('Session 14 Triangle Pattern Engine & SDD 013 (T-14.1..T-14.43)', () =>
         internalSubwaves: [3, 3, 3, 3, 3]
       })
     ).toBe(false);
+    expect(
+      isInvalidTriangle(
+        {
+          ...validContracting,
+          rulesResults: [
+            {
+              ruleId: 'TRIANGLE_POSITION',
+              name: 'Triangle Allowed Only in Corrective Waves (2, 4, B)',
+              nameFa: 'موقعیت مجاز مثلث',
+              type: 'HARD',
+              passed: false,
+              score: 0,
+              messageFa: 'مثلث در موج ۳ مجاز نیست'
+            }
+          ]
+        },
+        candles
+      )
+    ).toBe(true);
 
     // Non-triangle patterns -> always false
     const nonTriangle = makeTriangleScenario([100, 150, 125, 220, 185, 260], {

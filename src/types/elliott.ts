@@ -431,6 +431,16 @@ export interface TriangleAnalysisOptions {
   trendlineUpperTouches?: number;
   /** Override lower trendline touch count for evaluation */
   trendlineLowerTouches?: number;
+  /** Session 15 (15-5 & 15-9): Wave A itself forms a sub-triangle -> UNLIMITED */
+  waveAIsTriangle?: boolean;
+  /** Session 15 (15-5 & 15-9): Wave B itself forms a sub-triangle -> UNLIMITED (rarer) */
+  waveBIsTriangle?: boolean;
+  /** Session 15 (15-7): Override normalized completion span ratio relative to 3 boxes */
+  timingSpanRatio?: number;
+  /** Session 15 (15-8): Selected trade entry timing relative to trendline breakout */
+  entryStyle?: 'AT_E_BEFORE_BREAKOUT' | 'AFTER_BREAKOUT_PULLBACK' | 'AFTER_BREAKOUT_NO_PULLBACK';
+  /** Session 15 (15-14): Wave 5 structural form to distinguish Ending Triangle vs Ending Diagonal vs Ideal */
+  wave5Structure?: 'TRIANGLE' | 'DIAGONAL' | 'IDEAL';
 }
 
 export interface TriangleAnalysisReport {
@@ -439,7 +449,11 @@ export interface TriangleAnalysisReport {
   triangleTypeLabelFa: string;
   directionalVariant?: 'ASCENDING' | 'DESCENDING' | 'SYMMETRIC';
   scopeVariant?: 'LIMITED' | 'UNLIMITED';
+  unlimitedSourceWave?: 'WAVE_A' | 'WAVE_B' | 'NONE';
+  rarityTier?: 'COMMON' | 'RARE' | 'VERY_RARE';
+  rarityLabelFa?: string;
   dominantWaveName?: 'COUNTER' | 'IRREGULAR' | 'LIMITED' | 'UNLIMITED';
+  dominantWaveLabelFa?: string;
   positionValid: boolean;
   positionSlotLabelFa: string;
   frequencyPct: string;
@@ -460,19 +474,26 @@ export interface TriangleAnalysisReport {
   counterTrendSlopeClass?: 'DESCENDING' | 'ASCENDING' | 'SYMMETRIC';
   counterTrendVerdict?: 'VALID' | 'RARE_ENDING_TRIANGLE' | 'INVALID_POSITION';
   idealRetracement50: boolean;
+  retracement50Status?: 'IDEAL' | 'NON_IDEAL' | 'WEAK';
+  retraceRatiosPct?: number[];
   idealCompletionBeforeBox3: boolean;
   timingZone?: 'BEFORE_BOX_3' | 'INSIDE_BOX_3' | 'AFTER_BOX_3';
+  timingQualityStatus?: 'IDEAL' | 'STANDARD' | 'NON_IDEAL';
   timingSpanRatio?: number;
   subwaveCounts?: number[];
   subwaveMismatchWarningFa?: string;
   tradingApproachFa: string;
+  tradingEntryRisk?: 'HIGH' | 'MEDIUM' | 'LOW';
+  tradingEntryLabelFa?: string;
   endingTriangle: boolean;
+  endingTriangleVerdict?: 'ENDING_TRIANGLE' | 'ENDING_DIAGONAL' | 'STANDARD_WAVE_5';
   isParallelRectangle?: boolean;
   isMixedTrendlines?: boolean;
   isRareWaveATriangle?: boolean;
   upperTrendlineTouches?: number;
   lowerTrendlineTouches?: number;
   trendlineStrengthStatus?: 'VALID' | 'WEAK' | 'INVALID';
+  trendlineCredibilityTier?: 'VALID' | 'MODERATE' | 'WEAK' | 'INVALID';
   is5WaveABCDE?: boolean;
   is33333Subwave?: boolean;
   trendlinesConverge?: boolean;
