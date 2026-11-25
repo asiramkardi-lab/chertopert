@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Candle, WaveScenario, PatternFamily, WaveRole, WaveVertex } from '../types/elliott';
-import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole, FlatPatternFlag, MarketTerminalFlag, isExcludedFlat } from '../engine/rulesEngine';
+import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA, inferWaveRole, FlatPatternFlag, MarketTerminalFlag, isExcludedFlat, isInvalidTriangle } from '../engine/rulesEngine';
 import { filterPatternsForRole } from '../engine/fractalSyncEngine';
 import { SmartRuleAlertEngine, ScenarioQuickStatusReport } from '../engine/smartRuleAlertEngine';
 import { ChartInteractionMode } from './ChartStudio';
@@ -72,19 +72,52 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
 
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
 
-  const { flatFlagsById, terminalWarningsById, excludedRunningById } = useMemo(() => {
+  const {
+    flatFlagsById,
+    terminalWarningsById,
+    excludedRunningById,
+    invalidTrianglesById,
+    triangleChecksById
+  } = useMemo(() => {
     const fMap: Record<string, FlatPatternFlag | undefined> = {};
     const tMap: Record<
       string,
       Pick<MarketTerminalFlag, 'warningLabelFa' | 'warningReasonFa' | 'distanceFromEndCandles'> | undefined
     > = {};
     const eMap: Record<string, boolean> = {};
+    const invTriMap: Record<string, boolean> = {};
+    const triCheckMap: Record<string, ReturnType<typeof RulesEngine.TrianglePatternValidator> | undefined> = {};
     scenarios.forEach(sc => {
       const res = RulesEngine.FlatPatternValidator(sc.patternType, sc.vertices, sc.direction, candles);
       if (res.isPotentialFlat && res.flag) {
         fMap[sc.id] = res.flag;
       }
       eMap[sc.id] = Boolean(sc.isExcludedRunningFlat) || isExcludedFlat(sc, candles);
+      const resolvedLabel = parentWaveLabel || sc.parentLegLabel || '';
+      const resolvedRole: WaveRole =
+        parentRole !== 'ROOT'
+          ? parentRole
+          : resolvedLabel
+          ? inferWaveRole(resolvedLabel.split(/[←→]/).pop() || resolvedLabel)
+          : 'ROOT';
+      const invTri = isInvalidTriangle(sc, candles, {
+        parentRole: resolvedRole,
+        parentWaveLabel: resolvedLabel
+      });
+      invTriMap[sc.id] = invTri;
+      if (
+        sc.patternType === 'TRIANGLE_CONVERGING' ||
+        sc.patternType === 'TRIANGLE_EXPANDING' ||
+        invTri
+      ) {
+        triCheckMap[sc.id] = RulesEngine.TrianglePatternValidator(
+          sc,
+          candles,
+          undefined,
+          resolvedRole,
+          resolvedLabel
+        );
+      }
       const term = RulesEngine.MarketTerminalValidator(sc.patternType, sc.vertices, candles, res.flag);
       const hasMetaPhaseWarning = Boolean(sc.marketPhaseWarning || sc.metadata?.marketPhaseWarning);
       if (term.isFlatAtMarketEnd && term.flag) {
@@ -100,8 +133,14 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
         };
       }
     });
-    return { flatFlagsById: fMap, terminalWarningsById: tMap, excludedRunningById: eMap };
-  }, [scenarios, candles]);
+    return {
+      flatFlagsById: fMap,
+      terminalWarningsById: tMap,
+      excludedRunningById: eMap,
+      invalidTrianglesById: invTriMap,
+      triangleChecksById: triCheckMap
+    };
+  }, [scenarios, candles, parentRole, parentWaveLabel]);
 
   const quickPreviewById = useMemo(() => {
     const map: Record<string, ScenarioQuickStatusReport> = {};
@@ -371,6 +410,38 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                         >
                           <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
                           <span>هشدار انتهای بازار · عدم استفاده فلت در فاز پایانی</span>
+                        </span>
+                      )}
+                      {triangleChecksById[sc.id] &&
+                        !invalidTrianglesById[sc.id] &&
+                        triangleChecksById[sc.id]!.triangleLabel !== 'Invalid' && (
+                          <span
+                            data-testid="scenario-triangle-type-badge"
+                            title={
+                              triangleChecksById[sc.id]!.isContracting
+                                ? 'Contracting Triangle (خطوط روند همگرا — ۳-۳-۳-۳-۳)'
+                                : 'Expanding Triangle (خطوط روند واگرا — ۳-۳-۳-۳-۳)'
+                            }
+                            className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold border whitespace-nowrap ${
+                              triangleChecksById[sc.id]!.isContracting
+                                ? 'bg-emerald-500/15 border-emerald-500/45 text-emerald-200'
+                                : 'bg-amber-500/15 border-amber-500/45 text-amber-200'
+                            }`}
+                          >
+                            {triangleChecksById[sc.id]!.isContracting ? 'مثلث مانع (Contracting)' : 'مثلث گستشی (Expanding)'}
+                          </span>
+                        )}
+                      {invalidTrianglesById[sc.id] && (
+                        <span
+                          data-testid="scenario-invalid-triangle-badge"
+                          title={
+                            triangleChecksById[sc.id]?.invalidTriangleReasonFa ||
+                            'Invalid Triangle: Triangle pattern placed in wave 1, 3, or 5 or violates 3-3-3-3-3 internal structure.'
+                          }
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold border bg-rose-500/20 border-rose-500/50 text-rose-200 whitespace-nowrap"
+                        >
+                          <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                          <span>مثلث نامعتبر</span>
                         </span>
                       )}
                       <span className="text-[10px] text-slate-400 font-mono">({sc.patternType})</span>

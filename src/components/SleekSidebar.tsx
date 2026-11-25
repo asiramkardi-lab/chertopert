@@ -456,12 +456,32 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                       }`}
                     />
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5 flex-wrap">
                         <span>بازرس الگوی مثلث (A-B-C-D-E)</span>
                         {activeInvalidTriangle ? (
-                          <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          <span
+                            data-testid="sidebar-copilot-invalid-triangle-badge"
+                            title={
+                              liveTriangleValidation.invalidTriangleReasonFa ||
+                              'Invalid Triangle: Triangle pattern placed in wave 1, 3, or 5 or violates 3-3-3-3-3 internal structure.'
+                            }
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/60 border border-rose-500/50 text-rose-300 text-[9.5px] font-bold shrink-0 whitespace-nowrap"
+                          >
+                            <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                            <span>مثلث نامعتبر</span>
+                          </span>
                         ) : liveTriangleValidation.isValidTriangle ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span
+                            title={
+                              liveTriangleValidation.isContracting
+                                ? 'Contracting Triangle (خطوط روند همگرا — ۳-۳-۳-۳-۳)'
+                                : 'Expanding Triangle (خطوط روند واگرا — ۳-۳-۳-۳-۳)'
+                            }
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/55 border border-emerald-500/45 text-emerald-300 text-[9.5px] font-bold shrink-0 whitespace-nowrap"
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>{liveTriangleValidation.isContracting ? 'مثلث مانع' : 'مثلث گستشی'}</span>
+                          </span>
                         ) : null}
                       </div>
                       <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
