@@ -54,6 +54,15 @@ export const SUPPORTED_ASSETS: MarketAssetConfig[] = [
     maxAllowedDegree: 4,
     descriptionFa: 'مثال عملی جلسه ۱۴ — مثلث مانع (A-B-C-D-E) در موج ۴ پیش از جهش موج ۵',
     timeframes: ['1M', '1W', '1D', '4H', '1H', '15M']
+  },
+  {
+    id: 'TSE_FARS',
+    name: 'صنایع پتروشیمی خلیج فارس (فارس)',
+    symbol: 'فارس (TSE)',
+    marketType: 'TSE_IRAN',
+    maxAllowedDegree: 4,
+    descriptionFa: 'مثال عملی جلسه ۱۶ — الگوی ترکیبی اصلاحی (Z-X-F-X-Z / W-X-Y) با موج رابط X',
+    timeframes: ['1M', '1W', '1D', '4H', '1H', '15M']
   }
 ];
 
@@ -143,6 +152,18 @@ const ASSET_WAYPOINTS: Record<string, Waypoint[]> = {
     { u: 0.82, p: 0.55, isMotive: false },  // Wave 4.E (Triangle End)
     { u: 0.97, p: 0.98, isMotive: true },   // Wave 5 Impulsive breakout
     { u: 1.0, p: 0.91, isMotive: false }
+  ],
+  // Fars (فارس): Session 16 Practical Complex Combination (W=Zigzag -> X -> Y=Flat -> X2 -> Z=Zigzag)
+  TSE_FARS: [
+    { u: 0.0, p: 0.18, isMotive: false },
+    { u: 0.07, p: 0.0, isMotive: false },   // Absolute Bottom
+    { u: 0.22, p: 0.88, isMotive: true },   // Prior Peak (End of Impulse)
+    { u: 0.36, p: 0.52, isMotive: false },  // W (Zigzag leg)
+    { u: 0.45, p: 0.72, isMotive: true },   // X-Wave 1
+    { u: 0.60, p: 0.36, isMotive: false },  // Y (Flat leg)
+    { u: 0.69, p: 0.58, isMotive: true },   // X-Wave 2
+    { u: 0.85, p: 0.24, isMotive: false },  // Z (Zigzag leg)
+    { u: 1.0, p: 0.68, isMotive: true }     // Post-combination recovery
   ]
 };
 
@@ -193,6 +214,8 @@ function evaluatePriceAtTimestamp(assetId: string, ts: number, depth: number): n
       ? 3100
       : assetId === 'TSE_ZOB'
       ? 2400
+      : assetId === 'TSE_FARS'
+      ? 5200
       : 1920;
   const scale =
     assetId === 'BTCUSDT'
@@ -201,6 +224,8 @@ function evaluatePriceAtTimestamp(assetId: string, ts: number, depth: number): n
       ? 3900
       : assetId === 'TSE_ZOB'
       ? 2800
+      : assetId === 'TSE_FARS'
+      ? 4400
       : 880;
 
   const u = Math.max(0, Math.min(1, (ts - ANCHOR_START_TS) / TOTAL_SPAN_MS));
@@ -290,6 +315,8 @@ export function generateRealisticCandles(
       ? 3900
       : assetId === 'TSE_ZOB'
       ? 2800
+      : assetId === 'TSE_FARS'
+      ? 4400
       : 880;
   const noiseAmp = timeframe === '15M' ? 0.008 : timeframe === '1H' ? 0.005 : 0.003;
 

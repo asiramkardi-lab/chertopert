@@ -31,9 +31,11 @@ import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import { RulesEngineComplianceCard } from './RulesEngineComplianceCard';
 import { FlatPatternInspector } from './FlatSidebarVisualizer';
 import { TrianglePatternInspector } from './TrianglePatternInspector';
+import { ComplexPatternInspector } from './ComplexPatternInspector';
 import { 
   Cpu, 
   GitBranch, 
+  GitMerge,
   FolderGit2, 
   Compass, 
   FileCode2, 
@@ -52,7 +54,7 @@ import {
 const FLAT_MARKET_PHASE_TOOLTIP =
   "Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase.";
 
-export type SidebarTab = 'COPILOT' | 'FLAT_ANALYSIS' | 'TRIANGLE_ANALYSIS' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
+export type SidebarTab = 'COPILOT' | 'FLAT_ANALYSIS' | 'TRIANGLE_ANALYSIS' | 'COMPLEX_ANALYSIS' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
 
 interface SleekSidebarProps {
   activeScenario: WaveScenario;
@@ -138,6 +140,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'CONFLUENCE' | 'PRZ'>('RADAR');
   const [showInlineFlatToggle, setShowInlineFlatToggle] = useState<boolean>(false);
   const [showInlineTriangleToggle, setShowInlineTriangleToggle] = useState<boolean>(false);
+  const [showInlineComplexToggle, setShowInlineComplexToggle] = useState<boolean>(false);
 
   const liveFlatFlag = useMemo(
     () =>
@@ -167,6 +170,11 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
     ]
   );
 
+  const liveComplexValidation = useMemo(
+    () => RulesEngine.ComplexPatternValidator(activeScenario, candles),
+    [activeScenario, candles]
+  );
+
   const activeInvalidTriangle = useMemo(
     () =>
       isInvalidTriangle(activeScenario, candles, {
@@ -184,6 +192,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
   const is335Identified = Boolean(liveFlatFlag?.isStructure335) || activeScenario.patternType.startsWith('FLAT_');
   const isTriangleIdentified = Boolean(liveTriangleValidation.isTriangleScenario);
+  const isComplexIdentified = Boolean(liveComplexValidation.isComplexPattern);
 
   useEffect(() => {
     setShowInlineFlatToggle(is335Identified);
@@ -192,6 +201,10 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   useEffect(() => {
     setShowInlineTriangleToggle(isTriangleIdentified);
   }, [isTriangleIdentified, activeScenario.id]);
+
+  useEffect(() => {
+    setShowInlineComplexToggle(isComplexIdentified);
+  }, [isComplexIdentified, activeScenario.id]);
 
   const scenarioPhaseWarningsById = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -238,6 +251,12 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
       badge: liveTriangleValidation.report.frequencyPct || 'A-E',
       hasWarning: activeInvalidTriangle
     },
+    {
+      id: 'COMPLEX_ANALYSIS' as SidebarTab,
+      label: 'بازرس ترکیبی W-X-Y',
+      icon: GitMerge,
+      badge: liveComplexValidation.report.patternSignature || 'W-X-Y'
+    },
     { id: 'ANGLE_TARGETS' as SidebarTab, label: 'زوایا و اهداف', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
     { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch, badge: '۴ درجه' },
     {
@@ -268,6 +287,8 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                   ? 'flat-pattern-inspector-tab'
                   : tab.id === 'TRIANGLE_ANALYSIS'
                   ? 'triangle-pattern-inspector-tab'
+                  : tab.id === 'COMPLEX_ANALYSIS'
+                  ? 'complex-pattern-inspector-tab'
                   : undefined
               }
               onClick={() => {
@@ -529,6 +550,64 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               </div>
             )}
 
+            {/* Studio Sidebar Complex Pattern Inspector (Activates when a Complex W-X-Y scenario is selected) */}
+            {isComplexIdentified && (
+              <div className="rounded-xl bg-[#0b1324] border border-violet-500/40 overflow-hidden">
+                <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowInlineComplexToggle(prev => !prev)}
+                    aria-expanded={showInlineComplexToggle}
+                    className="flex items-center gap-2 min-w-0 text-right flex-1"
+                  >
+                    <GitMerge className="w-4 h-4 text-violet-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                        <span>بازرس الگوی ترکیبی (W-X-Y)</span>
+                        {liveComplexValidation.isValidComplex && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        )}
+                      </div>
+                      <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
+                        {liveComplexValidation.report.patternSignature} ·{' '}
+                        {liveComplexValidation.isStandardCombination ? 'استاندارد' : 'غیراستاندارد'} ·{' '}
+                        {liveComplexValidation.report.xWaveCandleCount} کندل X
+                      </div>
+                    </div>
+                  </button>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowInlineComplexToggle(prev => !prev)}
+                      className="px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 bg-violet-600/30 border-violet-500/60 text-violet-100"
+                    >
+                      {showInlineComplexToggle ? 'بستن' : 'نمایش'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('COMPLEX_ANALYSIS')}
+                      className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
+                      title="باز کردن تب کامل بازرس الگوی ترکیبی W-X-Y"
+                    >
+                      <ArrowUpLeft className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {showInlineComplexToggle && (
+                  <div className="p-2.5 pt-0 border-t border-slate-800/80">
+                    <ComplexPatternInspector
+                      scenario={activeScenario}
+                      candles={candles}
+                      onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                      compact
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Quick Shortcuts to Angle Radar & Fibonacci Confluence Zones */}
             <div className="grid grid-cols-1 gap-2">
               <button
@@ -666,6 +745,16 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               candles={candles}
               parentRole={drillContext?.role || 'ROOT'}
               parentWaveLabel={drillContext?.waveLabel || ''}
+              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+            />
+          </div>
+        )}
+
+        {activeTab === 'COMPLEX_ANALYSIS' && (
+          <div className="space-y-4">
+            <ComplexPatternInspector
+              scenario={activeScenario}
+              candles={candles}
               onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
             />
           </div>

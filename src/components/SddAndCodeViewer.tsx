@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSION16' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -391,6 +391,75 @@ def evaluate_advanced_triangle(req: AdvancedTriangleRequest) -> Dict[str, Any]:
       <div>نام غالب: {{ report.dominantWaveName }}</div>
       <div>قانون ۵۰٪: {{ report.retracement50Status }}</div>
       <div>باکس ۳: {{ report.timingZone }}</div>
+    </div>
+  </UCard>
+</template>
+\`\`\`
+`;
+
+  const session16Markdown = `# جلسه ۱۶: الگوهای ترکیبی (015-complex-patterns-engine) — Spec-Kit SDD + Backend & Frontend
+
+## بخش ۱: مفاهیم استخراج‌شده (۱۶-۱ تا ۱۶-۱۴) و تست‌های مرزی (T-16.1 تا T-16.43)
+| کد | مفهوم | شرایط مرزی و خروجی موتور | تست‌ها |
+|----|-------|--------------------------|--------|
+| ۱۶-۱ | تعریف الگوی ترکیبی (W-X-Y) | ترکیب ۲ الگوی ساده با X-Wave ← \`STANDARD_2\`؛ الگوی تنها ← \`NONE\` | T-16.1..3 |
+| ۱۶-۲ | X-Wave به عنوان رابط | زیگزاگ، شتاب‌دار یا تک‌موج با حداقل ۳ کندل؛ < ۳ کندل ← \`INVALID\` | T-16.4..6 |
+| ۱۶-۳ | مخفف‌های استاندارد | \`I\` (ایده‌آل)، \`G\` (قطر)، \`F\` (فلت)، \`Z\` (زیگزاگ)، \`T\` (مثلث/ترمینال)، \`X\` (رابط) | T-16.7..9 |
+| ۱۶-۴ | قانون ۳-گانه در ترکیبی | فقط ۳ قانون بنیادین (W2<100%, W3 کوتاه‌ترین نیست، W4<100% W3) الزامی‌اند | T-16.10..12 |
+| ۱۶-۵ | اولویت‌بندی ۷ سطحی | ۱.ایده‌آل ← ۲.قطر ← ۳.ترمینال ← ۴.زیگزاگ ← ۵.فلت ← ۶.مثلث ← ۷.ترکیبی | T-16.13..15 |
+| ۱۶-۶ | هزینه کاهش اعتبار | ساده ← \`HIGH\`؛ ترکیبی با تایید ساده ← \`MEDIUM\`؛ ترکیبی خالص ← \`LOW\` (~۱٪ دید عمومی) | T-16.16..18 |
+| ۱۶-۷ | ۹ ترکیب استاندارد اصلاحی | رایج (\`Z-X-Z, Z-X-F, Z-X-T, F-X-Z, F-X-T, T-X-Z, T-X-F\`) و نادر (\`F-X-F, T-X-T\`) | T-16.19..21 |
+| ۱۶-۸ | ترکیب شامل الگوهای اصلی | مجاز در ۲ الگو (\`I-X-Z, G-X-F, I-X-I\`)؛ ۳+ الگو ← غیراستاندارد | T-16.22..24 |
+| ۱۶-۹ | جزئیات کندلی X-Wave | زیگزاگ (\`5-3-5\` / \`3-3-3\`)، شتاب‌دار، تک‌موج (≥۳ کندل)؛ <۳ کندل نامعتبر | T-16.25..28 |
+| ۱۶-۱۰ | ترکیبی غیراستاندارد | ۲ الگو ← استاندارد؛ ۳ الگو (\`Z-X-Z-X-Z\`) ← غیراستاندارد؛ ۴+ الگو ← خطای شمارش | T-16.29..31 |
+| ۱۶-۱۱ | ترکیب بیش از حد پیچیده | مثال \`Z-X-F-X-Z\` ← نادر/غیراستاندارد؛ پیچیدگی زیاد ← هشدار شمارش اشتباه | T-16.32..34 |
+| ۱۶-۱۲ | محدودیت انتهای بازار | در گذشته بازار مجاز (گره‌گشایی)؛ در انتهای بازار بدون تایید قوی ممنوع | T-16.35..37 |
+| ۱۶-۱۳ | مثال عملی: نماد فارس (TSE_FARS) | پشتیبانی \`Z-X-Z\` (استاندارد)، \`Z-X-F-X-Z\` (غیراستاندارد)، \`I-X-Z\` (اصلی+اصلاحی) | T-16.38..40 |
+| ۱۶-۱۴ | استاندارد در برابر ساده‌شماری | هر زمان ساده ممکن باشد \`PREFER_SIMPLE\`؛ در غیر این صورت \`USE_COMPLEX_STANDARD\` | T-16.41..43 |
+
+## بخش ۲: معماری FastAPI پایتون (۰۱۵)
+\`\`\`python
+from pydantic import BaseModel
+from typing import Literal, List
+
+class ComplexDetectionRequest(BaseModel):
+    signature: str
+    x_wave_kind: Literal["ZIGZAG", "IMPULSIVE", "SINGLE", "AUTO"] = "AUTO"
+    x_wave_candles: int = 4
+    wave2_retrace_pct: float = 50.0
+    wave4_retrace_pct: float = 50.0
+    wave1_len: float = 100.0
+    wave3_len: float = 140.0
+    wave5_len: float = 110.0
+    is_market_end: bool = False
+    simple_pattern_possible: bool = False
+    has_strong_confirmation: bool = False
+
+# Services:
+# - detect_service.py     -> evaluate_complex_combination_signature + detect_complex_pattern
+# - validate_service.py   -> evaluate_complex_three_cardinal_rules
+# - priority_service.py   -> select_pattern_by_counting_priority (1..7)
+# - x_wave_service.py     -> evaluate_x_wave (>= 3 candles)
+# - recommend_service.py  -> recommend_simple_vs_complex & market_end_restriction
+\`\`\`
+
+## بخش ۳: رابط کاربری Nuxt 4 و کامپوننت‌های Session 16
+\`\`\`vue
+<!-- ComplexInput.vue / PatternDisplay.vue / PriorityCard.vue / RulesValidator.vue / RecommendCard.vue / XWaveCard.vue -->
+<template>
+  <UCard class="bg-default border border-muted" dir="rtl">
+    <template #header>
+      <div class="flex items-center justify-between">
+        <span class="font-bold">بازرس الگوی ترکیبی و موج X (جلسه ۱۶)</span>
+        <UBadge :color="report.standard ? 'success' : 'warning'">
+          {{ report.patternSignature }} · اولویت {{ report.priorityRank }}/۷
+        </UBadge>
+      </div>
+    </template>
+    <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+      <div>موج X: {{ report.xWaveType }} ({{ report.xWaveCandleCount }} کندل)</div>
+      <div>۳ قانون بنیادین: {{ report.threeCardinalPassed ? 'برقرار' : 'نقض' }}</div>
+      <div>توصیه: {{ report.simpleVsComplexDecision }}</div>
     </div>
   </UCard>
 </template>
@@ -1094,6 +1163,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION16')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION16'
+                ? 'bg-gradient-to-r from-violet-600 to-violet-500 text-white shadow-lg shadow-violet-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۶ (015 — الگوهای ترکیبی)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -1161,6 +1242,8 @@ const runAnalysis = async () => {
               ? session14Markdown
               : activeTab === 'SESSION15'
               ? session15Markdown
+              : activeTab === 'SESSION16'
+              ? session16Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -1188,6 +1271,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSION13' ||
           activeTab === 'SESSION14' ||
           activeTab === 'SESSION15' ||
+          activeTab === 'SESSION16' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -1202,6 +1286,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSION13' && session13Markdown}
         {activeTab === 'SESSION14' && session14Markdown}
         {activeTab === 'SESSION15' && session15Markdown}
+        {activeTab === 'SESSION16' && session16Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

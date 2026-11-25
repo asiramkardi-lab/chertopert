@@ -530,13 +530,46 @@ export interface ExtensionTmvTrailingReport {
   warnings: string[];
 }
 
+export interface ComplexAnalysisOptions {
+  /** Explicit signature override e.g. 'Z-X-Z', 'Z-X-F', 'Z-X-T', 'F-X-F', 'I-X-Z', 'Z-X-F-X-Z', 'Z' */
+  signature?: string;
+  /** X-Wave kind override ('ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'AUTO') */
+  xWaveKind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'AUTO';
+  /** Explicit X-Wave candle count override for boundary validation (>= 3 valid, < 3 invalid) */
+  xWaveCandles?: number;
+  /** Whether a simpler pattern (Zigzag/Flat/Ideal) is also valid on this slice */
+  simplePatternPossible?: boolean;
+  /** Whether simple-count confirmation supports the complex count */
+  hasSimpleConfirmation?: boolean;
+  /** Explicit market-end context override */
+  isMarketEnd?: boolean;
+  /** Explicit strong confirmation at market end */
+  hasStrongConfirmation?: boolean;
+  /** Optional explicit W2 retrace % of W1 for 3-Cardinal-Rule check */
+  wave2RetracePctOf1?: number;
+  /** Optional explicit W4 retrace % of W3 for 3-Cardinal-Rule check */
+  wave4RetracePctOf3?: number;
+}
+
 export interface ComplexPatternReport {
   detected: boolean;
+  /** True only when 2+ patterns are linked via X-Wave (false for single simple pattern like 'Z') */
+  isComplexPattern: boolean;
   patternSignature: string; // e.g., Z-X-Z, Z-X-F, Z-X-F-X-Z
   standard: boolean;
+  combinationTier: 'NONE' | 'STANDARD_2' | 'NON_STANDARD_3' | 'SEVERE_NON_STANDARD';
+  combinationCategory:
+    | 'SIMPLE_SINGLE'
+    | 'CORRECTIVE_STANDARD'
+    | 'CORRECTIVE_RARE'
+    | 'MAIN_INCLUDED'
+    | 'NON_STANDARD_CHAIN';
+  rarityStatus: 'COMMON' | 'RARE' | 'VERY_RARE';
   complexity: 'LOW' | 'MEDIUM' | 'HIGH' | 'TOO_COMPLEX';
   priorityRank: number; // 1=Ideal .. 7=Complex
   priorityLabelFa: string;
+  credibilityTier: 'HIGH' | 'MEDIUM' | 'LOW';
+  credibilityNoteFa: string;
   xWaveValid: boolean;
   xWaveType: 'SINGLE' | 'ZIGZAG_SIMPLE' | 'ZIGZAG_IDEAL' | 'IMPULSIVE' | 'INVALID';
   xWaveTypeFa: string;
@@ -545,7 +578,10 @@ export interface ComplexPatternReport {
   violatedRules: number[];
   recommend: 'SIMPLE' | 'COMPLEX_2' | 'COMPLEX_3' | 'RECOUNT';
   recommendFa: string;
+  simpleVsComplexDecision: 'PREFER_SIMPLE' | 'USE_COMPLEX_STANDARD' | 'INVALID_COUNT';
+  marketEndDecision: 'ALLOW_PAST_KNOT' | 'FORBID_AT_MARKET_END' | 'ALLOW_WITH_CONFIRMATION' | 'PREFER_SIMPLE';
   isMarketEndRestricted: boolean;
+  abbreviationsUsed: string[];
   confidence: number;
   warnings: string[];
   notes: string[];

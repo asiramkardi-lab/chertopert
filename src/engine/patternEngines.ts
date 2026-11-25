@@ -13,6 +13,7 @@
 
 import {
   Candle,
+  ComplexAnalysisOptions,
   ComplexPatternReport,
   DiagonalAnalysisReport,
   EntryStepPlan,
@@ -4579,6 +4580,475 @@ export class PatternEngines {
   }
 
   /**
+   * Session 16 (§2.1, §2.3, §2.7, §2.8, §2.10, §2.11):
+   * Classifies pattern signature abbreviations (I, G, T, F, Z, Tri, X) into:
+   * - Single simple pattern ('Z', 'F', 'T', 'I', 'G') -> isComplex: false
+   * - Standard 2-pattern combination ('Z-X-Z'..'T-X-T', 'I-X-Z', 'G-X-F', 'I-X-I', etc.)
+   * - Non-standard 3-pattern ('Z-X-Z-X-Z', 'Z-X-F-X-Z') and Severe 4+ ('Z-X-Z-X-Z-X-Z')
+   */
+  public static evaluateComplexCombinationSignature(
+    signatureInput: string | string[]
+  ): {
+    signature: string;
+    parts: string[];
+    isComplex: boolean;
+    isStandard: boolean;
+    combinationTier: ComplexPatternReport['combinationTier'];
+    combinationCategory: ComplexPatternReport['combinationCategory'];
+    rarityStatus: ComplexPatternReport['rarityStatus'];
+    complexity: ComplexPatternReport['complexity'];
+    abbreviationsUsed: string[];
+    labelFa: string;
+  } {
+    const rawStr = Array.isArray(signatureInput)
+      ? signatureInput.join('-')
+      : signatureInput;
+    const normalized = rawStr
+      .trim()
+      .toUpperCase()
+      .replace(/TRI/g, 'T')
+      .replace(/\s+/g, '')
+      .replace(/\+/g, '-');
+    const tokens = normalized.split('-').filter(Boolean);
+    const parts = tokens.filter(t => t !== 'X' && t !== 'XX' && t !== 'X2');
+    const canonicalSig = parts.join('-X-') || 'Z';
+
+    const STANDARD_CORRECTIVE_COMMON = new Set([
+      'Z-X-Z',
+      'Z-X-F',
+      'Z-X-T',
+      'F-X-Z',
+      'F-X-T',
+      'T-X-Z',
+      'T-X-F'
+    ]);
+    const STANDARD_CORRECTIVE_RARE = new Set(['F-X-F', 'T-X-T']);
+    const MAIN_COMMON = new Set([
+      'I-X-Z',
+      'I-X-F',
+      'I-X-T',
+      'G-X-F',
+      'G-X-Z',
+      'G-X-T',
+      'D-X-Z',
+      'D-X-F',
+      'D-X-T',
+      'T-X-I',
+      'Z-X-I',
+      'F-X-I',
+      'Z-X-G',
+      'F-X-G'
+    ]);
+    const MAIN_RARE = new Set(['I-X-I', 'G-X-G', 'D-X-D', 'I-X-G', 'G-X-I']);
+
+    const abbreviationsUsed = Array.from(
+      new Set(tokens.length > 0 ? tokens : [canonicalSig])
+    );
+
+    if (parts.length <= 1) {
+      return {
+        signature: parts[0] || 'Z',
+        parts,
+        isComplex: false,
+        isStandard: false,
+        combinationTier: 'NONE',
+        combinationCategory: 'SIMPLE_SINGLE',
+        rarityStatus: 'COMMON',
+        complexity: 'LOW',
+        abbreviationsUsed,
+        labelFa: `الگوی ساده تک‌ساختار (${parts[0] || 'Z'}) — ترکیبی محسوب نمی‌شود.`
+      };
+    }
+
+    if (parts.length === 2) {
+      const isCorrCommon = STANDARD_CORRECTIVE_COMMON.has(canonicalSig);
+      const isCorrRare = STANDARD_CORRECTIVE_RARE.has(canonicalSig);
+      const isMainCommon = MAIN_COMMON.has(canonicalSig);
+      const isMainRare = MAIN_RARE.has(canonicalSig);
+      const isMain = isMainCommon || isMainRare;
+      const isRare = isCorrRare || isMainRare;
+      return {
+        signature: canonicalSig,
+        parts,
+        isComplex: true,
+        isStandard: true,
+        combinationTier: 'STANDARD_2',
+        combinationCategory: isMain
+          ? 'MAIN_INCLUDED'
+          : isCorrRare
+          ? 'CORRECTIVE_RARE'
+          : 'CORRECTIVE_STANDARD',
+        rarityStatus: isRare ? 'RARE' : 'COMMON',
+        complexity: 'MEDIUM',
+        abbreviationsUsed,
+        labelFa: isMain
+          ? isRare
+            ? `ترکیب نادر الگوهای اصلی (${canonicalSig}) — ۲ الگوی مجاز با موج رابط X.`
+            : `ترکیب استاندارد شامل الگوی اصلی (${canonicalSig}) — معتبر.`
+          : isCorrRare
+          ? `ترکیب اصلاحی استاندارد اما نادر (${canonicalSig}) — با احتیاط بررسی شود.`
+          : `ترکیب اصلاحی استاندارد (${canonicalSig}) — دو الگوی ساده با موج رابط X.`
+      };
+    }
+
+    if (parts.length === 3) {
+      return {
+        signature: canonicalSig,
+        parts,
+        isComplex: true,
+        isStandard: false,
+        combinationTier: 'NON_STANDARD_3',
+        combinationCategory: 'NON_STANDARD_CHAIN',
+        rarityStatus: 'RARE',
+        complexity: 'HIGH',
+        abbreviationsUsed,
+        labelFa: `الگوی ترکیبی غیراستاندارد سه‌تایی (${canonicalSig}) — ترکیب چند الگوی ترکیبی (ریسک و خطای بالا).`
+      };
+    }
+
+    return {
+      signature: canonicalSig,
+      parts,
+      isComplex: true,
+      isStandard: false,
+      combinationTier: 'SEVERE_NON_STANDARD',
+      combinationCategory: 'NON_STANDARD_CHAIN',
+      rarityStatus: 'VERY_RARE',
+      complexity: 'TOO_COMPLEX',
+      abbreviationsUsed,
+      labelFa: `الگوی ترکیبی غیراستاندارد شدید (${parts.length} الگو: ${canonicalSig}) — احتمال شمارش نادرست؛ بازنگری الزامی است.`
+    };
+  }
+
+  /**
+   * Session 16 (§2.2 & §2.9, T-16.4..6, T-16.25..28):
+   * Validates X-Wave connecting link:
+   * - Allowed forms: ZIGZAG (5-3-5 / 3-3-3), IMPULSIVE (motive/accelerated), SINGLE wave
+   * - Mandatory minimum length: >= 3 candles; < 3 candles -> INVALID
+   */
+  public static evaluateXWave(params: {
+    kind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'AUTO';
+    candleCount: number;
+    subwaves?: number[];
+  }): {
+    isValid: boolean;
+    xWaveType: ComplexPatternReport['xWaveType'];
+    candleCount: number;
+    labelFa: string;
+  } {
+    const { kind = 'AUTO', candleCount, subwaves } = params;
+    if (candleCount < 3) {
+      return {
+        isValid: false,
+        xWaveType: 'INVALID',
+        candleCount,
+        labelFa: `موج رابط X نامعتبر (${candleCount} کندل < حداقل ۳ کندل).`
+      };
+    }
+    if (kind === 'ZIGZAG') {
+      const isIdeal = subwaves?.join('-') === '5-3-5' || candleCount >= 10;
+      return {
+        isValid: true,
+        xWaveType: isIdeal ? 'ZIGZAG_IDEAL' : 'ZIGZAG_SIMPLE',
+        candleCount,
+        labelFa: isIdeal
+          ? 'موج X به صورت زیگزاگ ایده‌آل (۵-۳-۵) — استاندارد و معتبر.'
+          : 'موج X به صورت زیگزاگ ساده (۳-۳-۳) — استاندارد و معتبر.'
+      };
+    }
+    if (kind === 'IMPULSIVE') {
+      return {
+        isValid: true,
+        xWaveType: 'IMPULSIVE',
+        candleCount,
+        labelFa: 'موج X به صورت شتاب‌دار (فرض ۵ یا ۳ موجی) — معتبر.'
+      };
+    }
+    if (kind === 'SINGLE') {
+      return {
+        isValid: true,
+        xWaveType: 'SINGLE',
+        candleCount,
+        labelFa: `موج X تک‌موجی معتبر (${candleCount} کندل ≥ ۳ کندل).`
+      };
+    }
+    if (subwaves && subwaves.length === 5) {
+      return {
+        isValid: true,
+        xWaveType: 'IMPULSIVE',
+        candleCount,
+        labelFa: 'موج X شتاب‌دار ۵ موجی — معتبر.'
+      };
+    }
+    if (candleCount >= 10) {
+      return {
+        isValid: true,
+        xWaveType: 'ZIGZAG_IDEAL',
+        candleCount,
+        labelFa: 'موج X زیگزاگ ایده‌آل — معتبر.'
+      };
+    }
+    if (candleCount >= 6) {
+      return {
+        isValid: true,
+        xWaveType: 'ZIGZAG_SIMPLE',
+        candleCount,
+        labelFa: 'موج X زیگزاگ ساده — معتبر.'
+      };
+    }
+    return {
+      isValid: true,
+      xWaveType: 'SINGLE',
+      candleCount,
+      labelFa: `موج X تک‌موجی سریع (${candleCount} کندل ≥ ۳ کندل) — معتبر.`
+    };
+  }
+
+  /**
+   * Session 16 (§2.4, T-16.10..12):
+   * In Complex Combinations, ONLY the 3 Cardinal Rules must hold:
+   * 1. Wave 2 does not cover 100% of Wave 1 (< 100%)
+   * 2. Wave 3 is NOT the shortest among Waves 1, 3, 5
+   * 3. Wave 4 does not cover 100% of Wave 3 (< 100%)
+   * Non-cardinal rules (degree consistency, fractal symmetry, strict overlap) are relaxed.
+   */
+  public static evaluateComplexThreeCardinalRules(params: {
+    wave2RetracePctOf1: number;
+    wave3Len: number;
+    wave1Len: number;
+    wave5Len: number;
+    wave4RetracePctOf3?: number;
+  }): {
+    passed: boolean;
+    violatedRules: number[];
+    nonCardinalRelaxed: boolean;
+    reasonFa: string;
+  } {
+    const violatedRules: number[] = [];
+    if (params.wave2RetracePctOf1 >= 100 - 1e-6) {
+      violatedRules.push(1);
+    }
+    if (params.wave3Len < params.wave1Len - 1e-6 && params.wave3Len < params.wave5Len - 1e-6) {
+      violatedRules.push(2);
+    }
+    if ((params.wave4RetracePctOf3 ?? 50) >= 100 - 1e-6) {
+      violatedRules.push(3);
+    }
+    const passed = violatedRules.length === 0;
+    return {
+      passed,
+      violatedRules,
+      nonCardinalRelaxed: true,
+      reasonFa: passed
+        ? 'هر ۳ قانون بنیادین در الگوی ترکیبی رعایت شده است (قوانین فرعی درجه و تقارن آزادند).'
+        : `نقض قانون ${violatedRules.join(' و ')} در الگوی ترکیبی: حتی در الگوهای ترکیبی، ۳ قانون بنیادین شکستنی نیستند.`
+    };
+  }
+
+  /**
+   * Session 16 (§2.5, T-16.13..15):
+   * Strictly enforces the 7-tier counting priority ladder:
+   * 1. Ideal -> 2. Diagonal -> 3. Terminal -> 4. Zigzag -> 5. Flat -> 6. Triangle -> 7. Complex
+   */
+  public static selectPatternByCountingPriority(candidates: {
+    ideal?: boolean;
+    diagonal?: boolean;
+    terminal?: boolean;
+    zigzag?: boolean;
+    flat?: boolean;
+    triangle?: boolean;
+    complex?: boolean;
+  }): {
+    selectedPattern:
+      | 'IDEAL_CYCLE'
+      | 'DIAGONAL'
+      | 'TERMINAL'
+      | 'ZIGZAG'
+      | 'FLAT'
+      | 'TRIANGLE'
+      | 'COMPLEX_COMBINATION'
+      | 'NONE';
+    priorityRank: number;
+    labelFa: string;
+  } {
+    if (candidates.ideal) {
+      return { selectedPattern: 'IDEAL_CYCLE', priorityRank: 1, labelFa: 'رتبه ۱ — سیکل ایده‌آل (اولویت نخست)' };
+    }
+    if (candidates.diagonal) {
+      return { selectedPattern: 'DIAGONAL', priorityRank: 2, labelFa: 'رتبه ۲ — الگوی قطر' };
+    }
+    if (candidates.terminal) {
+      return { selectedPattern: 'TERMINAL', priorityRank: 3, labelFa: 'رتبه ۳ — ترمینال / آنتی‌سیکل' };
+    }
+    if (candidates.zigzag) {
+      return { selectedPattern: 'ZIGZAG', priorityRank: 4, labelFa: 'رتبه ۴ — زیگزاگ' };
+    }
+    if (candidates.flat) {
+      return { selectedPattern: 'FLAT', priorityRank: 5, labelFa: 'رتبه ۵ — فلت' };
+    }
+    if (candidates.triangle) {
+      return { selectedPattern: 'TRIANGLE', priorityRank: 6, labelFa: 'رتبه ۶ — مثلث' };
+    }
+    if (candidates.complex) {
+      return { selectedPattern: 'COMPLEX_COMBINATION', priorityRank: 7, labelFa: 'رتبه ۷ — الگوی ترکیبی (آخرین راه‌حل)' };
+    }
+    return { selectedPattern: 'NONE', priorityRank: 0, labelFa: 'هیچ الگوی معتبری در ۷ سطح یافت نشد.' };
+  }
+
+  /**
+   * Session 16 (§2.6, T-16.16..18):
+   * Credibility cost of Complex Patterns (~1% analyst visibility vs public simple counts):
+   * - Simple pattern -> HIGH
+   * - Complex + simple confirmation -> MEDIUM
+   * - Pure complex -> LOW
+   */
+  public static evaluateComplexCredibility(params: {
+    isComplex: boolean;
+    hasSimpleConfirmation?: boolean;
+  }): {
+    credibilityTier: 'HIGH' | 'MEDIUM' | 'LOW';
+    estimatedPublicVisibilityPct: number;
+    noteFa: string;
+  } {
+    if (!params.isComplex) {
+      return {
+        credibilityTier: 'HIGH',
+        estimatedPublicVisibilityPct: 80,
+        noteFa: 'شمارش ساده با دید عمومی بالا: اعتبار بالا برای محدوده‌های عمومی معامله‌گران.'
+      };
+    }
+    if (params.hasSimpleConfirmation) {
+      return {
+        credibilityTier: 'MEDIUM',
+        estimatedPublicVisibilityPct: 25,
+        noteFa: 'الگوی ترکیبی همراه با تأیید الگوی ساده: اعتبار متوسط.'
+      };
+    }
+    return {
+      credibilityTier: 'LOW',
+      estimatedPublicVisibilityPct: 1,
+      noteFa: 'هشدار اعتبار کم (~۱٪ تحلیلگران): استفاده زیاد از ترکیبی باعث خروج از محدوده‌های عمومی بازار می‌شود.'
+    };
+  }
+
+  /**
+   * Session 16 (§2.12, T-16.35..37):
+   * Market-End Restriction on Complex Patterns:
+   * - Past market -> ALLOW_PAST_KNOT (allowed to untangle past counts)
+   * - Market end + simple pattern possible -> PREFER_SIMPLE
+   * - Market end + complex only + no strong confirmation -> FORBID_AT_MARKET_END
+   * - Market end + strong confirmation -> ALLOW_WITH_CONFIRMATION
+   */
+  public static evaluateComplexMarketEndRestriction(params: {
+    isMarketEnd: boolean;
+    simplePatternPossible?: boolean;
+    hasStrongConfirmation?: boolean;
+  }): {
+    decision: 'ALLOW_PAST_KNOT' | 'FORBID_AT_MARKET_END' | 'ALLOW_WITH_CONFIRMATION' | 'PREFER_SIMPLE';
+    isRestricted: boolean;
+    reasonFa: string;
+  } {
+    if (!params.isMarketEnd) {
+      return {
+        decision: 'ALLOW_PAST_KNOT',
+        isRestricted: false,
+        reasonFa: 'گذشته بازار: استفاده از الگوی ترکیبی برای باز کردن گره شمارش مجاز است.'
+      };
+    }
+    if (params.simplePatternPossible) {
+      return {
+        decision: 'PREFER_SIMPLE',
+        isRestricted: true,
+        reasonFa: 'انتهای بازار با امکان ساده‌شماری: الگوی ساده حتماً بر ترکیبی ترجیح داده می‌شود.'
+      };
+    }
+    if (params.hasStrongConfirmation) {
+      return {
+        decision: 'ALLOW_WITH_CONFIRMATION',
+        isRestricted: false,
+        reasonFa: 'انتهای بازار با تأیید قوی: الگوی ترکیبی فقط با احتیاط کامل قابل بررسی است.'
+      };
+    }
+    return {
+      decision: 'FORBID_AT_MARKET_END',
+      isRestricted: true,
+      reasonFa: 'ممنوعیت انتهای بازار (جلسه ۱۶): به‌کارگیری الگوی ترکیبی بدون تأیید در انتهای بازار به دلیل سناریوهای زیاد ممنوع است.'
+    };
+  }
+
+  /**
+   * Session 16 (§2.13, T-16.38..40):
+   * Practical Case Study — Fars (فارس):
+   * Evaluates Z-X-Z (standard), Z-X-F-X-Z (non-standard multi-complex), and I-X-Z (valid main-included).
+   */
+  public static evaluateFarsComplexCase(params: {
+    signature: string;
+    cardinalRulesPassed?: boolean;
+    xWaveCandles?: number;
+  }): {
+    isValid: boolean;
+    classification: 'STANDARD' | 'NON_STANDARD' | 'INVALID';
+    signatureEval: ReturnType<typeof PatternEngines.evaluateComplexCombinationSignature>;
+    reasonFa: string;
+  } {
+    const sigEval = PatternEngines.evaluateComplexCombinationSignature(params.signature);
+    const rulesOk = params.cardinalRulesPassed ?? true;
+    const xOk = (params.xWaveCandles ?? 4) >= 3;
+    if (!rulesOk || !xOk) {
+      return {
+        isValid: false,
+        classification: 'INVALID',
+        signatureEval: sigEval,
+        reasonFa: !xOk
+          ? 'مثال فارس نامعتبر: موج رابط X کمتر از ۳ کندل دارد.'
+          : 'مثال فارس نامعتبر: یکی از ۳ قانون بنیادین نقض شده است.'
+      };
+    }
+    return {
+      isValid: true,
+      classification: sigEval.isStandard ? 'STANDARD' : 'NON_STANDARD',
+      signatureEval: sigEval,
+      reasonFa: `نماد فارس (${sigEval.signature}): ${sigEval.labelFa}`
+    };
+  }
+
+  /**
+   * Session 16 (§2.14, T-16.41..43):
+   * Standard Complex vs Simple Counting Decision:
+   * - Both simple & complex possible -> PREFER_SIMPLE
+   * - Only complex possible -> USE_COMPLEX_STANDARD
+   * - Neither possible -> INVALID_COUNT
+   */
+  public static recommendSimpleVsComplex(params: {
+    simplePossible: boolean;
+    complexPossible: boolean;
+  }): {
+    decision: 'PREFER_SIMPLE' | 'USE_COMPLEX_STANDARD' | 'INVALID_COUNT';
+    isValid: boolean;
+    reasonFa: string;
+  } {
+    if (params.simplePossible) {
+      return {
+        decision: 'PREFER_SIMPLE',
+        isValid: true,
+        reasonFa: 'ساده‌شماری ممکن است: الگوی ساده بر ترکیبی استاندارد ارجحیت قطعی دارد.'
+      };
+    }
+    if (params.complexPossible) {
+      return {
+        decision: 'USE_COMPLEX_STANDARD',
+        isValid: true,
+        reasonFa: 'هیچ الگوی ساده‌ای پاسخگو نیست: استفاده از الگوی ترکیبی استاندارد (W-X-Y) مجاز است.'
+      };
+    }
+    return {
+      decision: 'INVALID_COUNT',
+      isValid: false,
+      reasonFa: 'خطا: نه الگوی ساده و نه الگوی ترکیبی با داده‌ها و قوانین سه‌گانه هم‌خوانی ندارند.'
+    };
+  }
+
+  /**
    * Sessions 16 & 17 (015/016-complex-patterns-and-counting-order):
    * Evaluates 9 standard corrective combinations (Z-X-Z..T-X-T) & main combinations (I-X-Z, G-X-F, I-X-I, G-X-G, T-X-T),
    * X-Wave validity (>=3 candles; Single/Zigzag/Impulsive), 3-Cardinal-Rule-only enforcement,
@@ -4586,119 +5056,102 @@ export class PatternEngines {
    */
   public static analyzeComplexPattern(
     scenario: WaveScenario,
-    candles: Candle[]
+    candles: Candle[],
+    options?: ComplexAnalysisOptions
   ): ComplexPatternReport {
     const verts = scenario.vertices;
     const warnings: string[] = [];
     const notes: string[] = [];
 
-    const STANDARD_CORRECTIVE_COMBOS = new Set([
-      'Z-X-Z',
-      'Z-X-F',
-      'Z-X-T',
-      'F-X-Z',
-      'F-X-F',
-      'F-X-T',
-      'T-X-Z',
-      'T-X-F',
-      'T-X-T'
-    ]);
-    const STANDARD_MAIN_COMBOS = new Set([
-      'I-X-Z',
-      'I-X-F',
-      'I-X-T',
-      'I-X-I',
-      'G-X-F',
-      'G-X-Z',
-      'G-X-T',
-      'G-X-G',
-      'T-X-T',
-      'T-X-I',
-      'D-X-Z',
-      'D-X-F',
-      'D-X-T',
-      'D-X-D',
-      'Z-X-I',
-      'F-X-I'
-    ]);
-
     const legCount = Math.max(0, verts.length - 1);
     const isComplexType = scenario.patternType === 'COMPLEX_COMBINATION';
 
-    // Determine inferred signature from wave segments / labels
-    let patternSignature = 'Z-X-Z';
-    if (legCount >= 7) {
-      patternSignature = 'Z-X-F-X-T';
-    } else if (legCount >= 5) {
-      const r21 =
-        verts.length >= 3
-          ? Math.abs(verts[2].price - verts[1].price) / Math.max(0.01, Math.abs(verts[1].price - verts[0].price))
-          : 0.618;
-      const r43 =
-        verts.length >= 5
-          ? Math.abs(verts[4].price - verts[3].price) / Math.max(0.01, Math.abs(verts[3].price - verts[2].price))
-          : 0.618;
-      const p1 = r21 > 0.786 ? 'F' : 'Z';
-      const p2 = r43 > 0.786 ? 'F' : legCount >= 6 ? 'T' : 'Z';
-      patternSignature = `${p1}-X-${p2}`;
-    } else if (scenario.patternType === 'IDEAL_CYCLE') {
-      patternSignature = 'I';
-    } else if (scenario.patternType === 'ZIGZAG') {
-      patternSignature = 'Z';
-    } else if (scenario.patternType.startsWith('FLAT')) {
-      patternSignature = 'F';
-    } else if (scenario.patternType.startsWith('TRIANGLE')) {
-      patternSignature = 'T';
+    // Determine inferred signature from explicit override, vertex labels, or wave ratios
+    let inferredSignature = options?.signature || '';
+    if (!inferredSignature) {
+      const vertLabels = verts.slice(1).map(v => v.label.toUpperCase());
+      const hasDoubleX = vertLabels.some(l => l === 'XX' || l === 'X2') || legCount >= 7;
+      if (hasDoubleX && legCount >= 7) {
+        inferredSignature = 'Z-X-F-X-T';
+      } else if (legCount >= 5 && (isComplexType || vertLabels.some(l => l === 'X' || l === 'W' || l === 'Y'))) {
+        const r21 =
+          verts.length >= 3
+            ? Math.abs(verts[2].price - verts[1].price) / Math.max(0.01, Math.abs(verts[1].price - verts[0].price))
+            : 0.618;
+        const r43 =
+          verts.length >= 5
+            ? Math.abs(verts[4].price - verts[3].price) / Math.max(0.01, Math.abs(verts[3].price - verts[2].price))
+            : 0.618;
+        const p1 = r21 > 0.786 ? 'F' : 'Z';
+        const p2 = r43 > 0.786 ? 'F' : legCount >= 6 ? 'T' : 'Z';
+        inferredSignature = `${p1}-X-${p2}`;
+      } else if (isComplexType) {
+        inferredSignature = 'Z-X-Z';
+      } else if (scenario.patternType === 'IDEAL_CYCLE') {
+        inferredSignature = 'I';
+      } else if (scenario.patternType === 'ZIGZAG') {
+        inferredSignature = 'Z';
+      } else if (scenario.patternType.startsWith('FLAT')) {
+        inferredSignature = 'F';
+      } else if (scenario.patternType.startsWith('TRIANGLE')) {
+        inferredSignature = 'T';
+      } else if (scenario.patternType.includes('DIAGONAL')) {
+        inferredSignature = 'G';
+      } else {
+        inferredSignature = 'Z';
+      }
     }
 
-    const parts = patternSignature.split('-X-');
+    const sigEval = PatternEngines.evaluateComplexCombinationSignature(inferredSignature);
+    const patternSignature = sigEval.signature;
+    const isComplexPattern = sigEval.isComplex;
+    const parts = sigEval.parts;
     const isTripleOrMore = parts.length >= 3;
-    const standard =
-      !isTripleOrMore &&
-      (STANDARD_CORRECTIVE_COMBOS.has(patternSignature) || STANDARD_MAIN_COMBOS.has(patternSignature));
-
-    const complexity: ComplexPatternReport['complexity'] =
-      parts.length === 1
-        ? 'LOW'
-        : parts.length === 2
-        ? 'MEDIUM'
-        : parts.length === 3
-        ? 'HIGH'
-        : 'TOO_COMPLEX';
+    const standard = sigEval.isStandard;
+    const complexity = sigEval.complexity;
 
     // X-Wave inspection (typically leg index 2 or middle linking leg)
     const xIdx = verts.length >= 4 ? 2 : Math.max(0, verts.length - 2);
     const xStart = verts[xIdx];
     const xEnd = verts[xIdx + 1];
     const xWaveCandleCount =
-      xStart && xEnd ? Math.max(1, Math.abs(xEnd.candleIndex - xStart.candleIndex)) : 0;
-
-    let xWaveValid = xWaveCandleCount >= 3;
-    let xWaveType: ComplexPatternReport['xWaveType'] = 'SINGLE';
-    let xWaveTypeFa = 'موج X تک‌موجی سریع (حداقل ۳ کندل)';
-
-    if (xWaveCandleCount < 3) {
-      xWaveValid = false;
-      xWaveType = 'INVALID';
-      xWaveTypeFa = `موج رابط X نامعتبر (${xWaveCandleCount} کندل < ۳ کندل)`;
+      options?.xWaveCandles !== undefined
+        ? options.xWaveCandles
+        : xStart && xEnd
+        ? Math.max(1, Math.abs(xEnd.candleIndex - xStart.candleIndex))
+        : 0;
+    const inferredSubwaves =
+      xStart && xEnd && candles.length > 0
+        ? [estimateSubwaveCount(candles, xStart.candleIndex, xEnd.candleIndex, 3)]
+        : undefined;
+    const xEval = PatternEngines.evaluateXWave({
+      kind: options?.xWaveKind ?? 'AUTO',
+      candleCount: xWaveCandleCount,
+      subwaves:
+        inferredSubwaves && inferredSubwaves[0] === 5 ? [3, 3, 3, 3, 3] : undefined
+    });
+    const xWaveValid = xEval.isValid;
+    const xWaveType = xEval.xWaveType;
+    const xWaveTypeFa = xEval.labelFa;
+    if (!xWaveValid) {
       warnings.push('هشدار جلسه ۱۶: موج رابط X حداقل باید ۳ کندل معتبر داشته باشد.');
-    } else if (xStart && xEnd) {
-      const subCount = estimateSubwaveCount(candles, xStart.candleIndex, xEnd.candleIndex, 3);
-      if (subCount === 5) {
-        xWaveType = 'IMPULSIVE';
-        xWaveTypeFa = 'موج X شتاب‌دار ۵ موجی (نادر)';
-      } else if (xWaveCandleCount >= 10) {
-        xWaveType = 'ZIGZAG_IDEAL';
-        xWaveTypeFa = 'موج X زیگزاگ ایده‌آل (۵-۳-۵)';
-      } else if (xWaveCandleCount >= 6) {
-        xWaveType = 'ZIGZAG_SIMPLE';
-        xWaveTypeFa = 'موج X زیگزاگ ساده (۳-۳-۳)';
-      }
     }
 
-    // 3 Cardinal Rules Check (Session 17: only 3 cardinal rules are sacred)
+    // 3 Cardinal Rules Check (Session 16 §2.4 & Session 17: only 3 cardinal rules are sacred)
     const violatedRules: number[] = [];
-    if (verts.length >= 4) {
+    if (options?.wave2RetracePctOf1 !== undefined || options?.wave4RetracePctOf3 !== undefined) {
+      const l1 = verts.length >= 2 ? Math.abs(verts[1].price - verts[0].price) : 100;
+      const l3 = verts.length >= 4 ? Math.abs(verts[3].price - verts[2].price) : 120;
+      const l5 = verts.length >= 6 ? Math.abs(verts[5].price - verts[4].price) : 110;
+      const cardEval = PatternEngines.evaluateComplexThreeCardinalRules({
+        wave2RetracePctOf1: options?.wave2RetracePctOf1 ?? 50,
+        wave3Len: l3,
+        wave1Len: l1,
+        wave5Len: l5,
+        wave4RetracePctOf3: options?.wave4RetracePctOf3 ?? 50
+      });
+      violatedRules.push(...cardEval.violatedRules);
+    } else if (verts.length >= 4) {
       const isBull = scenario.direction === 'BULLISH';
       const w1Start = verts[0].price;
       const w1End = verts[1].price;
@@ -4713,7 +5166,7 @@ export class PatternEngines {
       }
       if (verts.length >= 5) {
         const w4End = verts[4].price;
-        if ((isBull && w4End <= w1End) || (!isBull && w4End >= w1End)) violatedRules.push(3);
+        if ((isBull && w4End <= w2End) || (!isBull && w4End >= w2End)) violatedRules.push(3);
       }
     }
     const threeCardinalPassed = violatedRules.length === 0;
@@ -4737,12 +5190,36 @@ export class PatternEngines {
       TRIANGLE_EXPANDING: { rank: 6, label: 'رتبه ۶ — مثلث واگرا' },
       COMPLEX_COMBINATION: { rank: 7, label: 'رتبه ۷ — الگوی ترکیبی (آخرین انتخاب)' }
     };
-    const prio = priorityMap[scenario.patternType] || { rank: 7, label: 'رتبه ۷ — الگوی ترکیبی' };
+    const prio =
+      !isComplexPattern && patternSignature === 'Z'
+        ? { rank: 4, label: 'رتبه ۴ — زیگزاگ ساده' }
+        : priorityMap[scenario.patternType] || { rank: 7, label: 'رتبه ۷ — الگوی ترکیبی' };
+
+    const credEval = PatternEngines.evaluateComplexCredibility({
+      isComplex: isComplexPattern,
+      hasSimpleConfirmation: options?.hasSimpleConfirmation
+    });
+
+    const isMarketEnd =
+      options?.isMarketEnd !== undefined
+        ? options.isMarketEnd
+        : verts.length >= 6 && !verts[verts.length - 1]?.isConfirmed;
+    const marketEndEval = PatternEngines.evaluateComplexMarketEndRestriction({
+      isMarketEnd,
+      simplePatternPossible: options?.simplePatternPossible,
+      hasStrongConfirmation: options?.hasStrongConfirmation
+    });
+    const isMarketEndRestricted = marketEndEval.isRestricted;
+
+    const svcRec = PatternEngines.recommendSimpleVsComplex({
+      simplePossible: Boolean(options?.simplePatternPossible) || !isComplexPattern,
+      complexPossible: isComplexPattern && xWaveValid && threeCardinalPassed
+    });
 
     const recommend: ComplexPatternReport['recommend'] =
       isTripleOrMore || complexity === 'TOO_COMPLEX'
         ? 'RECOUNT'
-        : isComplexType
+        : isComplexPattern && !options?.simplePatternPossible
         ? parts.length >= 3
           ? 'COMPLEX_3'
           : 'COMPLEX_2'
@@ -4750,36 +5227,43 @@ export class PatternEngines {
 
     const recommendFa =
       recommend === 'SIMPLE'
-        ? 'اولویت جلسه ۱۷: الگوی ساده کفایت می‌کند؛ از پیچیده‌سازی با موج X پرهیز شود.'
+        ? 'اولویت جلسه ۱۶ و ۱۷: الگوی ساده کفایت می‌کند؛ از پیچیده‌سازی با موج X پرهیز شود.'
         : recommend === 'COMPLEX_2'
         ? 'ترکیب دوالگویی استاندارد (W-X-Y) تنها در صورت رد کامل الگوهای ساده معتبر است.'
         : 'هشدار سه‌الگویی یا پیچیدگی زیاد: احتمالاً شمارش اشتباه است؛ بازبینی از تایم‌فریم بالاتر توصیه می‌شود.';
 
-    const isMarketEndRestricted = verts.length >= 6 && !verts[verts.length - 1]?.isConfirmed;
-    if (isComplexType && isMarketEndRestricted) {
-      warnings.push('هشدار جلسه ۱۶: از به‌کارگیری الگوهای ترکیبی پیچیده در انتهای باز بازار پرهیز کنید.');
+    if (isComplexPattern && isMarketEndRestricted) {
+      warnings.push(marketEndEval.reasonFa);
     }
-    if (!threeCardinalPassed && !isComplexType) {
+    if (!threeCardinalPassed) {
       warnings.push(`قوانین بنیادین نقض‌شده: قانون ${violatedRules.join('، ')}`);
     }
-    if (isComplexType) {
+    if (isComplexPattern) {
       notes.push('۹ ترکیب استاندارد اصلاحی: Z-X-Z, Z-X-F, Z-X-T, F-X-Z, F-X-F, F-X-T, T-X-Z, T-X-F, T-X-T');
       notes.push('ترکیب‌های اصلی مجاز: I-X-Z, G-X-F, I-X-I, G-X-G, T-X-T');
+      notes.push(credEval.noteFa);
     }
 
-    let confidence = isComplexType ? 74 : 88;
-    if (!xWaveValid && isComplexType) confidence -= 20;
+    let confidence = !isComplexPattern ? 88 : credEval.credibilityTier === 'MEDIUM' ? 78 : 68;
+    if (!xWaveValid && isComplexPattern) confidence -= 20;
     if (complexity === 'TOO_COMPLEX') confidence -= 25;
-    if (!threeCardinalPassed) confidence -= 15;
+    if (!threeCardinalPassed) confidence -= 20;
+    if (sigEval.rarityStatus === 'RARE') confidence -= 6;
     confidence = Math.max(20, Math.min(98, confidence));
 
     return {
-      detected: isComplexType,
+      detected: (isComplexType || (isComplexPattern && options?.signature !== undefined)) && isComplexPattern,
+      isComplexPattern,
       patternSignature,
       standard,
+      combinationTier: sigEval.combinationTier,
+      combinationCategory: sigEval.combinationCategory,
+      rarityStatus: sigEval.rarityStatus,
       complexity,
       priorityRank: prio.rank,
       priorityLabelFa: prio.label,
+      credibilityTier: credEval.credibilityTier,
+      credibilityNoteFa: credEval.noteFa,
       xWaveValid,
       xWaveType,
       xWaveTypeFa,
@@ -4788,7 +5272,10 @@ export class PatternEngines {
       violatedRules,
       recommend,
       recommendFa,
+      simpleVsComplexDecision: svcRec.decision,
+      marketEndDecision: marketEndEval.decision,
       isMarketEndRestricted,
+      abbreviationsUsed: sigEval.abbreviationsUsed,
       confidence,
       warnings,
       notes

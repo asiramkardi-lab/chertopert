@@ -29,6 +29,7 @@ import {
   FlatSubtype,
   TriangleAnalysisOptions,
   TriangleAnalysisReport,
+  ComplexAnalysisOptions,
   ComplexPatternReport,
   MarketTerminalScenarioWarning
 } from '../types/elliott';
@@ -1102,6 +1103,91 @@ export class RulesEngine {
       isInvalidTriangle: isInvalidTriangleFlag,
       invalidTriangleReasonFa: report.invalidTriangleReasonFa,
       ...(labeledScenario ? { labeledScenario } : {}),
+      report,
+      rules
+    };
+  }
+
+  /**
+   * RulesEngine 'ComplexPatternValidator' (Session 16 §2.1..§2.14):
+   * Evaluates Complex Combinations (Z-X-Z..T-X-T, I-X-Z, G-X-F, multi-complex chains),
+   * X-Wave validity (>=3 candles; Single/Zigzag/Impulsive), 3-Cardinal-Rule-only enforcement,
+   * 7-tier priority rank, credibility cost, and market-end restriction.
+   */
+  public static ComplexPatternValidator(
+    scenario: WaveScenario,
+    candles: Candle[] = [],
+    options?: ComplexAnalysisOptions
+  ): {
+    isComplexPattern: boolean;
+    isStandardCombination: boolean;
+    isValidComplex: boolean;
+    report: ComplexPatternReport;
+    rules: RuleValidationItem[];
+  } {
+    const report = PatternEngines.analyzeComplexPattern(scenario, candles, options);
+    const rules: RuleValidationItem[] = [
+      {
+        ruleId: 'COMPLEX_SIGNATURE_CLASS',
+        name: 'Complex Combination Structure (Session 16 §2.1, §2.7–2.11)',
+        nameFa: 'نوع ترکیب الگویی (استاندارد ۲الگویی / غیراستاندارد / ساده‌شماری)',
+        type: 'STRUCTURE',
+        passed: !report.isComplexPattern || report.standard,
+        score: !report.isComplexPattern ? 100 : report.standard ? 85 : 40,
+        conceptId: 'C26',
+        details: report.patternSignature,
+        messageFa: !report.isComplexPattern
+          ? `الگوی ساده (${report.patternSignature}) — ساده‌شماری بر ترکیبی ترجیح دارد.`
+          : report.standard
+          ? `ترکیب استاندارد (${report.patternSignature}) با ۲ الگو و موج رابط X.`
+          : `ترکیب غیراستاندارد (${report.patternSignature}): پیچیدگی بالا و احتمال شمارش نادرست.`
+      },
+      {
+        ruleId: 'COMPLEX_X_WAVE_VALIDITY',
+        name: 'X-Wave Minimum 3 Candles & Type (Session 16 §2.2 & §2.9)',
+        nameFa: 'اعتبار موج رابط X (حداقل ۳ کندل)',
+        type: 'HARD',
+        passed: report.xWaveValid,
+        score: report.xWaveValid ? 100 : 0,
+        conceptId: 'C26',
+        messageFa: report.xWaveTypeFa
+      },
+      {
+        ruleId: 'COMPLEX_THREE_CARDINAL_RULES',
+        name: 'Three Cardinal Rules in Complex Patterns (Session 16 §2.4)',
+        nameFa: 'اجرای ۳ قانون بنیادین در الگوی ترکیبی',
+        type: 'HARD',
+        passed: report.threeCardinalPassed,
+        score: report.threeCardinalPassed ? 100 : 0,
+        conceptId: 'C07',
+        messageFa: report.threeCardinalPassed
+          ? 'هر ۳ قانون بنیادین (موج ۳ کوتاه‌ترین نباشد، موج ۲ < ۱۰۰٪ ۱ و موج ۴ < ۱۰۰٪ ۳) رعایت شده‌اند.'
+          : `نقض قانون ${report.violatedRules.join(' و ')} در الگوی ترکیبی.`
+      },
+      {
+        ruleId: 'COMPLEX_MARKET_END_CHECK',
+        name: 'Complex Pattern Market-End Restriction (Session 16 §2.12)',
+        nameFa: 'محدودیت استفاده در انتهای بازار',
+        type: 'SOFT',
+        passed: !report.isMarketEndRestricted,
+        score: report.isMarketEndRestricted ? 35 : 90,
+        conceptId: 'C30',
+        messageFa: report.isMarketEndRestricted
+          ? 'هشدار جلسه ۱۶: در انتهای بازار از الگوی ترکیبی بدون تأیید قوی استفاده نکنید و ساده‌شماری را ترجیح دهید.'
+          : 'شرایط زمینه برای ارزیابی الگوی ترکیبی مجاز است.'
+      }
+    ];
+
+    const isValidComplex =
+      report.isComplexPattern &&
+      report.xWaveValid &&
+      report.threeCardinalPassed &&
+      !report.isMarketEndRestricted;
+
+    return {
+      isComplexPattern: report.isComplexPattern,
+      isStandardCombination: report.standard,
+      isValidComplex,
       report,
       rules
     };
