@@ -4375,6 +4375,518 @@ export class PatternEngines {
   }
 
   /**
+   * Session 18 (§2.1, T-18.1..4):
+   * Relative Wave Extension classifier: compares wave lengths against each other.
+   * >= 161.8% relative dominance marks extension; equal waves -> NONE.
+   */
+  public static evaluateRelativeWaveExtension(params: {
+    wave1Len: number;
+    wave3Len: number;
+    wave5Len: number;
+  }): {
+    extendedWave: 'WAVE_1' | 'WAVE_3' | 'WAVE_5' | null;
+    rarity: 'COMMON' | 'LESS_COMMON' | 'RARE' | 'NONE';
+    dominantRatioPct: number;
+    reasonFa: string;
+  } {
+    const w1 = Math.max(0.0001, Math.abs(params.wave1Len));
+    const w3 = Math.max(0.0001, Math.abs(params.wave3Len));
+    const w5 = Math.max(0.0001, Math.abs(params.wave5Len));
+
+    const r1vs3 = (w1 / w3) * 100;
+    const r3vs1 = (w3 / w1) * 100;
+    const r5vs3 = (w5 / w3) * 100;
+
+    if (r3vs1 >= 161.8 && w3 >= w1 && w3 >= w5) {
+      return {
+        extendedWave: 'WAVE_3',
+        rarity: 'COMMON',
+        dominantRatioPct: Math.round(r3vs1 * 10) / 10,
+        reasonFa: `کشیدگی موج ۳ (${Math.round(r3vs1)}٪ موج ۱ — رایج‌ترین حالت کشیدگی).`
+      };
+    }
+    if (r1vs3 >= 161.8 && w1 >= w3 && w1 >= w5) {
+      return {
+        extendedWave: 'WAVE_1',
+        rarity: 'LESS_COMMON',
+        dominantRatioPct: Math.round(r1vs3 * 10) / 10,
+        reasonFa: `کشیدگی موج ۱ (${Math.round(r1vs3)}٪ موج ۳ — موج اول فراتر از شخصیت معمول حرکت کرده است).`
+      };
+    }
+    if (r5vs3 >= 161.8 && w5 >= w3 && w5 >= w1) {
+      return {
+        extendedWave: 'WAVE_5',
+        rarity: 'RARE',
+        dominantRatioPct: Math.round(r5vs3 * 10) / 10,
+        reasonFa: `کشیدگی موج ۵ (${Math.round(r5vs3)}٪ موج ۳ — نادر و همراه با زنگ خطر برگشت).`
+      };
+    }
+    return {
+      extendedWave: null,
+      rarity: 'NONE',
+      dominantRatioPct: 100,
+      reasonFa: 'همه امواج هم‌اندازه یا متعادل هستند؛ کشیدگی خاصی وجود ندارد.'
+    };
+  }
+
+  /**
+   * Session 18 (§2.2 & §2.5, T-18.5..7, T-18.14..16):
+   * Wave 1 Extension confirmation:
+   * - Requires prior correction reference (not absolute bottom) + 100% coverage of prior move + W2 < 38.2%
+   * - Consequences: W3 < 100% W1, W4 overlaps W1 (Terminal tendency), W5 short.
+   */
+  public static evaluateWave1Extension(params: {
+    afterCorrection: boolean;
+    priorMoveCoveragePct: number;
+    wave2RetracePct: number;
+    fromAbsoluteBottom?: boolean;
+  }): {
+    status: 'CONFIRMED' | 'BORDERLINE' | 'UNCONFIRMED_NO_REFERENCE' | 'NOT_CONFIRMED';
+    extended: boolean;
+    consequencesFa: string[];
+    reasonFa: string;
+  } {
+    if (params.fromAbsoluteBottom || !params.afterCorrection) {
+      return {
+        status: 'UNCONFIRMED_NO_REFERENCE',
+        extended: false,
+        consequencesFa: [],
+        reasonFa: 'موج ۱ از کف مطلق شروع شده و مرجع قبلی ندارد؛ کشیدگی موج ۱ قابل تشخیص نیست.'
+      };
+    }
+    if (params.priorMoveCoveragePct < 100 - 1e-6) {
+      return {
+        status: 'NOT_CONFIRMED',
+        extended: false,
+        consequencesFa: [],
+        reasonFa: 'موج ۱ هنوز ۱۰۰٪ حرکت قبلی را پوشش نداده است؛ کشیدگی موج ۱ تأیید نمی‌شود.'
+      };
+    }
+    if (Math.abs(params.wave2RetracePct - 38.2) <= 0.1) {
+      return {
+        status: 'BORDERLINE',
+        extended: true,
+        consequencesFa: [
+          'موج ۳ کوتاه‌تر از ۱۰۰٪ موج ۱',
+          'احتمال ورود موج ۴ به محدوده موج ۱ (ترمینال)',
+          'کوتاه‌شدگی موج ۵'
+        ],
+        reasonFa: 'اصلاح موج ۲ دقیقاً روی مرز ۳۸.۲٪ است؛ کشیدگی موج ۱ مرزی (تأیید با احتیاط).'
+      };
+    }
+    if (params.wave2RetracePct < 38.2) {
+      return {
+        status: 'CONFIRMED',
+        extended: true,
+        consequencesFa: [
+          'موج ۳ کوتاه‌تر از ۱۰۰٪ موج ۱ می‌شود',
+          'موج ۴ احتمالاً وارد محدوده ۱ می‌شود (ترمینال)',
+          'موج ۵ کوتاه می‌شود'
+        ],
+        reasonFa: `کشیدگی موج ۱ تأیید شد (پوشش ${params.priorMoveCoveragePct}٪ و اصلاح موج ۲=${params.wave2RetracePct}٪ < ۳۸.۲٪).`
+      };
+    }
+    return {
+      status: 'NOT_CONFIRMED',
+      extended: false,
+      consequencesFa: [],
+      reasonFa: `اصلاح موج ۲ (${params.wave2RetracePct}٪) بیش از ۳۸.۲٪ است؛ کشیدگی موج ۱ تأیید نمی‌شود.`
+    };
+  }
+
+  /**
+   * Session 18 (§2.3 & §2.6, T-18.8..10, T-18.17..19):
+   * Wave 3 Extension confirmation:
+   * - Requires W3 > 161.8% W1 and W4 < 38.2% W3 (BORDERLINE at 38.2%; >38.2% not confirmed)
+   * - W3 > 261.8% -> SEVERE
+   */
+  public static evaluateWave3Extension(params: {
+    wave3PctOf1: number;
+    wave4RetracePct: number;
+  }): {
+    status: 'CONFIRMED' | 'BORDERLINE' | 'NOT_CONFIRMED';
+    extended: boolean;
+    severity: 'MODERATE' | 'STRONG' | 'SEVERE' | 'NONE';
+    trailingStopRequired: boolean;
+    reasonFa: string;
+  } {
+    if (params.wave3PctOf1 < 161.8 - 1e-6) {
+      return {
+        status: 'NOT_CONFIRMED',
+        extended: false,
+        severity: 'NONE',
+        trailingStopRequired: false,
+        reasonFa: `موج ۳ (${params.wave3PctOf1}٪) کمتر از ۱۶۱.۸٪ موج ۱ است؛ کشیدگی موج ۳ وجود ندارد.`
+      };
+    }
+    if (params.wave4RetracePct > 38.2 + 0.1) {
+      return {
+        status: 'NOT_CONFIRMED',
+        extended: false,
+        severity: 'NONE',
+        trailingStopRequired: false,
+        reasonFa: `اصلاح موج ۴ (${params.wave4RetracePct}٪) بیشتر از ۳۸.۲٪ است؛ کشیدگی موج ۳ تأیید نمی‌شود.`
+      };
+    }
+    const severity: 'MODERATE' | 'STRONG' | 'SEVERE' =
+      params.wave3PctOf1 >= 261.8
+        ? 'SEVERE'
+        : params.wave3PctOf1 >= 200
+        ? 'STRONG'
+        : 'MODERATE';
+    if (Math.abs(params.wave4RetracePct - 38.2) <= 0.1) {
+      return {
+        status: 'BORDERLINE',
+        extended: true,
+        severity,
+        trailingStopRequired: true,
+        reasonFa: `اصلاح موج ۴ روی مرز ۳۸.۲٪ است؛ کشیدگی موج ۳ مرزی (${severity}).`
+      };
+    }
+    return {
+      status: 'CONFIRMED',
+      extended: true,
+      severity,
+      trailingStopRequired: true,
+      reasonFa:
+        severity === 'SEVERE'
+          ? `کشیدگی شدید موج ۳ (${params.wave3PctOf1}٪ > ۲۶۱.۸٪) و موج ۴=${params.wave4RetracePct}٪ < ۳۸.۲٪ — Trailing Stop ضروری است.`
+          : `کشیدگی موج ۳ (${params.wave3PctOf1}٪ > ۱۶۱.۸٪ و موج ۴ < ۳۸.۲٪) تأیید شد — احتمال کوتاه‌شدگی موج ۵.`
+    };
+  }
+
+  /**
+   * Session 18 (§2.4 & §2.7, T-18.11..13, T-18.20..22):
+   * Wave 5 Extension confirmation:
+   * - < 161.8% -> NONE
+   * - = 161.8% -> BORDERLINE
+   * - > 161.8% -> EXTENDED
+   * - > 200% -> SEVERE_ALARM (danger bell: imminent drop, profit taking required)
+   * - > 261.8% -> EXTREME_SEVERE
+   */
+  public static evaluateWave5Extension(params: {
+    wave5PctOf3: number;
+  }): {
+    status: 'NONE' | 'BORDERLINE' | 'EXTENDED' | 'SEVERE_ALARM' | 'EXTREME_SEVERE';
+    extended: boolean;
+    dangerBell: boolean;
+    takeProfitRequired: boolean;
+    reasonFa: string;
+  } {
+    const pct = params.wave5PctOf3;
+    if (Math.abs(pct - 161.8) <= 0.1) {
+      return {
+        status: 'BORDERLINE',
+        extended: true,
+        dangerBell: false,
+        takeProfitRequired: true,
+        reasonFa: 'موج ۵ دقیقاً روی مرز ۱۶۱.۸٪ موج ۳ است (مرزی) — آماده سیو سود باشید.'
+      };
+    }
+    if (pct < 161.8) {
+      return {
+        status: 'NONE',
+        extended: false,
+        dangerBell: false,
+        takeProfitRequired: false,
+        reasonFa: `موج ۵ (${pct}٪) زیر ۱۶۱.۸٪ موج ۳ است؛ کشیدگی موج ۵ رخ نداده است.`
+      };
+    }
+    if (pct > 261.8) {
+      return {
+        status: 'EXTREME_SEVERE',
+        extended: true,
+        dangerBell: true,
+        takeProfitRequired: true,
+        reasonFa: `کشیدگی بسیار شدید موج ۵ (${pct}٪ > ۲۶۱.۸٪ موج ۳) — هشدار ریزش شدید و خروج فوری!`
+      };
+    }
+    if (pct > 200) {
+      return {
+        status: 'SEVERE_ALARM',
+        extended: true,
+        dangerBell: true,
+        takeProfitRequired: true,
+        reasonFa: `زنگ خطر کشیدگی شدید موج ۵ (${pct}٪ > ۲۰۰٪ موج ۳) — هر لحظه امکان ریزش وجود دارد؛ سیو سود ضروری است.`
+      };
+    }
+    return {
+      status: 'EXTENDED',
+      extended: true,
+      dangerBell: false,
+      takeProfitRequired: true,
+      reasonFa: `کشیدگی موج ۵ (${pct}٪ > ۱۶۱.۸٪ موج ۳) — مدیریت معامله و سیو سود پله‌ای توصیه می‌شود.`
+    };
+  }
+
+  /**
+   * Session 18 (§2.8, §2.10, §2.11, §2.12, T-18.23..25, T-18.29..34):
+   * Calculates TMV Prime (Wave 1 high/low), TMV Ideal (100% 3-pt projection Z + (Y-X)),
+   * TMV Alternate (161.8% and 261.8% projection), and rejects Alternate < 100%.
+   */
+  public static evaluateTmvTargets(params: {
+    x: number;
+    y: number;
+    z: number;
+    direction?: 'BULLISH' | 'BEARISH';
+    alternateRatioPct?: number;
+  }): {
+    isValid: boolean;
+    tmvPrime: number;
+    tmvIdeal100: number;
+    tmvAlternate127: number;
+    tmvAlternate1618: number;
+    tmvAlternate2618: number;
+    selectedAlternatePrice: number | null;
+    reasonFa: string;
+  } {
+    const dir = params.direction ?? (params.y >= params.x ? 'BULLISH' : 'BEARISH');
+    const signedMove = params.y - params.x; // positive in bullish, negative in bearish
+    const tmvPrime = roundPrice(params.y);
+    const tmvIdeal100 = roundPrice(params.z + signedMove);
+    const tmvAlternate127 = roundPrice(params.z + signedMove * 1.27);
+    const tmvAlternate1618 = roundPrice(params.z + signedMove * 1.618);
+    const tmvAlternate2618 = roundPrice(params.z + signedMove * 2.618);
+
+    const reqAlt = params.alternateRatioPct ?? 161.8;
+    if (reqAlt < 100) {
+      return {
+        isValid: false,
+        tmvPrime,
+        tmvIdeal100,
+        tmvAlternate127,
+        tmvAlternate1618,
+        tmvAlternate2618,
+        selectedAlternatePrice: null,
+        reasonFa: `نسبت TMV Alternate (${reqAlt}٪) کمتر از ۱۰۰٪ نامعتبر است.`
+      };
+    }
+
+    const selectedAlternatePrice = roundPrice(params.z + signedMove * (reqAlt / 100));
+    return {
+      isValid: true,
+      tmvPrime,
+      tmvIdeal100,
+      tmvAlternate127,
+      tmvAlternate1618,
+      tmvAlternate2618,
+      selectedAlternatePrice,
+      reasonFa:
+        dir === 'BULLISH'
+          ? `اهداف صعودی TMV: Prime=${tmvPrime} (سقف موج ۱) ← Ideal=${tmvIdeal100} (۱۰۰٪) ← Alt=${tmvAlternate1618} (۱۶۱.۸٪).`
+          : `اهداف نزولی TMV: Prime=${tmvPrime} (کف موج ۱) ← Ideal=${tmvIdeal100} (۱۰۰٪) ← Alt=${tmvAlternate1618} (۱۶۱.۸٪).`
+    };
+  }
+
+  /**
+   * Session 18 (§2.9, T-18.26..28):
+   * PRZ (Potential Reversal Zone) classifier:
+   * - 61.8% -> Wave 2 reversal zone
+   * - 78.6% -> Wave 2 accelerated reversal zone
+   * - 38.2% -> Wave 4 reversal zone
+   */
+  public static evaluatePrzReversalZone(params: {
+    retracementPct: number;
+  }): {
+    zoneType: 'WAVE_2_PRZ' | 'WAVE_2_ACCELERATED_PRZ' | 'WAVE_4_PRZ' | 'OTHER_PRZ';
+    expectedWave: '2' | '4' | 'UNKNOWN';
+    isAcceleratedReversal: boolean;
+    distinctionFa: string;
+    reasonFa: string;
+  } {
+    const r = params.retracementPct;
+    const distinctionFa =
+      'TMV هدف حرکتی موج است که قیمت برای رسیدن به آن حرکت می‌کند؛ PRZ محدوده پرپتانسیل چرخش است که قیمت ممکن است در آن برگردد.';
+    if (Math.abs(r - 78.6) <= 1.5) {
+      return {
+        zoneType: 'WAVE_2_ACCELERATED_PRZ',
+        expectedWave: '2',
+        isAcceleratedReversal: true,
+        distinctionFa,
+        reasonFa: 'PRZ روی ۷۸.۶٪: محدوده چرخش موج ۲ همراه با شتاب‌گیری قیمت.'
+      };
+    }
+    if (Math.abs(r - 61.8) <= 1.5) {
+      return {
+        zoneType: 'WAVE_2_PRZ',
+        expectedWave: '2',
+        isAcceleratedReversal: false,
+        distinctionFa,
+        reasonFa: 'PRZ روی ۶۱.۸٪: محدوده کلاسیک چرخش موج ۲.'
+      };
+    }
+    if (Math.abs(r - 38.2) <= 1.5) {
+      return {
+        zoneType: 'WAVE_4_PRZ',
+        expectedWave: '4',
+        isAcceleratedReversal: false,
+        distinctionFa,
+        reasonFa: 'PRZ روی ۳۸.۲٪: محدوده چرخش متداول موج ۴.'
+      };
+    }
+    return {
+      zoneType: 'OTHER_PRZ',
+      expectedWave: 'UNKNOWN',
+      isAcceleratedReversal: false,
+      distinctionFa,
+      reasonFa: `PRZ روی ${r}٪: محدوده بازگشت غیرکلاسیک نیازمند هم‌پوشانی با حمایت/مقاومت.`
+    };
+  }
+
+  /**
+   * Session 18 (§2.13, T-18.35..37):
+   * Explicit TMV-based Trailing Stop progression helper.
+   */
+  public static evaluateTmvTrailingStopStep(params: {
+    tmvPrimeHit?: boolean;
+    tmvIdealHit?: boolean;
+    tmvAlternateHit?: boolean;
+    wave5Extended?: boolean;
+    wave2Low?: number;
+    ret618Level?: number;
+    proj100Level?: number;
+    currentPrice?: number;
+  }): {
+    stage:
+      | 'INITIAL_BELOW_WAVE_2'
+      | 'BELOW_WAVE_2'
+      | 'BELOW_618_RETRACEMENT'
+      | 'BELOW_100_PROJECTION'
+      | 'IMMEDIATE_PROFIT_TAKING';
+    action: 'HOLD_INITIAL_STOP' | 'TRAIL_STOP' | 'IMMEDIATE_PROFIT_TAKING';
+    stopBasisFa: string;
+    suggestedStopPrice: number | null;
+  } {
+    if (params.wave5Extended) {
+      return {
+        stage: 'IMMEDIATE_PROFIT_TAKING',
+        action: 'IMMEDIATE_PROFIT_TAKING',
+        stopBasisFa: 'کشیدگی موج ۵: سیو سود فوری و خروج یا بستن استاپ روی قیمت فعلی.',
+        suggestedStopPrice: params.currentPrice !== undefined ? roundPrice(params.currentPrice) : null
+      };
+    }
+    if (params.tmvAlternateHit) {
+      return {
+        stage: 'BELOW_100_PROJECTION',
+        action: 'TRAIL_STOP',
+        stopBasisFa: 'عبور از TMV Alternate (۱۶۱.۸٪): انتقال استاپ به زیر ۱۰۰٪ پروجکشن.',
+        suggestedStopPrice: params.proj100Level !== undefined ? roundPrice(params.proj100Level) : null
+      };
+    }
+    if (params.tmvIdealHit) {
+      return {
+        stage: 'BELOW_618_RETRACEMENT',
+        action: 'TRAIL_STOP',
+        stopBasisFa: 'عبور از TMV Ideal (۱۰۰٪): انتقال استاپ به زیر ۶۱.۸٪ رتریسمنت.',
+        suggestedStopPrice: params.ret618Level !== undefined ? roundPrice(params.ret618Level) : null
+      };
+    }
+    if (params.tmvPrimeHit) {
+      return {
+        stage: 'BELOW_WAVE_2',
+        action: 'TRAIL_STOP',
+        stopBasisFa: 'عبور از TMV Prime (سقف موج ۱): انتقال استاپ به زیر انتهای موج ۲.',
+        suggestedStopPrice: params.wave2Low !== undefined ? roundPrice(params.wave2Low) : null
+      };
+    }
+    return {
+      stage: 'INITIAL_BELOW_WAVE_2',
+      action: 'HOLD_INITIAL_STOP',
+      stopBasisFa: 'ورود روی ۶۱.۸٪ موج ۲: حد ضرر اولیه زیر کف موج ۲ قرار گیرد.',
+      suggestedStopPrice: params.wave2Low !== undefined ? roundPrice(params.wave2Low) : null
+    };
+  }
+
+  /**
+   * Session 18 Contract CLI JSON in/out handler (017-wave-extension-tmv-engine).
+   */
+  public static runSession18ExtensionTmvCli(requestJson: string): string {
+    try {
+      const req = JSON.parse(requestJson) as {
+        action:
+          | 'detect_relative_extension'
+          | 'evaluate_wave1_extension'
+          | 'evaluate_wave3_extension'
+          | 'evaluate_wave5_extension'
+          | 'calculate_tmv'
+          | 'evaluate_prz'
+          | 'evaluate_trailing';
+        payload: Record<string, unknown>;
+      };
+
+      let result: unknown;
+      if (req.action === 'detect_relative_extension') {
+        result = PatternEngines.evaluateRelativeWaveExtension({
+          wave1Len: Number(req.payload?.wave1Len ?? 100),
+          wave3Len: Number(req.payload?.wave3Len ?? 100),
+          wave5Len: Number(req.payload?.wave5Len ?? 100)
+        });
+      } else if (req.action === 'evaluate_wave1_extension') {
+        result = PatternEngines.evaluateWave1Extension({
+          afterCorrection: Boolean(req.payload?.afterCorrection),
+          priorMoveCoveragePct: Number(req.payload?.priorMoveCoveragePct ?? 100),
+          wave2RetracePct: Number(req.payload?.wave2RetracePct ?? 30),
+          fromAbsoluteBottom: Boolean(req.payload?.fromAbsoluteBottom)
+        });
+      } else if (req.action === 'evaluate_wave3_extension') {
+        result = PatternEngines.evaluateWave3Extension({
+          wave3PctOf1: Number(req.payload?.wave3PctOf1 ?? 200),
+          wave4RetracePct: Number(req.payload?.wave4RetracePct ?? 30)
+        });
+      } else if (req.action === 'evaluate_wave5_extension') {
+        result = PatternEngines.evaluateWave5Extension({
+          wave5PctOf3: Number(req.payload?.wave5PctOf3 ?? 170)
+        });
+      } else if (req.action === 'calculate_tmv') {
+        result = PatternEngines.evaluateTmvTargets({
+          x: Number(req.payload?.x ?? 100),
+          y: Number(req.payload?.y ?? 200),
+          z: Number(req.payload?.z ?? 150),
+          direction: req.payload?.direction as 'BULLISH' | 'BEARISH' | undefined,
+          alternateRatioPct:
+            req.payload?.alternateRatioPct !== undefined
+              ? Number(req.payload.alternateRatioPct)
+              : undefined
+        });
+      } else if (req.action === 'evaluate_prz') {
+        result = PatternEngines.evaluatePrzReversalZone({
+          retracementPct: Number(req.payload?.retracementPct ?? 61.8)
+        });
+      } else if (req.action === 'evaluate_trailing') {
+        result = PatternEngines.evaluateTmvTrailingStopStep({
+          tmvPrimeHit: Boolean(req.payload?.tmvPrimeHit),
+          tmvIdealHit: Boolean(req.payload?.tmvIdealHit),
+          tmvAlternateHit: Boolean(req.payload?.tmvAlternateHit),
+          wave5Extended: Boolean(req.payload?.wave5Extended),
+          wave2Low: req.payload?.wave2Low !== undefined ? Number(req.payload.wave2Low) : undefined,
+          ret618Level: req.payload?.ret618Level !== undefined ? Number(req.payload.ret618Level) : undefined,
+          proj100Level: req.payload?.proj100Level !== undefined ? Number(req.payload.proj100Level) : undefined,
+          currentPrice: req.payload?.currentPrice !== undefined ? Number(req.payload.currentPrice) : undefined
+        });
+      } else {
+        return JSON.stringify({
+          status: 'error',
+          feature: '017-wave-extension-tmv-engine',
+          error: `Unsupported CLI action: ${String(req.action)}`
+        });
+      }
+
+      return JSON.stringify({
+        status: 'ok',
+        feature: '017-wave-extension-tmv-engine',
+        action: req.action,
+        result
+      });
+    } catch (err) {
+      return JSON.stringify({
+        status: 'error',
+        feature: '017-wave-extension-tmv-engine',
+        error: err instanceof Error ? err.message : 'Invalid JSON payload'
+      });
+    }
+  }
+
+  /**
    * Step 0 Pre-Flight Check (Tables 1 & 2):
    * Validates candle feed integrity (empty, <10 candles, <=10% NaN forward-fill vs >10% error,
    * duplicate/out-of-order timestamps, zero price movement, >50% Doji rate, negative prices, high < low,

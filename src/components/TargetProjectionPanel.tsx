@@ -206,6 +206,31 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
             report.tmvSummary?.alternate1618,
             item.parentWaveLabel
           );
+          const s18Verts = scenario.vertices;
+          const s18W1 = s18Verts.length >= 2 ? Math.abs(s18Verts[1].price - s18Verts[0].price) : 100;
+          const s18W3 = s18Verts.length >= 4 ? Math.abs(s18Verts[3].price - s18Verts[2].price) : 100;
+          const s18W5 = s18Verts.length >= 6 ? Math.abs(s18Verts[5].price - s18Verts[4].price) : 100;
+          const s18RelExt =
+            s18Verts.length >= 4
+              ? PatternEngines.evaluateRelativeWaveExtension({
+                  wave1Len: s18W1,
+                  wave3Len: s18W3,
+                  wave5Len: s18Verts.length >= 6 ? s18W5 : s18W1
+                })
+              : null;
+          const s18Wave5Ext =
+            s18Verts.length >= 6 && s18W3 > 0
+              ? PatternEngines.evaluateWave5Extension({ wave5PctOf3: (s18W5 / s18W3) * 100 })
+              : null;
+          const s18TmvExact =
+            s18Verts.length >= 3
+              ? PatternEngines.evaluateTmvTargets({
+                  x: s18Verts[0].price,
+                  y: s18Verts[1].price,
+                  z: s18Verts[2].price,
+                  direction: scenario.direction
+                })
+              : null;
           const isDiagonalPattern =
             scenario.patternType === 'LEADING_DIAGONAL' ||
             scenario.patternType === 'ANTI_LEADING_DIAGONAL' ||
@@ -571,6 +596,36 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                         {w}
                       </div>
                     ))}
+                    {(s18RelExt || s18TmvExact) && (
+                      <div className="pt-1.5 border-t border-slate-800/80 space-y-1 text-[9.5px] text-slate-300">
+                        {s18RelExt && (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-400">کشیدگی نسبی (جلسه ۱۸):</span>
+                            <span
+                              className={`font-semibold ${
+                                s18Wave5Ext?.dangerBell
+                                  ? 'text-rose-300'
+                                  : s18RelExt.extendedWave
+                                  ? 'text-amber-200'
+                                  : 'text-emerald-300'
+                              }`}
+                            >
+                              {s18Wave5Ext?.dangerBell
+                                ? s18Wave5Ext.reasonFa
+                                : s18RelExt.reasonFa}
+                            </span>
+                          </div>
+                        )}
+                        {s18TmvExact && (
+                          <div className="font-mono text-cyan-200/90 tabular-nums">
+                            Z+(Y-X): Prime={s18TmvExact.tmvPrime.toLocaleString()} · Ideal={s18TmvExact.tmvIdeal100.toLocaleString()} · Alt161.8={s18TmvExact.tmvAlternate1618.toLocaleString()} · Alt261.8={s18TmvExact.tmvAlternate2618.toLocaleString()}
+                          </div>
+                        )}
+                        <div className="text-slate-400">
+                          تفاوت TMV و PRZ: TMV هدف حرکت است (باید برسد)؛ PRZ محدوده چرخش است (احتمال برگشت).
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSION16' | 'SESSION17' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSION16' | 'SESSION17' | 'SESSION18' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -534,6 +534,66 @@ class ComplexAdvRequest(BaseModel):
       <div>موج X: {{ xWave.xWaveSubType }} ({{ xWave.xWaveRarity }})</div>
       <div>پیشنهاد ساده‌شماری: {{ recommend.selectedCount }}</div>
       <div>فارس (Z-X-F-X-Z): {{ fars.legsBreakdown.length }} بخش</div>
+    </div>
+  </UCard>
+</template>
+\`\`\`
+`;
+
+  const session18Markdown = `# جلسه ۱۸: کشیدگی امواج و TMV/PRZ (017-wave-extension-tmv-engine) — Spec-Kit SDD + Backend & Frontend
+
+## بخش ۱: ۱۴ مفهوم استخراج‌شده جلسه ۱۸ (۱۸-۱ تا ۱۸-۱۴) و تست‌های مرزی (T-18.1 تا T-18.40)
+| کد | مفهوم | شرایط مرزی و خروجی موتور | تست‌ها |
+|----|-------|--------------------------|--------|
+| ۱۸-۱ | تعریف کشیدگی نسبی | موج ۱=۲۰۰٪۳ ← \`WAVE_1\`؛ موج ۳=۲۰۰٪۱ ← \`WAVE_3\` (رایج)؛ موج ۵=۲۰۰٪۳ ← \`WAVE_5\` (نادر)؛ هم‌اندازه ← \`NONE\` | T-18.1..4 |
+| ۱۸-۲ | کشیدگی موج ۱ | پس از اصلاح + پوشش ۱۰۰٪ + W2 < ۳۸.۲٪ ← \`CONFIRMED\`؛ از کف مطلق ← عدم تشخیص | T-18.5..7 |
+| ۱۸-۳ | کشیدگی موج ۳ | W3 > ۱۶۱.۸٪ و W4 < ۳۸.۲٪ ← \`CONFIRMED\`؛ W3 > ۲۶۱.۸٪ ← \`SEVERE\`؛ W4 > ۳۸.۲٪ ← عدم تأیید | T-18.8..10 |
+| ۱۸-۴ | کشیدگی موج ۵ | W5 > ۱۶۱.۸٪ W3 ← \`EXTENDED\`؛ > ۲۰۰٪ ← زنگ خطر ریزش؛ > ۲۶۱.۸٪ ← شدیدترین حالت | T-18.11..13 |
+| ۱۸-۵ | شرط موج ۲ در کشیدگی ۱ | W2 < ۳۸.۲٪ ← تأیید؛ W2 = ۳۸.۲٪ ← مرزی؛ W2 > ۳۸.۲٪ ← رد | T-18.14..16 |
+| ۱۸-۶ | شرط موج ۴ در کشیدگی ۳ | W4 < ۳۸.۲٪ ← تأیید؛ W4 = ۳۸.۲٪ ← مرزی؛ W4 > ۳۸.۲٪ ← رد | T-18.17..19 |
+| ۱۸-۷ | شرط موج ۵ (> ۱۶۱.۸٪ W3) | W5 = ۱۶۱.۸٪ ← مرزی؛ > ۱۶۱.۸٪ ← کشیدگی؛ < ۱۶۱.۸٪ ← بدون کشیدگی | T-18.20..22 |
+| ۱۸-۸ | TMV (هدف حرکت) | TMV Prime (سقف موج ۱)؛ Ideal (۱۰۰٪ پروجکشن)؛ Alternate (۱۶۱.۸٪ / ۲۶۱.۸٪) | T-18.23..25 |
+| ۱۸-۹ | PRZ (محدوده چرخش) | ۶۱.۸٪ (موج ۲)؛ ۷۸.۶٪ (موج ۲ با شتاب‌گیری)؛ ۳۸.۲٪ (موج ۴) — متمایز از TMV | T-18.26..28 |
+| ۱۸-۱۰ | TMV Prime صعودی/نزولی | در صعودی ← سقف موج ۱؛ در نزولی ← کف موج ۱ | T-18.29..30 |
+| ۱۸-۱۱ | TMV Ideal (۱۰۰٪) | فرمول \`Z + (Y - X)\`: برای X=100, Y=200, Z=150 ← خروجی \`250\` | T-18.31..32 |
+| ۱۸-۱۲ | TMV Alternate (۱۶۱.۸٪) | \`Z + (Y - X)*1.618\` (← \`311.8\`) و ۲۶۱.۸٪ (← \`411.8\`)؛ < ۱۰۰٪ نامعتبر | T-18.33..34 |
+| ۱۸-۱۳ | مدیریت معامله (Trailing Stop) | Prime hit ← زیر موج ۲؛ Ideal hit ← زیر ۶۱.۸٪؛ Alt hit ← زیر ۱۰۰٪؛ کشیدگی ۵ ← سیو سود فوری | T-18.35..37 |
+| ۱۸-۱۴ | عدم رسم رتریسمنت روی موج ۵ | رتریسمنت روی موج ۵ ← خطا؛ روی موج ۳ (برای ۴) و موج ۱ (برای ۲) ← صحیح | T-18.38..40 |
+
+## بخش ۲: سند Spec-Kit SDD (017-wave-extension-tmv-engine)
+- **Contract CLI (JSON in/out):** \`PatternEngines.runSession18ExtensionTmvCli(json)\` با اکشن‌های \`detect_relative_extension\`, \`evaluate_wave1_extension\`, \`evaluate_wave3_extension\`, \`evaluate_wave5_extension\`, \`calculate_tmv\`, \`evaluate_prz\`, \`evaluate_trailing\`.
+
+## بخش ۳: معماری Backend FastAPI (پایتون)
+\`\`\`python
+from pydantic import BaseModel
+
+class TmvRequest(BaseModel):
+    x: float
+    y: float
+    z: float
+    direction: str = "BULLISH"
+
+def calculate_tmv(req: TmvRequest):
+    move = req.y - req.x
+    return {
+        "tmv_prime": req.y,
+        "tmv_ideal": req.z + move,
+        "tmv_alt_1618": round(req.z + move * 1.618, 2),
+        "tmv_alt_2618": round(req.z + move * 2.618, 2),
+    }
+\`\`\`
+
+## بخش ۴: کامپوننت‌های Nuxt 4 (UI v4)
+\`\`\`vue
+<template>
+  <UCard class="bg-default border border-muted" dir="rtl">
+    <template #header>
+      <span class="font-bold">مدیریت کشیدگی امواج و TMV/PRZ (جلسه ۱۸)</span>
+    </template>
+    <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+      <div>TMV Prime: {{ tmv.tmvPrime }}</div>
+      <div>TMV Ideal: {{ tmv.tmvIdeal100 }}</div>
+      <div>TMV Alt 161.8%: {{ tmv.tmvAlternate1618 }}</div>
     </div>
   </UCard>
 </template>
@@ -1261,6 +1321,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION18')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION18'
+                ? 'bg-gradient-to-r from-sky-600 to-cyan-500 text-white shadow-lg shadow-sky-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۸ (017 — کشیدگی و TMV/PRZ)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -1332,6 +1404,8 @@ const runAnalysis = async () => {
               ? session16Markdown
               : activeTab === 'SESSION17'
               ? session17Markdown
+              : activeTab === 'SESSION18'
+              ? session18Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -1361,6 +1435,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSION15' ||
           activeTab === 'SESSION16' ||
           activeTab === 'SESSION17' ||
+          activeTab === 'SESSION18' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -1377,6 +1452,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSION15' && session15Markdown}
         {activeTab === 'SESSION16' && session16Markdown}
         {activeTab === 'SESSION17' && session17Markdown}
+        {activeTab === 'SESSION18' && session18Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}
