@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSION16' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSION16' | 'SESSION17' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -460,6 +460,80 @@ class ComplexDetectionRequest(BaseModel):
       <div>موج X: {{ report.xWaveType }} ({{ report.xWaveCandleCount }} کندل)</div>
       <div>۳ قانون بنیادین: {{ report.threeCardinalPassed ? 'برقرار' : 'نقض' }}</div>
       <div>توصیه: {{ report.simpleVsComplexDecision }}</div>
+    </div>
+  </UCard>
+</template>
+\`\`\`
+`;
+
+  const session17Markdown = `# جلسه ۱۷: الگوهای ترکیبی پیشرفته (016-complex-patterns-advanced-engine) — Spec-Kit SDD + Backend & Frontend
+
+## بخش ۱: ۱۴ مفهوم استخراج‌شده جلسه ۱۷ (۱۷-۱ تا ۱۷-۱۴) و تست‌های مرزی (T-17.1 تا T-17.43)
+| کد | مفهوم | شرایط مرزی و خروجی موتور | تست‌ها |
+|----|-------|--------------------------|--------|
+| ۱۷-۱ | ۹ ترکیب استاندارد اصلاحی | رایج (\`Z-X-Z, Z-X-F, Z-X-T, F-X-Z, F-X-T, T-X-Z, T-X-F\`)، نادرتر (\`F-X-F\`)، نادرترین (\`T-X-T\`)، غیراستاندارد (\`Z-X-Z-X-Z\`) | T-17.1..4 |
+| ۱۷-۲ | ترکیب با الگوهای اصلی | \`I-X-Z\` (رایج‌ترین)، \`G-X-F\` (کمتر رایج)، \`TERM-X-T\` (نادر)، \`I-X-I\` (بسیار نادر) | T-17.5..7 |
+| ۱۷-۳ | X-Wave تک‌موج (ساده‌ترین) | حداقل ۳ کندل صعودی یا نزولی ← \`SINGLE / SIMPLEST\`؛ ۲ کندل ← \`INVALID\` | T-17.8..10 |
+| ۱۷-۴ | X-Wave زیگزاگ (پیچیده‌تر) | ایده‌آل (\`5-3-5\`)، سیمپل (\`3-3-3\`)، آنتی‌ای (\`3-5-5\`) ← همگی معتبر | T-17.11..13 |
+| ۱۷-۵ | X-Wave شتابدار (نادر) | در اصلاحی \`RAREST\`، در اصلی \`RARE\`؛ با ساختار قابل شمارش \`5-3-5\` ← بازتشخیص به زیگزاگ | T-17.14..16 |
+| ۱۷-۶ | ترکیب زیگزاگ با ایده‌آل (\`Z-X-I\`) | \`Z-X-I\` (رایج)؛ \`I-X-Z\` (رایج‌تر / \`MOST_COMMON\`)؛ \`I-X-I\` (بسیار نادر) | T-17.17..19 |
+| ۱۷-۷ | ترکیب فلت با ایده‌آل (\`F-X-I\`) | \`F-X-I\` (کمتر رایج)؛ \`F-X-Z\` (رایج)؛ \`F-X-F\` (نادر) | T-17.20..22 |
+| ۱۷-۸ | ترکیب مثلث با زیگزاگ/فلت/مثلث | \`T-X-Z\` و \`T-X-F\` استاندارد؛ \`T-X-T\` نادرترین | T-17.23..25 |
+| ۱۷-۹ | ترکیب قطر با الگوهای دیگر | \`G-X-G\` (نادر)؛ \`G-X-Z\` و \`G-X-F\` (کمتر رایج) | T-17.26..28 |
+| ۱۷-۱۰ | ترکیب ترمینال با الگوهای دیگر | \`TERM-X-TERM\` (نادر)؛ \`TERM-X-Z\` (کمتر رایج)؛ \`TERM-X-F\` (نادر) | T-17.29..31 |
+| ۱۷-۱۱ | ترکیب ایده‌آل با الگوهای دیگر | \`I-X-I\` (بسیار نادر)؛ \`I-X-Z\` (رایج‌ترین)؛ \`I-X-F\` (نادر) | T-17.32..34 |
+| ۱۷-۱۲ | ساده‌شماری در ترکیبی | اولویت قاطع با \`Z\` ← سپس \`Z-X-Z\` ← ساده‌سازی زنجیره‌های \`Z-X-Z-X-Z\` به \`Z-X-Z\` | T-17.35..37 |
+| ۱۷-۱۳ | ترکیب غیراستاندارد \`Z-X-F-X-Z\` | تفکیک ۵ بخش (\`A=Z, X1, B=F, X2, C=Z\`) با برچسب \`NON_STANDARD_3\` | T-17.38..40 |
+| ۱۷-۱۴ | مثال عملی فارس (\`TSE_FARS\`) | اعتبارسنجی \`Z-X-Z\` (استاندارد)، \`Z-X-F-X-Z\` (غیراستاندارد) و \`I-X-Z\` (اصلی+اصلاحی) | T-17.41..43 |
+
+## بخش ۲: سند Spec-Kit SDD (016-complex-patterns-advanced-engine)
+- **User Story 1 (P1):** تشخیص و رتبه‌بندی نایابی ۹ ترکیب استاندارد و ترکیب‌های الگوهای اصلی (\`I, G, TERM\`).
+- **User Story 2 (P1):** ارزیابی سه‌گانه موج رابط X (تک‌موج ≥ ۳ کندل، زیگزاگ \`5-3-5/3-3-3/3-5-5\`، شتابدار با بازتشخیص خودکار ۵ موجی).
+- **User Story 3 (P1):** اعمال قانون ساده‌شماری حتی درون شمارش ترکیبی (\`Z ← Z-X-Z ← ساده‌سازی Z-X-Z-X-Z\`).
+- **User Story 4 (P2):** تفکیک ساختار غیراستاندارد ۵ بخشی \`Z-X-F-X-Z\` روی نماد فارس (\`TSE_FARS\`).
+- **User Story 5 (P2):** اعتبارسنجی ۳ قانون بنیادین و نایابی ترکیب‌های \`I-X-I\`, \`G-X-G\`, \`TERM-X-TERM\` و \`T-term-X-Tri\` در مثال‌های عملی.
+- **Contract CLI (JSON in/out):** \`PatternEngines.runSession17ComplexCli(json)\` با اکشن‌های \`detect_standard\`, \`detect_nonstd\`, \`evaluate_x_wave\`, \`recommend\`, \`evaluate_fars\`.
+- **Constitution Check:** کتابخانه مستقل قطعی، آزمون قرارداد CLI، یکپارچه‌سازی بدون شبیه‌سازی روی داده‌های \`TSE_FARS\`.
+
+## بخش ۳: معماری Backend FastAPI (پایتون)
+\`\`\`python
+from pydantic import BaseModel
+from typing import Literal, Optional, List
+
+class ComplexAdvRequest(BaseModel):
+    signature: str
+    x_wave_kind: Literal["SINGLE", "ZIGZAG", "IMPULSIVE", "AUTO"] = "AUTO"
+    x_wave_candles: int = 4
+    subwave_signature: Optional[str] = None
+    slot_role: Literal["CORRECTIVE", "MOTIVE"] = "CORRECTIVE"
+    has_countable_structure: bool = False
+    simple_z_possible: bool = False
+    standard_zxz_possible: bool = True
+
+# Services (016):
+# - detect_standard_service -> طبقه‌بندی ۹ ترکیب استاندارد + ترکیب‌های اصلی (MOST_COMMON..VERY_RARE)
+# - detect_nonstd_service   -> تفکیک ساختارهای ۳+ الگو مثل Z-X-F-X-Z (A=Z, X1, B=F, X2, C=Z)
+# - x_wave_service          -> SINGLE (>=3) / ZIGZAG (5-3-5, 3-3-3, 3-5-5) / IMPULSIVE (بازتشخیص در ۵موجی)
+# - recommend_service       -> توصیه ساده‌شماری (Z -> Z-X-Z) و جلوگیری از زنجیره غیرضروری
+\`\`\`
+
+## بخش ۴: کامپوننت‌های رابط کاربری Nuxt 4 (UI v4)
+\`\`\`vue
+<!-- ComplexAdvInput.vue / PatternVisualizer.vue / XWaveCard.vue / RecommendCard.vue / ComboMatrix.vue -->
+<template>
+  <UCard class="bg-default border border-muted" dir="rtl">
+    <template #header>
+      <div class="flex items-center justify-between">
+        <span class="font-bold">تحلیلگر ترکیبی پیشرفته و ماتریس نایابی (جلسه ۱۷)</span>
+        <UBadge :color="sigEval.isStandard ? 'success' : 'warning'">
+          {{ sigEval.signature }} · {{ sigEval.rarityTier17 }}
+        </UBadge>
+      </div>
+    </template>
+    <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+      <div>موج X: {{ xWave.xWaveSubType }} ({{ xWave.xWaveRarity }})</div>
+      <div>پیشنهاد ساده‌شماری: {{ recommend.selectedCount }}</div>
+      <div>فارس (Z-X-F-X-Z): {{ fars.legsBreakdown.length }} بخش</div>
     </div>
   </UCard>
 </template>
@@ -1175,6 +1249,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION17')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION17'
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-500 text-white shadow-lg shadow-violet-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۷ (016 — ترکیبی پیشرفته)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -1244,6 +1330,8 @@ const runAnalysis = async () => {
               ? session15Markdown
               : activeTab === 'SESSION16'
               ? session16Markdown
+              : activeTab === 'SESSION17'
+              ? session17Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -1272,6 +1360,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSION14' ||
           activeTab === 'SESSION15' ||
           activeTab === 'SESSION16' ||
+          activeTab === 'SESSION17' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -1287,6 +1376,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSION14' && session14Markdown}
         {activeTab === 'SESSION15' && session15Markdown}
         {activeTab === 'SESSION16' && session16Markdown}
+        {activeTab === 'SESSION17' && session17Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

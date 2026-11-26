@@ -4596,6 +4596,7 @@ export class PatternEngines {
     combinationTier: ComplexPatternReport['combinationTier'];
     combinationCategory: ComplexPatternReport['combinationCategory'];
     rarityStatus: ComplexPatternReport['rarityStatus'];
+    rarityTier17: 'MOST_COMMON' | 'COMMON' | 'LESS_COMMON' | 'RARE' | 'RAREST' | 'VERY_RARE';
     complexity: ComplexPatternReport['complexity'];
     abbreviationsUsed: string[];
     labelFa: string;
@@ -4606,11 +4607,13 @@ export class PatternEngines {
     const normalized = rawStr
       .trim()
       .toUpperCase()
+      .replace(/T_TERM/g, 'TERM')
+      .replace(/T_TRI/g, 'T')
       .replace(/TRI/g, 'T')
       .replace(/\s+/g, '')
       .replace(/\+/g, '-');
     const tokens = normalized.split('-').filter(Boolean);
-    const parts = tokens.filter(t => t !== 'X' && t !== 'XX' && t !== 'X2');
+    const parts = tokens.filter(t => t !== 'X' && t !== 'XX' && t !== 'X1' && t !== 'X2');
     const canonicalSig = parts.join('-X-') || 'Z';
 
     const STANDARD_CORRECTIVE_COMMON = new Set([
@@ -4622,24 +4625,24 @@ export class PatternEngines {
       'T-X-Z',
       'T-X-F'
     ]);
-    const STANDARD_CORRECTIVE_RARE = new Set(['F-X-F', 'T-X-T']);
-    const MAIN_COMMON = new Set([
-      'I-X-Z',
-      'I-X-F',
-      'I-X-T',
+    const STANDARD_CORRECTIVE_RARE = new Set(['F-X-F']);
+    const STANDARD_CORRECTIVE_RAREST = new Set(['T-X-T']);
+    const MAIN_MOST_COMMON = new Set(['I-X-Z']);
+    const MAIN_COMMON = new Set(['Z-X-I', 'T-X-I']);
+    const MAIN_LESS_COMMON = new Set([
       'G-X-F',
       'G-X-Z',
       'G-X-T',
+      'F-X-I',
       'D-X-Z',
       'D-X-F',
       'D-X-T',
-      'T-X-I',
-      'Z-X-I',
-      'F-X-I',
       'Z-X-G',
-      'F-X-G'
+      'F-X-G',
+      'TERM-X-Z'
     ]);
-    const MAIN_RARE = new Set(['I-X-I', 'G-X-G', 'D-X-D', 'I-X-G', 'G-X-I']);
+    const MAIN_RARE = new Set(['G-X-G', 'D-X-D', 'I-X-G', 'G-X-I', 'I-X-F', 'TERM-X-TERM', 'TERM-X-F', 'TERM-X-T', 'I-X-T']);
+    const MAIN_VERY_RARE = new Set(['I-X-I']);
 
     const abbreviationsUsed = Array.from(
       new Set(tokens.length > 0 ? tokens : [canonicalSig])
@@ -4654,6 +4657,7 @@ export class PatternEngines {
         combinationTier: 'NONE',
         combinationCategory: 'SIMPLE_SINGLE',
         rarityStatus: 'COMMON',
+        rarityTier17: 'COMMON',
         complexity: 'LOW',
         abbreviationsUsed,
         labelFa: `الگوی ساده تک‌ساختار (${parts[0] || 'Z'}) — ترکیبی محسوب نمی‌شود.`
@@ -4663,10 +4667,29 @@ export class PatternEngines {
     if (parts.length === 2) {
       const isCorrCommon = STANDARD_CORRECTIVE_COMMON.has(canonicalSig);
       const isCorrRare = STANDARD_CORRECTIVE_RARE.has(canonicalSig);
+      const isCorrRarest = STANDARD_CORRECTIVE_RAREST.has(canonicalSig);
+      const isMainMostCommon = MAIN_MOST_COMMON.has(canonicalSig);
       const isMainCommon = MAIN_COMMON.has(canonicalSig);
+      const isMainLessCommon = MAIN_LESS_COMMON.has(canonicalSig);
       const isMainRare = MAIN_RARE.has(canonicalSig);
-      const isMain = isMainCommon || isMainRare;
-      const isRare = isCorrRare || isMainRare;
+      const isMainVeryRare = MAIN_VERY_RARE.has(canonicalSig);
+      const isMain = isMainMostCommon || isMainCommon || isMainLessCommon || isMainRare || isMainVeryRare;
+      const isRare = isCorrRare || isCorrRarest || isMainRare || isMainVeryRare;
+      const rarityTier17: 'MOST_COMMON' | 'COMMON' | 'LESS_COMMON' | 'RARE' | 'RAREST' | 'VERY_RARE' =
+        isMainVeryRare
+          ? 'VERY_RARE'
+          : isCorrRarest
+          ? 'RAREST'
+          : isCorrRare || isMainRare
+          ? 'RARE'
+          : isMainLessCommon
+          ? 'LESS_COMMON'
+          : isMainMostCommon
+          ? 'MOST_COMMON'
+          : isCorrCommon || isMainCommon
+          ? 'COMMON'
+          : 'COMMON';
+
       return {
         signature: canonicalSig,
         parts,
@@ -4675,18 +4698,25 @@ export class PatternEngines {
         combinationTier: 'STANDARD_2',
         combinationCategory: isMain
           ? 'MAIN_INCLUDED'
-          : isCorrRare
+          : isCorrRare || isCorrRarest
           ? 'CORRECTIVE_RARE'
           : 'CORRECTIVE_STANDARD',
         rarityStatus: isRare ? 'RARE' : 'COMMON',
+        rarityTier17,
         complexity: 'MEDIUM',
         abbreviationsUsed,
         labelFa: isMain
-          ? isRare
+          ? isMainVeryRare
+            ? `ترکیب بسیار نادر الگوهای اصلی (${canonicalSig}) — ۲ الگوی مجاز با موج رابط X.`
+            : isMainRare
             ? `ترکیب نادر الگوهای اصلی (${canonicalSig}) — ۲ الگوی مجاز با موج رابط X.`
-            : `ترکیب استاندارد شامل الگوی اصلی (${canonicalSig}) — معتبر.`
+            : isMainLessCommon
+            ? `ترکیب کمتر رایج شامل الگوی اصلی (${canonicalSig}) — معتبر.`
+            : `ترکیب استاندارد رایج شامل الگوی اصلی (${canonicalSig}) — معتبر.`
+          : isCorrRarest
+          ? `ترکیب اصلاحی استاندارد اما نادرترین (${canonicalSig}) — با احتیاط بررسی شود.`
           : isCorrRare
-          ? `ترکیب اصلاحی استاندارد اما نادر (${canonicalSig}) — با احتیاط بررسی شود.`
+          ? `ترکیب اصلاحی استاندارد اما نادرتر (${canonicalSig}) — با احتیاط بررسی شود.`
           : `ترکیب اصلاحی استاندارد (${canonicalSig}) — دو الگوی ساده با موج رابط X.`
       };
     }
@@ -4700,6 +4730,7 @@ export class PatternEngines {
         combinationTier: 'NON_STANDARD_3',
         combinationCategory: 'NON_STANDARD_CHAIN',
         rarityStatus: 'RARE',
+        rarityTier17: 'VERY_RARE',
         complexity: 'HIGH',
         abbreviationsUsed,
         labelFa: `الگوی ترکیبی غیراستاندارد سه‌تایی (${canonicalSig}) — ترکیب چند الگوی ترکیبی (ریسک و خطای بالا).`
@@ -4714,6 +4745,7 @@ export class PatternEngines {
       combinationTier: 'SEVERE_NON_STANDARD',
       combinationCategory: 'NON_STANDARD_CHAIN',
       rarityStatus: 'VERY_RARE',
+      rarityTier17: 'VERY_RARE',
       complexity: 'TOO_COMPLEX',
       abbreviationsUsed,
       labelFa: `الگوی ترکیبی غیراستاندارد شدید (${parts.length} الگو: ${canonicalSig}) — احتمال شمارش نادرست؛ بازنگری الزامی است.`
@@ -4730,52 +4762,133 @@ export class PatternEngines {
     kind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'AUTO';
     candleCount: number;
     subwaves?: number[];
+    subwaveSignature?: string;
+    slotRole?: 'CORRECTIVE' | 'MOTIVE';
+    hasCountableStructure?: boolean;
+    direction?: 'BULLISH' | 'BEARISH';
   }): {
     isValid: boolean;
     xWaveType: ComplexPatternReport['xWaveType'];
+    xWaveSubType:
+      | 'SINGLE'
+      | 'ZIGZAG_IDEAL_535'
+      | 'ZIGZAG_SIMPLE_333'
+      | 'ZIGZAG_ANTI_355'
+      | 'IMPULSIVE_RARE'
+      | 'INVALID';
+    xWaveRarity: 'SIMPLEST' | 'STANDARD' | 'RARE' | 'RAREST' | 'INVALID';
+    reclassifiedFromImpulsive: boolean;
     candleCount: number;
     labelFa: string;
   } {
-    const { kind = 'AUTO', candleCount, subwaves } = params;
+    const {
+      kind = 'AUTO',
+      candleCount,
+      subwaves,
+      subwaveSignature,
+      slotRole = 'CORRECTIVE',
+      hasCountableStructure = false
+    } = params;
+    const sigStr = subwaveSignature || (subwaves ? subwaves.join('-') : '');
+
     if (candleCount < 3) {
       return {
         isValid: false,
         xWaveType: 'INVALID',
+        xWaveSubType: 'INVALID',
+        xWaveRarity: 'INVALID',
+        reclassifiedFromImpulsive: false,
         candleCount,
         labelFa: `موج رابط X نامعتبر (${candleCount} کندل < حداقل ۳ کندل).`
       };
     }
+
     if (kind === 'ZIGZAG') {
-      const isIdeal = subwaves?.join('-') === '5-3-5' || candleCount >= 10;
+      if (sigStr === '3-5-5') {
+        return {
+          isValid: true,
+          xWaveType: 'ZIGZAG_SIMPLE',
+          xWaveSubType: 'ZIGZAG_ANTI_355',
+          xWaveRarity: 'STANDARD',
+          reclassifiedFromImpulsive: false,
+          candleCount,
+          labelFa: 'موج X به صورت زیگزاگ آنتی‌ای (۳-۵-۵) — استاندارد و معتبر.'
+        };
+      }
+      if (sigStr === '3-3-3') {
+        return {
+          isValid: true,
+          xWaveType: 'ZIGZAG_SIMPLE',
+          xWaveSubType: 'ZIGZAG_SIMPLE_333',
+          xWaveRarity: 'STANDARD',
+          reclassifiedFromImpulsive: false,
+          candleCount,
+          labelFa: 'موج X به صورت زیگزاگ سیمپل (۳-۳-۳) — استاندارد و معتبر.'
+        };
+      }
+      const isIdeal = sigStr === '5-3-5' || candleCount >= 10;
       return {
         isValid: true,
         xWaveType: isIdeal ? 'ZIGZAG_IDEAL' : 'ZIGZAG_SIMPLE',
+        xWaveSubType: isIdeal ? 'ZIGZAG_IDEAL_535' : 'ZIGZAG_SIMPLE_333',
+        xWaveRarity: 'STANDARD',
+        reclassifiedFromImpulsive: false,
         candleCount,
         labelFa: isIdeal
           ? 'موج X به صورت زیگزاگ ایده‌آل (۵-۳-۵) — استاندارد و معتبر.'
           : 'موج X به صورت زیگزاگ ساده (۳-۳-۳) — استاندارد و معتبر.'
       };
     }
+
     if (kind === 'IMPULSIVE') {
+      const countable535 =
+        hasCountableStructure ||
+        sigStr === '5-3-5' ||
+        (subwaves && subwaves.length === 5);
+      if (countable535) {
+        return {
+          isValid: true,
+          xWaveType: 'ZIGZAG_IDEAL',
+          xWaveSubType: 'ZIGZAG_IDEAL_535',
+          xWaveRarity: 'STANDARD',
+          reclassifiedFromImpulsive: true,
+          candleCount,
+          labelFa: 'موج X دارای ساختار قابل شمارش ۵ موجی (۵-۳-۵) است ← بازتشخیص به عنوان زیگزاگ.'
+        };
+      }
       return {
         isValid: true,
         xWaveType: 'IMPULSIVE',
+        xWaveSubType: 'IMPULSIVE_RARE',
+        xWaveRarity: slotRole === 'MOTIVE' ? 'RARE' : 'RAREST',
+        reclassifiedFromImpulsive: false,
         candleCount,
-        labelFa: 'موج X به صورت شتاب‌دار (فرض ۵ یا ۳ موجی) — معتبر.'
+        labelFa:
+          slotRole === 'MOTIVE'
+            ? 'موج X شتاب‌دار در جایگاه اصلی — نادر و نیازمند احتیاط.'
+            : 'موج X به صورت شتاب‌دار (بدون ساختار قابل شمارش) — معتبر (نادرترین نوع X-Wave).'
       };
     }
+
     if (kind === 'SINGLE') {
       return {
         isValid: true,
         xWaveType: 'SINGLE',
+        xWaveSubType: 'SINGLE',
+        xWaveRarity: 'SIMPLEST',
+        reclassifiedFromImpulsive: false,
         candleCount,
-        labelFa: `موج X تک‌موجی معتبر (${candleCount} کندل ≥ ۳ کندل).`
+        labelFa: `موج X تک‌موجی ساده‌ترین حالت معتبر (${candleCount} کندل ≥ ۳ کندل).`
       };
     }
+
     if (subwaves && subwaves.length === 5) {
       return {
         isValid: true,
         xWaveType: 'IMPULSIVE',
+        xWaveSubType: 'IMPULSIVE_RARE',
+        xWaveRarity: 'RAREST',
+        reclassifiedFromImpulsive: false,
         candleCount,
         labelFa: 'موج X شتاب‌دار ۵ موجی — معتبر.'
       };
@@ -4784,6 +4897,9 @@ export class PatternEngines {
       return {
         isValid: true,
         xWaveType: 'ZIGZAG_IDEAL',
+        xWaveSubType: 'ZIGZAG_IDEAL_535',
+        xWaveRarity: 'STANDARD',
+        reclassifiedFromImpulsive: false,
         candleCount,
         labelFa: 'موج X زیگزاگ ایده‌آل — معتبر.'
       };
@@ -4792,6 +4908,9 @@ export class PatternEngines {
       return {
         isValid: true,
         xWaveType: 'ZIGZAG_SIMPLE',
+        xWaveSubType: 'ZIGZAG_SIMPLE_333',
+        xWaveRarity: 'STANDARD',
+        reclassifiedFromImpulsive: false,
         candleCount,
         labelFa: 'موج X زیگزاگ ساده — معتبر.'
       };
@@ -4799,6 +4918,9 @@ export class PatternEngines {
     return {
       isValid: true,
       xWaveType: 'SINGLE',
+      xWaveSubType: 'SINGLE',
+      xWaveRarity: 'SIMPLEST',
+      reclassifiedFromImpulsive: false,
       candleCount,
       labelFa: `موج X تک‌موجی سریع (${candleCount} کندل ≥ ۳ کندل) — معتبر.`
     };
@@ -5046,6 +5168,193 @@ export class PatternEngines {
       isValid: false,
       reasonFa: 'خطا: نه الگوی ساده و نه الگوی ترکیبی با داده‌ها و قوانین سه‌گانه هم‌خوانی ندارند.'
     };
+  }
+
+  /**
+   * Session 17 (§2.12, T-17.35..37):
+   * Simplest counting recommendation inside Complex analysis:
+   * Always prefer simple Z when possible, then standard Z-X-Z, and simplify multi-X chains back toward Z-X-Z.
+   */
+  public static recommendSimpleCountingInComplex(params: {
+    simpleZPossible: boolean;
+    standardZXZPossible: boolean;
+    nonStandardChainPossible?: boolean;
+  }): {
+    selectedCount: 'Z' | 'Z-X-Z' | 'Z-X-Z-X-Z' | 'NONE';
+    simplificationApplied: boolean;
+    isStandard: boolean;
+    reasonFa: string;
+  } {
+    if (params.simpleZPossible) {
+      return {
+        selectedCount: 'Z',
+        simplificationApplied: false,
+        isStandard: true,
+        reasonFa: 'ساده‌شماری اولویت دارد: زیگزاگ ساده (Z) ممکن است و نباید Z-X-Z انتخاب شود.'
+      };
+    }
+    if (params.standardZXZPossible) {
+      return {
+        selectedCount: 'Z-X-Z',
+        simplificationApplied: false,
+        isStandard: true,
+        reasonFa: 'زیگزاگ ساده پاسخگو نیست؛ ترکیب استاندارد Z-X-Z انتخاب می‌شود.'
+      };
+    }
+    if (params.nonStandardChainPossible) {
+      return {
+        selectedCount: 'Z-X-Z',
+        simplificationApplied: true,
+        isStandard: true,
+        reasonFa:
+          'توصیه ساده‌شماری جلسه ۱۷: حتی در شمارش ترکیبی پیچیده، ساده‌ترین ترکیب استاندارد (Z-X-Z) بر زنجیره‌های غیراستاندارد ترجیح داده می‌شود.'
+      };
+    }
+    return {
+      selectedCount: 'NONE',
+      simplificationApplied: false,
+      isStandard: false,
+      reasonFa: 'هیچ شمارش ساده یا ترکیبی معتبری در این ساختار یافت نشد.'
+    };
+  }
+
+  /**
+   * Session 17 (§2.13 & §2.14, T-17.38..43):
+   * Practical Case Study — Fars (فارس) Z-X-F-X-Z breakdown (A=Z, X1, B=F, X2, C=Z) & standard Z-X-Z / I-X-Z check.
+   */
+  public static evaluateFarsWaveStructure(params: {
+    signature: string;
+    x1Candles?: number;
+    x2Candles?: number;
+    cardinalRulesPassed?: boolean;
+  }): {
+    isValid: boolean;
+    classification: 'STANDARD' | 'NON_STANDARD' | 'INVALID';
+    signatureEval: ReturnType<typeof PatternEngines.evaluateComplexCombinationSignature>;
+    legsBreakdown: Array<{ slot: string; code: string; labelFa: string }>;
+    reasonFa: string;
+  } {
+    const sigEval = PatternEngines.evaluateComplexCombinationSignature(params.signature);
+    const x1Ok = (params.x1Candles ?? 4) >= 3;
+    const x2Ok = sigEval.parts.length >= 3 ? (params.x2Candles ?? 4) >= 3 : true;
+    const rulesOk = params.cardinalRulesPassed ?? true;
+
+    const codeNamesFa: Record<string, string> = {
+      Z: 'زیگزاگ (Zigzag)',
+      F: 'فلت (Flat)',
+      T: 'مثلث (Triangle)',
+      I: 'سیکل ایده‌آل (Ideal)',
+      G: 'قطر (Diagonal)',
+      TERM: 'ترمینال (Terminal)'
+    };
+
+    const legsBreakdown: Array<{ slot: string; code: string; labelFa: string }> = [];
+    const slotNames = ['موج A', 'موج B', 'موج C', 'موج D'];
+    sigEval.parts.forEach((code, idx) => {
+      legsBreakdown.push({
+        slot: slotNames[idx] || `بخش ${idx + 1}`,
+        code,
+        labelFa: codeNamesFa[code] || code
+      });
+      if (idx < sigEval.parts.length - 1) {
+        legsBreakdown.push({
+          slot: `X-Wave ${idx + 1}`,
+          code: `X${idx + 1}`,
+          labelFa: 'موج رابط X'
+        });
+      }
+    });
+
+    if (!x1Ok || !x2Ok || !rulesOk) {
+      return {
+        isValid: false,
+        classification: 'INVALID',
+        signatureEval: sigEval,
+        legsBreakdown,
+        reasonFa: !rulesOk
+          ? 'مثال عملی فارس نامعتبر: نقض ۳ قانون بنیادین.'
+          : 'مثال عملی فارس نامعتبر: طول موج رابط X کمتر از ۳ کندل است.'
+      };
+    }
+
+    return {
+      isValid: true,
+      classification: sigEval.isStandard ? 'STANDARD' : 'NON_STANDARD',
+      signatureEval: sigEval,
+      legsBreakdown,
+      reasonFa: sigEval.isStandard
+        ? `نماد فارس (${sigEval.signature}): ترکیب استاندارد معتبر.`
+        : `نماد فارس (${sigEval.signature}): ترکیب غیراستاندارد (${sigEval.parts.length} الگو) — ساختار ${legsBreakdown.map(l => l.code).join('-')}.`
+    };
+  }
+
+  /**
+   * Session 17 Contract CLI JSON in/out handler (016-complex-patterns-advanced-engine).
+   */
+  public static runSession17ComplexCli(requestJson: string): string {
+    try {
+      const req = JSON.parse(requestJson) as {
+        action:
+          | 'detect_standard'
+          | 'detect_nonstd'
+          | 'evaluate_x_wave'
+          | 'recommend'
+          | 'evaluate_fars';
+        payload: Record<string, unknown>;
+      };
+
+      let result: unknown;
+      if (req.action === 'detect_standard' || req.action === 'detect_nonstd') {
+        result = PatternEngines.evaluateComplexCombinationSignature(
+          String(req.payload?.signature || 'Z-X-Z')
+        );
+      } else if (req.action === 'evaluate_x_wave') {
+        result = PatternEngines.evaluateXWave({
+          kind: (req.payload?.kind as 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'AUTO') || 'AUTO',
+          candleCount: Number(req.payload?.candleCount ?? 3),
+          subwaveSignature: req.payload?.subwaveSignature as string | undefined,
+          subwaves: req.payload?.subwaves as number[] | undefined,
+          slotRole: req.payload?.slotRole as 'CORRECTIVE' | 'MOTIVE' | undefined,
+          hasCountableStructure: Boolean(req.payload?.hasCountableStructure),
+          direction: req.payload?.direction as 'BULLISH' | 'BEARISH' | undefined
+        });
+      } else if (req.action === 'recommend') {
+        result = PatternEngines.recommendSimpleCountingInComplex({
+          simpleZPossible: Boolean(req.payload?.simpleZPossible),
+          standardZXZPossible: Boolean(req.payload?.standardZXZPossible),
+          nonStandardChainPossible: Boolean(req.payload?.nonStandardChainPossible)
+        });
+      } else if (req.action === 'evaluate_fars') {
+        result = PatternEngines.evaluateFarsWaveStructure({
+          signature: String(req.payload?.signature || 'Z-X-F-X-Z'),
+          x1Candles: Number(req.payload?.x1Candles ?? 5),
+          x2Candles: Number(req.payload?.x2Candles ?? 5),
+          cardinalRulesPassed:
+            req.payload?.cardinalRulesPassed !== undefined
+              ? Boolean(req.payload.cardinalRulesPassed)
+              : true
+        });
+      } else {
+        return JSON.stringify({
+          status: 'error',
+          feature: '016-complex-patterns-advanced-engine',
+          error: `Unsupported CLI action: ${String(req.action)}`
+        });
+      }
+
+      return JSON.stringify({
+        status: 'ok',
+        feature: '016-complex-patterns-advanced-engine',
+        action: req.action,
+        result
+      });
+    } catch (err) {
+      return JSON.stringify({
+        status: 'error',
+        feature: '016-complex-patterns-advanced-engine',
+        error: err instanceof Error ? err.message : 'Invalid JSON payload'
+      });
+    }
   }
 
   /**

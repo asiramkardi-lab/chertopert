@@ -43,15 +43,27 @@ type SimSignatureMode =
   | 'Z-X-F'
   | 'F-X-T'
   | 'F-X-F'
+  | 'T-X-Z'
   | 'T-X-T'
   | 'I-X-Z'
+  | 'Z-X-I'
+  | 'F-X-I'
   | 'G-X-F'
+  | 'G-X-G'
+  | 'TERM-X-TERM'
   | 'I-X-I'
   | 'Z-X-F-X-Z'
   | 'Z-X-Z-X-Z-X-Z'
   | 'Z';
 
-type SimXWaveMode = 'AUTO' | 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE_4' | 'INVALID_2';
+type SimXWaveMode =
+  | 'AUTO'
+  | 'ZIGZAG_535'
+  | 'ZIGZAG_333'
+  | 'ZIGZAG_355'
+  | 'IMPULSIVE'
+  | 'SINGLE_4'
+  | 'INVALID_2';
 type SimCardinalMode = 'AUTO' | 'PASS_ALL' | 'FAIL_R1' | 'FAIL_R3' | 'FAIL_R2';
 type SimContextMode = 'AUTO' | 'PAST_KNOT' | 'MARKET_END_NO_CONF' | 'MARKET_END_SIMPLE_OK' | 'MARKET_END_CONFIRMED';
 
@@ -76,9 +88,9 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
       opts.signature = sigMode;
       hasAny = true;
     }
-    if (xWaveMode === 'ZIGZAG') {
+    if (xWaveMode === 'ZIGZAG_535' || xWaveMode === 'ZIGZAG_333' || xWaveMode === 'ZIGZAG_355') {
       opts.xWaveKind = 'ZIGZAG';
-      opts.xWaveCandles = 8;
+      opts.xWaveCandles = xWaveMode === 'ZIGZAG_535' ? 11 : xWaveMode === 'ZIGZAG_355' ? 9 : 7;
       hasAny = true;
     } else if (xWaveMode === 'IMPULSIVE') {
       opts.xWaveKind = 'IMPULSIVE';
@@ -153,16 +165,71 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
 
   const farsPreview = useMemo(
     () =>
-      PatternEngines.evaluateFarsComplexCase({
-        signature:
-          sigMode === 'AUTO'
-            ? 'Z-X-F-X-Z'
-            : sigMode,
+      PatternEngines.evaluateFarsWaveStructure({
+        signature: sigMode === 'AUTO' ? 'Z-X-F-X-Z' : sigMode,
         cardinalRulesPassed: report.threeCardinalPassed,
-        xWaveCandles: report.xWaveCandleCount
+        x1Candles: report.xWaveCandleCount || 5,
+        x2Candles: Math.max(4, report.xWaveCandleCount || 5)
       }),
     [sigMode, report.threeCardinalPassed, report.xWaveCandleCount]
   );
+
+  const xWaveCardEval = useMemo(() => {
+    const subSig =
+      xWaveMode === 'ZIGZAG_535'
+        ? '5-3-5'
+        : xWaveMode === 'ZIGZAG_333'
+        ? '3-3-3'
+        : xWaveMode === 'ZIGZAG_355'
+        ? '3-5-5'
+        : undefined;
+    const kind =
+      xWaveMode === 'AUTO'
+        ? 'AUTO'
+        : xWaveMode.startsWith('ZIGZAG')
+        ? 'ZIGZAG'
+        : xWaveMode === 'IMPULSIVE'
+        ? 'IMPULSIVE'
+        : 'SINGLE';
+    return PatternEngines.evaluateXWave({
+      kind,
+      candleCount: report.xWaveCandleCount,
+      subwaveSignature: subSig,
+      slotRole: 'CORRECTIVE'
+    });
+  }, [xWaveMode, report.xWaveCandleCount]);
+
+  const simpleRecommender = useMemo(
+    () =>
+      PatternEngines.recommendSimpleCountingInComplex({
+        simpleZPossible: contextMode === 'MARKET_END_SIMPLE_OK' || report.patternSignature === 'Z',
+        standardZXZPossible: report.standard || report.patternSignature === 'Z-X-Z',
+        nonStandardChainPossible: !report.standard && report.isComplexPattern
+      }),
+    [contextMode, report.patternSignature, report.standard, report.isComplexPattern]
+  );
+
+  const comboMatrixItems = useMemo(() => {
+    const signatures: Array<{ sig: SimSignatureMode; label: string; group: 'CORRECTIVE_9' | 'MAIN' }> = [
+      { sig: 'Z-X-Z', label: 'Z-X-Z', group: 'CORRECTIVE_9' },
+      { sig: 'Z-X-F', label: 'Z-X-F', group: 'CORRECTIVE_9' },
+      { sig: 'F-X-T', label: 'F-X-T', group: 'CORRECTIVE_9' },
+      { sig: 'F-X-F', label: 'F-X-F', group: 'CORRECTIVE_9' },
+      { sig: 'T-X-Z', label: 'T-X-Z', group: 'CORRECTIVE_9' },
+      { sig: 'T-X-T', label: 'T-X-T', group: 'CORRECTIVE_9' },
+      { sig: 'I-X-Z', label: 'I-X-Z', group: 'MAIN' },
+      { sig: 'Z-X-I', label: 'Z-X-I', group: 'MAIN' },
+      { sig: 'F-X-I', label: 'F-X-I', group: 'MAIN' },
+      { sig: 'G-X-F', label: 'G-X-F', group: 'MAIN' },
+      { sig: 'G-X-G', label: 'G-X-G', group: 'MAIN' },
+      { sig: 'TERM-X-TERM', label: 'TERM-X-TERM', group: 'MAIN' },
+      { sig: 'I-X-I', label: 'I-X-I', group: 'MAIN' }
+    ];
+    return signatures.map(item => ({
+      ...item,
+      eval: PatternEngines.evaluateComplexCombinationSignature(item.sig)
+    }));
+  }, []);
 
   const conversionCandidates = useMemo(
     () =>
@@ -234,11 +301,13 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
         </div>
 
         <div className="rounded-lg bg-slate-900/70 border border-slate-800/80 p-2.5 space-y-1">
-          <div className="text-[10px] text-slate-400">موج رابط X</div>
-          <div className={`font-bold font-mono tabular-nums ${report.xWaveValid ? 'text-emerald-300' : 'text-rose-300'}`}>
-            {report.xWaveValid ? `${report.xWaveCandleCount} کندل · معتبر` : `${report.xWaveCandleCount} کندل · نامعتبر`}
+          <div className="text-[10px] text-slate-400">موج رابط X (جلسه ۱۷)</div>
+          <div className={`font-bold font-mono tabular-nums ${xWaveCardEval.isValid ? 'text-emerald-300' : 'text-rose-300'}`}>
+            {xWaveCardEval.isValid ? `${report.xWaveCandleCount} کندل · معتبر` : `${report.xWaveCandleCount} کندل · نامعتبر`}
           </div>
-          <div className="text-[10px] text-slate-400 truncate">{report.xWaveType}</div>
+          <div className="text-[10px] text-slate-400 truncate font-mono">
+            {xWaveCardEval.xWaveSubType} · {xWaveCardEval.xWaveRarity}
+          </div>
         </div>
 
         <div className="rounded-lg bg-slate-900/70 border border-slate-800/80 p-2.5 space-y-1">
@@ -306,10 +375,10 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
 
           {/* Signature Selector */}
           <div className="space-y-1">
-            <div className="text-[10px] text-slate-400">ترکیب الگوها و مخفف‌ها (I, G, T, F, Z, X)</div>
+            <div className="text-[10px] text-slate-400">ترکیب الگوها و مخفف‌ها (I, G, TERM, F, Z, T, X)</div>
             <div className="flex flex-wrap gap-1">
               {(
-                ['AUTO', 'Z-X-Z', 'Z-X-F', 'F-X-T', 'F-X-F', 'T-X-T', 'I-X-Z', 'G-X-F', 'Z-X-F-X-Z', 'Z-X-Z-X-Z-X-Z', 'Z'] as SimSignatureMode[]
+                ['AUTO', 'Z-X-Z', 'Z-X-F', 'F-X-T', 'F-X-F', 'T-X-Z', 'T-X-T', 'I-X-Z', 'Z-X-I', 'F-X-I', 'G-X-F', 'G-X-G', 'TERM-X-TERM', 'I-X-I', 'Z-X-F-X-Z', 'Z-X-Z-X-Z-X-Z', 'Z'] as SimSignatureMode[]
               ).map(mode => (
                 <button
                   key={mode}
@@ -329,14 +398,16 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
 
           {/* X-Wave Mode */}
           <div className="space-y-1">
-            <div className="text-[10px] text-slate-400">ساختار و طول کندلی موج رابط X</div>
+            <div className="text-[10px] text-slate-400">ساختار و زیرگونه موج رابط X (تکموج / زیگزاگ ۵-۳-۵، ۳-۳-۳، ۳-۵-۵ / شتابدار)</div>
             <div className="flex flex-wrap gap-1">
               {(
                 [
                   { id: 'AUTO', label: 'خودکار' },
-                  { id: 'ZIGZAG', label: 'زیگزاگ (۸ کندل)' },
-                  { id: 'IMPULSIVE', label: 'شتابدار (۶ کندل)' },
-                  { id: 'SINGLE_4', label: 'تک‌موج (۴ کندل)' },
+                  { id: 'SINGLE_4', label: 'تکموج (۴ کندل)' },
+                  { id: 'ZIGZAG_535', label: 'زیگزاگ ۵-۳-۵' },
+                  { id: 'ZIGZAG_333', label: 'زیگزاگ ۳-۳-۳' },
+                  { id: 'ZIGZAG_355', label: 'زیگزاگ ۳-۵-۵' },
+                  { id: 'IMPULSIVE', label: 'شتابدار (نادر)' },
                   { id: 'INVALID_2', label: '۲ کندل (نامعتبر)' }
                 ] as const
               ).map(opt => (
@@ -485,6 +556,48 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
         </div>
       )}
 
+      {/* Session 17 ComboMatrix + Simple Recommender + Fars 5-Leg Breakdown */}
+      {!compact && (
+        <div className="border-t border-slate-800/80 pt-3 space-y-2.5" data-testid="session17-combo-matrix">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-200">
+            <span>ماتریس نایابی ترکیب‌های استاندارد و اصلی (جلسه ۱۷)</span>
+            <span className="font-mono text-[10px] text-indigo-300">
+              پیشنهاد ساده: {simpleRecommender.selectedCount}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+            {comboMatrixItems.map(item => {
+              const tier = item.eval.rarityTier17;
+              const tierClass =
+                tier === 'MOST_COMMON' || tier === 'COMMON'
+                  ? 'border-emerald-700/60 bg-emerald-950/30 text-emerald-200'
+                  : tier === 'LESS_COMMON'
+                  ? 'border-cyan-700/60 bg-cyan-950/30 text-cyan-200'
+                  : tier === 'RARE'
+                  ? 'border-amber-700/60 bg-amber-950/30 text-amber-200'
+                  : 'border-rose-700/60 bg-rose-950/30 text-rose-200';
+              return (
+                <button
+                  key={item.sig}
+                  type="button"
+                  onClick={() => setSigMode(item.sig)}
+                  className={`rounded-md border px-2 py-1 text-right transition-colors ${
+                    sigMode === item.sig ? 'ring-1 ring-indigo-400 ' : ''
+                  }${tierClass}`}
+                >
+                  <div className="font-mono font-bold text-[10px]">{item.label}</div>
+                  <div className="text-[9px] opacity-85 font-mono">{tier}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="rounded-lg bg-slate-900/75 border border-slate-800 p-2 text-[10.5px] text-slate-300">
+            <span className="font-bold text-indigo-300">توصیه ساده‌شماری: </span>
+            {simpleRecommender.reasonFa}
+          </div>
+        </div>
+      )}
+
       {/* Recommendation & Fars Practical Case Summary */}
       <div className="border-t border-slate-800/80 pt-3 space-y-2">
         <div className="flex items-start gap-2 text-[11px] leading-relaxed">
@@ -495,12 +608,28 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
           ) : (
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           )}
-          <div className="space-y-1 min-w-0">
+          <div className="space-y-1.5 min-w-0 flex-1">
             <div className="text-slate-200 font-semibold">{report.recommendFa}</div>
             <div className="text-[10.5px] text-slate-400">{report.credibilityNoteFa}</div>
             <div className="text-[10.5px] text-slate-300">
               مثال عملی فارس (TSE_FARS): {farsPreview.reasonFa}
             </div>
+            {farsPreview.legsBreakdown.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1 pt-0.5 font-mono text-[10px]">
+                {farsPreview.legsBreakdown.map((leg, idx) => (
+                  <span
+                    key={`${leg.slot}-${idx}`}
+                    className={`px-1.5 py-0.5 rounded border ${
+                      leg.code.startsWith('X')
+                        ? 'bg-violet-950/50 border-violet-700/60 text-violet-200'
+                        : 'bg-slate-900 border-slate-700 text-slate-200'
+                    }`}
+                  >
+                    {leg.slot}: {leg.code}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
