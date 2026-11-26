@@ -16,6 +16,7 @@ import {
 import { PATTERN_LABELS_FA } from '../engine/rulesEngine';
 import { TargetProjectionEngine } from '../engine/targetProjectionEngine';
 import { PatternEngines } from '../engine/patternEngines';
+import { validateWaveExtension, detectWave3Extension } from '../engine/extensionEngine';
 import {
   Target,
   Layers,
@@ -231,6 +232,8 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                   direction: scenario.direction
                 })
               : null;
+          const s18WaveExtCheck = validateWaveExtension(scenario, item.candlesForBranch);
+          const s18Wave3ExtCheck = detectWave3Extension(scenario);
           const isDiagonalPattern =
             scenario.patternType === 'LEADING_DIAGONAL' ||
             scenario.patternType === 'ANTI_LEADING_DIAGONAL' ||
@@ -614,6 +617,17 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                                 ? s18Wave5Ext.reasonFa
                                 : s18RelExt.reasonFa}
                             </span>
+                          </div>
+                        )}
+                        {s18WaveExtCheck.isWave1Extended && (
+                          <div className="text-amber-200 font-semibold">
+                            کشیدگی موج ۱ ({s18WaveExtCheck.priorMoveCoveragePct}٪ پوشش قبلی · موج ۲={s18WaveExtCheck.wave2RetracePct}٪)
+                          </div>
+                        )}
+                        {s18Wave3ExtCheck.isWave3Extended && (
+                          <div className="text-emerald-300 font-semibold">
+                            کشیدگی موج ۳ ({s18Wave3ExtCheck.wave3PctOf1}٪ موج ۱ · موج ۴={s18Wave3ExtCheck.wave4RetracePct}٪
+                            {s18Wave3ExtCheck.status === 'BORDERLINE' ? ' · مرزی' : ''})
                           </div>
                         )}
                         {s18TmvExact && (

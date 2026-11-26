@@ -4510,13 +4510,13 @@ export class PatternEngines {
     trailingStopRequired: boolean;
     reasonFa: string;
   } {
-    if (params.wave3PctOf1 < 161.8 - 1e-6) {
+    if (params.wave3PctOf1 <= 161.8 + 1e-6) {
       return {
         status: 'NOT_CONFIRMED',
         extended: false,
         severity: 'NONE',
         trailingStopRequired: false,
-        reasonFa: `موج ۳ (${params.wave3PctOf1}٪) کمتر از ۱۶۱.۸٪ موج ۱ است؛ کشیدگی موج ۳ وجود ندارد.`
+        reasonFa: `موج ۳ (${params.wave3PctOf1}٪) بیشتر از ۱۶۱.۸٪ موج ۱ نیست؛ کشیدگی موج ۳ تأیید نمی‌شود.`
       };
     }
     if (params.wave4RetracePct > 38.2 + 0.1) {

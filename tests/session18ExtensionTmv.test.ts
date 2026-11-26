@@ -285,4 +285,135 @@ describe('Session 18 Wave Extension & TMV/PRZ Engine (T-18.1..T-18.40)', () => {
     expect(t40.isValid).toBe(true);
     expect(t40.isGolden618).toBe(true);
   });
+
+  it('extensionEngine.validateWaveExtension: identifies Wave 1 extension (100% prior move coverage & Wave 2 < 38.2%)', async () => {
+    const { validateWaveExtension } = await import('../src/engine/extensionEngine');
+
+    // Prior correction high = 180 -> drops to 100 at candleIndex 10; then W1 rises 100 -> 200 (>=100% prior move 80), W2 retraces 25 (25% < 38.2%)
+    const baseTs = 1746057600;
+    const candles: Candle[] = Array.from({ length: 30 }, (_, idx) => {
+      const price =
+        idx < 10
+          ? 180 - idx * 8
+          : idx < 18
+          ? 100 + (idx - 10) * 12.5
+          : 200 - (idx - 18) * 3;
+      return {
+        time: `2025-06-${String(idx + 1).padStart(2, '0')}T00:00:00Z`,
+        timestamp: baseTs + idx * 86400,
+        open: price - 1,
+        high: idx === 0 ? 180 : price + 1,
+        low: price - 1,
+        close: price,
+        volume: 2000
+      };
+    });
+
+    const bullExtScen: WaveScenario = {
+      ...makeImpulseScenario([100, 200, 175]),
+      vertices: [
+        { label: '0', price: 100, candleIndex: 10, timestamp: baseTs + 10 * 86400, isConfirmed: true },
+        { label: '1', price: 200, candleIndex: 18, timestamp: baseTs + 18 * 86400, isConfirmed: true },
+        { label: '2', price: 175, candleIndex: 23, timestamp: baseTs + 23 * 86400, isConfirmed: true }
+      ]
+    };
+    const confirmedRes = validateWaveExtension(bullExtScen, candles);
+    expect(confirmedRes.isWave1Extended).toBe(true);
+    expect(confirmedRes.extendedWave).toBe('WAVE_1');
+    expect(confirmedRes.wave1Status).toBe('CONFIRMED');
+    expect(confirmedRes.covers100PctPriorMove).toBe(true);
+    expect(confirmedRes.wave2Under382).toBe(true);
+
+    // Fails if starting from absolute bottom (candleIndex 0 -> no prior reference)
+    const absBottomScen = makeImpulseScenario([100, 200, 175]);
+    const absBottomRes = validateWaveExtension(absBottomScen, candles);
+    expect(absBottomRes.isWave1Extended).toBe(false);
+    expect(absBottomRes.wave1Status).toBe('UNCONFIRMED_NO_REFERENCE');
+
+    // Fails if Wave 2 >= 38.2% (e.g., 50% retracement)
+    const deepW2Scen: WaveScenario = {
+      ...bullExtScen,
+      vertices: [
+        bullExtScen.vertices[0],
+        bullExtScen.vertices[1],
+        { label: '2', price: 150, candleIndex: 23, timestamp: baseTs + 23 * 86400, isConfirmed: true }
+      ]
+    };
+    const deepW2Res = validateWaveExtension(deepW2Scen, candles);
+    expect(deepW2Res.isWave1Extended).toBe(false);
+    expect(deepW2Res.wave1Status).toBe('NOT_CONFIRMED');
+
+    // Fails if Wave 1 covers < 100% of prior move (prior peak = 180, W1 only reaches 160 => 75%)
+    const partialW1Scen: WaveScenario = {
+      ...bullExtScen,
+      vertices: [
+        { label: '0', price: 100, candleIndex: 10, timestamp: baseTs + 10 * 86400, isConfirmed: true },
+        { label: '1', price: 160, candleIndex: 18, timestamp: baseTs + 18 * 86400, isConfirmed: true },
+        { label: '2', price: 145, candleIndex: 23, timestamp: baseTs + 23 * 86400, isConfirmed: true }
+      ]
+    };
+    const partialW1Res = validateWaveExtension(partialW1Scen, candles);
+    expect(partialW1Res.covers100PctPriorMove).toBe(false);
+    expect(partialW1Res.isWave1Extended).toBe(false);
+  });
+
+  it('extensionEngine.detectWave3Extension: detects Wave 3 > 161.8% of Wave 1 and Wave 4 < 38.2% of Wave 3', async () => {
+    const { detectWave3Extension } = await import('../src/engine/extensionEngine');
+
+    // Bullish Impulse: W1 = 100 (100->200), W2 = 160, W3 = 200 (160->360, 200% of W1 > 161.8%), W4 = 60 (360->300, 30% of W3 < 38.2%)
+    const confirmedScen = makeImpulseScenario([100, 200, 160, 360, 300, 380]);
+    const confirmedRes = detectWave3Extension(confirmedScen);
+    expect(confirmedRes.isWave3Extended).toBe(true);
+    expect(confirmedRes.status).toBe('CONFIRMED');
+    expect(confirmedRes.severity).toBe('STRONG');
+    expect(confirmedRes.wave3PctOf1).toBe(200);
+    expect(confirmedRes.wave4RetracePct).toBe(30);
+    expect(confirmedRes.wave3Over1618).toBe(true);
+    expect(confirmedRes.wave4Under382).toBe(true);
+    expect(confirmedRes.trailingStopRequired).toBe(true);
+    expect(confirmedRes.consequencesFa.length).toBeGreaterThan(0);
+
+    // Severe W3 (> 261.8% W1) & shallow W4 (< 38.2% W3)
+    const severeRes = detectWave3Extension({ wave1Length: 100, wave3Length: 280, wave4Length: 60 });
+    expect(severeRes.isWave3Extended).toBe(true);
+    expect(severeRes.status).toBe('CONFIRMED');
+    expect(severeRes.severity).toBe('SEVERE');
+
+    // Borderline W4 = 38.2% with W3 > 161.8%
+    const borderlineRes = detectWave3Extension({ wave3PctOf1: 185, wave4RetracePct: 38.2 });
+    expect(borderlineRes.isWave3Extended).toBe(true);
+    expect(borderlineRes.status).toBe('BORDERLINE');
+    expect(borderlineRes.severity).toBe('MODERATE');
+
+    // Strict > 161.8%: exact 161.8% or < 161.8% must NOT confirm Wave 3 extension
+    const exact1618Res = detectWave3Extension({ wave3PctOf1: 161.8, wave4RetracePct: 23.6 });
+    expect(exact1618Res.isWave3Extended).toBe(false);
+    expect(exact1618Res.status).toBe('NOT_CONFIRMED');
+    expect(exact1618Res.wave3Over1618).toBe(false);
+
+    // Fails when Wave 4 > 38.2% of Wave 3 (e.g., 50%)
+    const deepW4Scen = makeImpulseScenario([100, 200, 160, 360, 260]);
+    const deepW4Res = detectWave3Extension(deepW4Scen);
+    expect(deepW4Res.isWave3Extended).toBe(false);
+    expect(deepW4Res.status).toBe('NOT_CONFIRMED');
+    expect(deepW4Res.wave4Under382).toBe(false);
+
+    // Bearish scenario support: W1 = -100 (400->300), W2 = 340, W3 = -220 (340->120, 220% W1), W4 = +55 (120->175, 25% W3)
+    const bearishScen: WaveScenario = {
+      ...makeImpulseScenario([400, 300, 340, 120, 175]),
+      direction: 'BEARISH'
+    };
+    const bearishRes = detectWave3Extension(bearishScen);
+    expect(bearishRes.isWave3Extended).toBe(true);
+    expect(bearishRes.status).toBe('CONFIRMED');
+    expect(bearishRes.wave3PctOf1).toBe(220);
+    expect(bearishRes.wave4RetracePct).toBe(25);
+
+    // Incomplete scenario (Wave 4 pending)
+    const pendingW4Scen = makeImpulseScenario([100, 200, 160, 360]);
+    const pendingRes = detectWave3Extension(pendingW4Scen);
+    expect(pendingRes.isWave3Extended).toBe(false);
+    expect(pendingRes.status).toBe('PENDING_WAVE_4');
+    expect(pendingRes.wave3Over1618).toBe(true);
+  });
 });
