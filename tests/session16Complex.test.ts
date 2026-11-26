@@ -95,7 +95,11 @@ describe('Session 16 Complex Patterns Engine & SDD 015 (T-16.1..T-16.43)', () =>
     expect(t4.isValid).toBe(true);
     expect(t4.xWaveType).toBe('ZIGZAG_SIMPLE');
 
-    // T-16.5: X-Wave as Single wave with 4 candles -> Valid
+    // T-16.5: X-Wave as Impulsive & Single wave (>= 3 candles) -> Valid
+    const t5Imp = PatternEngines.evaluateXWave({ kind: 'IMPULSIVE', candleCount: 5 });
+    expect(t5Imp.isValid).toBe(true);
+    expect(t5Imp.xWaveType).toBe('IMPULSIVE');
+
     const t5 = PatternEngines.evaluateXWave({ kind: 'SINGLE', candleCount: 4 });
     expect(t5.isValid).toBe(true);
     expect(t5.xWaveType).toBe('SINGLE');
@@ -106,24 +110,33 @@ describe('Session 16 Complex Patterns Engine & SDD 015 (T-16.1..T-16.43)', () =>
     expect(t6.xWaveType).toBe('INVALID');
   });
 
-  it('۱۶-۳ (T-16.7..9): Recognizes standard abbreviations I, G, F, Z, T, X', () => {
+  it('۱۶-۳ (T-16.7..9): Recognizes standard abbreviations I, G, F, Z, T, Tri, X', () => {
     // T-16.7: I-X-Z -> Ideal + X + Zigzag (standard 2-pattern with main pattern)
     const t7 = PatternEngines.evaluateComplexCombinationSignature('I-X-Z');
     expect(t7.isComplex).toBe(true);
     expect(t7.isStandard).toBe(true);
     expect(t7.abbreviationsUsed).toEqual(expect.arrayContaining(['I', 'X', 'Z']));
 
-    // T-16.8: G-X-F -> Diagonal + X + Flat
-    const t8 = PatternEngines.evaluateComplexCombinationSignature('G-X-F');
-    expect(t8.isComplex).toBe(true);
-    expect(t8.isStandard).toBe(true);
-    expect(t8.combinationCategory).toBe('MAIN_INCLUDED');
+    // T-16.8: Z-X-F & G-X-I -> Standard combinations
+    const t8Zxf = PatternEngines.evaluateComplexCombinationSignature('Z-X-F');
+    expect(t8Zxf.isComplex).toBe(true);
+    expect(t8Zxf.isStandard).toBe(true);
+    expect(t8Zxf.combinationCategory).toBe('CORRECTIVE_STANDARD');
 
-    // T-16.9: F-X-T -> Flat + X + Triangle/Terminal
+    const t8Gxi = PatternEngines.evaluateComplexCombinationSignature('G-X-I');
+    expect(t8Gxi.isComplex).toBe(true);
+    expect(t8Gxi.isStandard).toBe(true);
+    expect(t8Gxi.combinationCategory).toBe('MAIN_INCLUDED');
+
+    // T-16.9: F-X-T & F-X-Tri -> Flat + X + Triangle/Terminal
     const t9 = PatternEngines.evaluateComplexCombinationSignature('F-X-T');
     expect(t9.isComplex).toBe(true);
     expect(t9.isStandard).toBe(true);
     expect(t9.combinationCategory).toBe('CORRECTIVE_STANDARD');
+
+    const t9Tri = PatternEngines.evaluateComplexCombinationSignature('F-X-Tri');
+    expect(t9Tri.isComplex).toBe(true);
+    expect(t9Tri.signature).toBe('F-X-T');
   });
 
   it('۱۶-۴ (T-16.10..12): Enforces ONLY the 3 Cardinal Rules inside complex combinations', () => {
@@ -243,6 +256,11 @@ describe('Session 16 Complex Patterns Engine & SDD 015 (T-16.1..T-16.43)', () =>
       expect(res.isStandard).toBe(true);
       expect(res.rarityStatus).toBe('COMMON');
     }
+
+    // Z-X-Z-X-Z (3 patterns) -> Non-standard
+    const nonStdZxzxz = PatternEngines.evaluateComplexCombinationSignature('Z-X-Z-X-Z');
+    expect(nonStdZxzxz.isStandard).toBe(false);
+    expect(nonStdZxzxz.combinationTier).toBe('NON_STANDARD_3');
   });
 
   it('۱۶-۸ (T-16.22..24): Allows 2-pattern combinations containing main patterns (I, G) and marks 3+ as Non-Standard', () => {
@@ -362,6 +380,14 @@ describe('Session 16 Complex Patterns Engine & SDD 015 (T-16.1..T-16.43)', () =>
     });
     expect(t37.decision).toBe('ALLOW_WITH_CONFIRMATION');
     expect(t37.isRestricted).toBe(false);
+
+    // Market end + simple pattern possible -> PREFER_SIMPLE
+    const tPreferSimple = PatternEngines.evaluateComplexMarketEndRestriction({
+      isMarketEnd: true,
+      simplePatternPossible: true
+    });
+    expect(tPreferSimple.decision).toBe('PREFER_SIMPLE');
+    expect(tPreferSimple.isRestricted).toBe(true);
   });
 
   it('۱۶-۱۳ (T-16.38..40): Evaluates Fars (فارس) practical case study and TSE_FARS market data', () => {
@@ -619,5 +645,259 @@ describe('Session 16 Complex Patterns Engine & SDD 015 (T-16.1..T-16.43)', () =>
     expect(failRule3.passed).toBe(false);
     expect(failRule3.rule3Passed).toBe(false);
     expect(failRule3.violatedRules).toContain(3);
+  });
+
+  it('RulesEngine.ComplexPatternEngine.scanForComplexCandidates detects two Zigzags & internal split candidates for complex conversion', () => {
+    const candles = makeCandles(50);
+
+    // Case A: Two identified Zigzag structures separated by >= 3 candles -> suggests Z-X-Z link
+    const zz1: WaveScenario = {
+      ...makeComplexScenario([100, 150, 125, 175], {
+        labels: ['0', 'A', 'B', 'C'],
+        patternType: 'ZIGZAG',
+        candleIndices: [0, 5, 9, 14]
+      }),
+      id: 'zz_first',
+      name: 'زیگزاگ اول'
+    };
+    const zz2: WaveScenario = {
+      ...makeComplexScenario([140, 190, 165, 225], {
+        labels: ['0', 'A', 'B', 'C'],
+        patternType: 'ZIGZAG',
+        candleIndices: [19, 24, 28, 34] // gap = 19 - 14 = 5 candles (>= 3)
+      }),
+      id: 'zz_second',
+      name: 'زیگزاگ دوم'
+    };
+
+    const paired = RulesEngine.ComplexPatternEngine.scanForComplexCandidates([zz1, zz2], candles);
+    const pairHit = paired.find(c => c.candidateKind === 'PAIRED_SCENARIOS');
+    expect(pairHit).toBeDefined();
+    expect(pairHit?.suggestedSignature).toBe('Z-X-Z');
+    expect(pairHit?.xWaveCandles).toBe(5);
+    expect(pairHit?.xWaveValid).toBe(true);
+    expect(pairHit?.isStandard9).toBe(true);
+    expect(pairHit?.suggestedVertices.map(v => v.label)).toEqual(['0', 'W', 'X', 'Y']);
+
+    // Case B: Single Zigzag scenario with deep B (> 61.8% A) and >= 3 candles -> suggests internal split
+    const deepZigzag: WaveScenario = {
+      ...makeComplexScenario([100, 160, 115, 190], {
+        labels: ['0', 'A', 'B', 'C'],
+        patternType: 'ZIGZAG',
+        candleIndices: [0, 6, 11, 18] // B retrace = 45/60 = 75%, span = 5 candles
+      }),
+      id: 'zz_deep_split',
+      name: 'زیگزاگ عمیق کاندیدا'
+    };
+    const splitRes = RulesEngine.ComplexPatternEngine.scanForComplexCandidates([deepZigzag], candles);
+    const splitHit = splitRes.find(c => c.candidateKind === 'INTERNAL_SPLIT');
+    expect(splitHit).toBeDefined();
+    expect(splitHit?.suggestedSignature).toBe('Z-X-Z');
+    expect(splitHit?.xWaveValid).toBe(true);
+    expect(splitHit?.xWaveCandles).toBe(5);
+  });
+
+  it('RulesEngine.exportApprovedScenariosToJson serializes approved scenarios and filters out discarded or invalid scenarios', () => {
+    const candles = makeCandles(40);
+
+    const approvedScenario: WaveScenario = {
+      ...makeComplexScenario([100, 150, 125, 190], {
+        labels: ['0', 'W', 'X', 'Y'],
+        candleIndices: [0, 6, 11, 18]
+      }),
+      id: 'approved_sc_1',
+      name: 'سناریوی تاییدشده کاربر',
+      isSelectedForTree: true,
+      isPrimary: true,
+      rulesResults: [
+        {
+          ruleId: 'CORE_RULE_1',
+          nameFa: 'موج ۲ < ۱۰۰٪ موج ۱',
+          type: 'HARD',
+          passed: true,
+          messageFa: 'تایید'
+        }
+      ]
+    };
+
+    const discardedScenario: WaveScenario = {
+      ...approvedScenario,
+      id: 'discarded_sc_2',
+      name: 'سناریوی حذف‌شده',
+      isDiscarded: true
+    };
+
+    const hardFailedScenario: WaveScenario = {
+      ...approvedScenario,
+      id: 'hard_failed_sc_3',
+      name: 'سناریوی نقض قانون سخت',
+      rulesResults: [
+        {
+          ruleId: 'HARD_FAIL',
+          nameFa: 'نقض سخت',
+          type: 'HARD',
+          passed: false,
+          messageFa: 'نامعتبر'
+        }
+      ]
+    };
+
+    const invalidTriangleScenario: WaveScenario = {
+      ...makeComplexScenario([100, 140, 110, 135, 115, 128], {
+        labels: ['0', 'A', 'B', 'C', 'D', 'E'],
+        patternType: 'TRIANGLE_CONVERGING',
+        candleIndices: [0, 5, 10, 15, 20, 25]
+      }),
+      id: 'invalid_tri_sc_4',
+      name: 'مثلث نامعتبر موج ۳',
+      parentLegLabel: 'موج 3',
+      isSelectedForTree: true
+    };
+
+    const exported = RulesEngine.exportApprovedScenariosToJson(
+      [approvedScenario, discardedScenario, hardFailedScenario, invalidTriangleScenario],
+      {
+        candles,
+        assetSymbol: 'TSE_FARS',
+        timeframe: '1D'
+      }
+    );
+
+    expect(exported.approvedCount).toBe(1);
+    expect(exported.excludedCount).toBe(3);
+    expect(exported.exportedScenarioIds).toEqual(['approved_sc_1']);
+    expect(exported.excludedScenarioIds).toEqual([
+      'discarded_sc_2',
+      'hard_failed_sc_3',
+      'invalid_tri_sc_4'
+    ]);
+
+    const parsed = JSON.parse(exported.json);
+    expect(parsed.schemaVersion).toBe('1.0.0');
+    expect(parsed.exporter).toBe('FEI-RulesEngine');
+    expect(parsed.assetSymbol).toBe('TSE_FARS');
+    expect(parsed.timeframe).toBe('1D');
+    expect(parsed.approvedCount).toBe(1);
+    expect(parsed.scenarios).toHaveLength(1);
+    expect(parsed.scenarios[0].id).toBe('approved_sc_1');
+
+    // When includeOnlyApproved=false, all scenarios are serialized
+    const exportAll = RulesEngine.exportApprovedScenariosToJson(
+      [approvedScenario, discardedScenario],
+      { candles, includeOnlyApproved: false }
+    );
+    expect(exportAll.approvedCount).toBe(2);
+    expect(exportAll.excludedCount).toBe(0);
+  });
+
+  it('RulesEngine.evaluatePriorityHierarchyStatus verifies priority position and warns when Complex is used despite a valid Zigzag', () => {
+    const candles = makeCandles(40);
+
+    // 1. Valid Ideal Cycle at Rank 1 -> optimal hierarchy position
+    const idealScen: WaveScenario = {
+      ...makeComplexScenario([100, 140, 120, 195, 165, 220], {
+        labels: ['0', '1', '2', '3', '4', '5'],
+        patternType: 'IDEAL_CYCLE',
+        candleIndices: [0, 6, 11, 20, 26, 33]
+      }),
+      id: 'ideal_priority_ok'
+    };
+    const idealRes = RulesEngine.evaluatePriorityHierarchyStatus(idealScen, candles, 'ROOT', '');
+    expect(idealRes.currentRank).toBe(1);
+    expect(idealRes.isRightPosition).toBe(true);
+    expect(idealRes.status).toBe('OPTIMAL');
+    expect(idealRes.isComplexWithSimplerAlternative).toBe(false);
+
+    // 2. Simple 3-leg Zigzag shape misclassified as COMPLEX_COMBINATION (Rank 7) -> warns and suggests ZIGZAG (Rank 4)
+    const overComplicatedScen: WaveScenario = {
+      ...makeComplexScenario([100, 150, 125, 175], {
+        labels: ['0', 'W', 'X', 'Y'],
+        patternType: 'COMPLEX_COMBINATION',
+        candleIndices: [0, 7, 13, 21]
+      }),
+      id: 'complex_when_zigzag_possible'
+    };
+    const complexWarnRes = RulesEngine.evaluatePriorityHierarchyStatus(
+      overComplicatedScen,
+      candles,
+      'CORRECTIVE',
+      'موج 4'
+    );
+    expect(complexWarnRes.currentRank).toBe(7);
+    expect(complexWarnRes.isRightPosition).toBe(false);
+    expect(complexWarnRes.isComplexWithSimplerAlternative).toBe(true);
+    expect(complexWarnRes.status).toBe('WARNING_SIMPLER_POSSIBLE');
+    expect(complexWarnRes.recommendedPattern).toBe('ZIGZAG');
+    expect(complexWarnRes.recommendedRank).toBe(4);
+    expect(complexWarnRes.warningMessageFa).toBeTruthy();
+
+    // 3. Same 3-leg corrective wave properly counted as ZIGZAG (Rank 4) -> right hierarchy position
+    const properZigzagScen: WaveScenario = {
+      ...overComplicatedScen,
+      id: 'proper_zigzag',
+      patternType: 'ZIGZAG'
+    };
+    const zigzagRes = RulesEngine.evaluatePriorityHierarchyStatus(
+      properZigzagScen,
+      candles,
+      'CORRECTIVE',
+      'موج 4'
+    );
+    expect(zigzagRes.currentRank).toBe(4);
+    expect(zigzagRes.isRightPosition).toBe(true);
+    expect(zigzagRes.status).toBe('OPTIMAL');
+    expect(zigzagRes.isComplexWithSimplerAlternative).toBe(false);
+  });
+
+  it('RulesEngine.evaluateAnalysisConfidence outputs 1..100 score that decreases as complex patterns increase and includes analyst statistics', () => {
+    const simple1: WaveScenario = {
+      ...makeComplexScenario([100, 140, 120, 195, 165, 220], {
+        labels: ['0', '1', '2', '3', '4', '5'],
+        patternType: 'IDEAL_CYCLE',
+        candleIndices: [0, 6, 11, 20, 26, 33]
+      }),
+      id: 'simple_ideal'
+    };
+
+    const complex1: WaveScenario = {
+      ...makeComplexScenario([100, 150, 125, 190], {
+        labels: ['0', 'W', 'X', 'Y'],
+        candleIndices: [0, 6, 11, 18]
+      }),
+      id: 'complex_1',
+      metadata: { complexSignature: 'Z-X-F' }
+    };
+
+    const complex2: WaveScenario = {
+      ...complex1,
+      id: 'complex_2',
+      metadata: { complexSignature: 'Z-X-Z' }
+    };
+
+    const complex3: WaveScenario = {
+      ...complex1,
+      id: 'complex_3',
+      metadata: { complexSignature: 'Z-X-F-X-Z' }
+    };
+
+    const zeroComplex = RulesEngine.evaluateAnalysisConfidence(simple1, [simple1]);
+    const oneComplex = RulesEngine.evaluateAnalysisConfidence(complex1, [simple1, complex1]);
+    const twoComplex = RulesEngine.evaluateAnalysisConfidence(complex1, [complex1, complex2]);
+    const threeComplex = RulesEngine.evaluateAnalysisConfidence(complex3, [complex1, complex2, complex3]);
+
+    expect(zeroComplex.score).toBeGreaterThanOrEqual(1);
+    expect(zeroComplex.score).toBeLessThanOrEqual(100);
+    expect(zeroComplex.complexScenarioCount).toBe(0);
+    expect(zeroComplex.credibilityTier).toBe('HIGH');
+
+    expect(oneComplex.score).toBeLessThan(zeroComplex.score);
+    expect(twoComplex.score).toBeLessThan(oneComplex.score);
+    expect(threeComplex.score).toBeLessThan(twoComplex.score);
+    expect(threeComplex.score).toBeGreaterThanOrEqual(1);
+
+    expect(oneComplex.statsTooltipFa).toContain('۲۰,۰۰۰');
+    expect(oneComplex.statsTooltipFa).toContain('۱,۰۰۰');
+    expect(oneComplex.analystFunnel.some(f => f.countFa.includes('۲۰,۰۰۰'))).toBe(true);
+    expect(oneComplex.analystFunnel.some(f => f.countFa.includes('۱,۰۰۰'))).toBe(true);
   });
 });

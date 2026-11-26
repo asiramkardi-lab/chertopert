@@ -850,6 +850,11 @@ export interface WaveScenario {
     internalSubwaves?: number[];
     triangleType?: 'CONTRACTING' | 'EXPANDING' | 'INVALID';
     triangleLabel?: 'Contracting' | 'Expanding' | 'Invalid';
+    complexSignature?: string;
+    isStandard9?: boolean;
+    xWaveForm?: string;
+    xWaveCandles?: number;
+    conversionCandidateSignature?: string;
   };
 }
 

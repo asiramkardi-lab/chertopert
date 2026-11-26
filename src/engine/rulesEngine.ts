@@ -1419,12 +1419,144 @@ export class RulesEngine {
    * RulesEngine 'ComplexPatternEngine' Module:
    * Links two simple patterns using an X-Wave, detects the 9 standard combinations
    * (Z-X-Z, Z-X-F, Z-X-T, F-X-Z, F-X-F, F-X-T, T-X-Z, T-X-F, T-X-T),
-   * and validates the 3 core rules:
-   * 1. Wave 2 does not exceed Wave 1
-   * 2. Wave 3 is not the shortest wave
-   * 3. Wave 4 does not exceed Wave 3
+   * validates the 3 core rules (Wave 2 <= Wave 1, Wave 3 not shortest, Wave 4 <= Wave 3),
+   * and scans existing scenarios for complex-pattern conversion candidates.
    */
-  public static readonly ComplexPatternEngine = {
+  public static readonly ComplexPatternEngine: {
+    readonly STANDARD_9_COMBINATIONS: readonly [
+      'Z-X-Z',
+      'Z-X-F',
+      'Z-X-T',
+      'F-X-Z',
+      'F-X-F',
+      'F-X-T',
+      'T-X-Z',
+      'T-X-F',
+      'T-X-T'
+    ];
+    normalizePatternCode: (pattern: PatternFamily | string) => 'Z' | 'F' | 'T' | 'I' | 'G';
+    detectStandardCombination: (
+      signatureOrScenario: string | WaveScenario,
+      candles?: Candle[]
+    ) => {
+      detected: boolean;
+      isStandard9: boolean;
+      isStandardCombination: boolean;
+      signature: string;
+      firstCode: string;
+      secondCode: string;
+      combinationCategory: ComplexPatternReport['combinationCategory'];
+      rarityStatus: ComplexPatternReport['rarityStatus'];
+      labelFa: string;
+    };
+    validateCoreRules: (params: {
+      wave1Len?: number;
+      wave2Len?: number;
+      wave2RetracePctOf1?: number;
+      wave3Len?: number;
+      wave4Len?: number;
+      wave4RetracePctOf3?: number;
+      wave5Len?: number;
+      vertices?: WaveVertex[];
+      direction?: WaveDirection;
+    }) => {
+      passed: boolean;
+      rule1Passed: boolean;
+      rule2Passed: boolean;
+      rule3Passed: boolean;
+      violatedRules: number[];
+      rules: RuleValidationItem[];
+      reasonFa: string;
+    };
+    linkPatterns: (input: {
+      firstPattern: PatternFamily | string;
+      secondPattern: PatternFamily | string;
+      xWave?: {
+        kind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'SIMPLE_3_CANDLE' | 'AUTO' | string;
+        candleCount?: number;
+        subwaves?: number[];
+        vertices?: WaveVertex[];
+      };
+      direction?: WaveDirection;
+      waveMeasurements?: {
+        wave1Len: number;
+        wave2Len?: number;
+        wave2RetracePctOf1?: number;
+        wave3Len: number;
+        wave4Len?: number;
+        wave4RetracePctOf3?: number;
+        wave5Len: number;
+      };
+      vertices?: WaveVertex[];
+      candles?: Candle[];
+      timeframe?: string;
+      degree?: WaveDegree;
+    }) => {
+      linked: boolean;
+      isValid: boolean;
+      signature: string;
+      isStandard9: boolean;
+      isMainIncluded: boolean;
+      rarityStatus: ComplexPatternReport['rarityStatus'];
+      xWaveValidation: ReturnType<typeof RulesEngine.XWaveValidator>;
+      coreRules: {
+        passed: boolean;
+        rule1Passed: boolean;
+        rule2Passed: boolean;
+        rule3Passed: boolean;
+        violatedRules: number[];
+        rules: RuleValidationItem[];
+        reasonFa: string;
+      };
+      scenario?: WaveScenario;
+      reasonFa: string;
+    };
+    scanForComplexCandidates: (
+      scenariosOrScenario: WaveScenario | WaveScenario[],
+      candles?: Candle[]
+    ) => Array<{
+      candidateId: string;
+      sourceScenarioIds: string[];
+      sourceScenarioNames: string[];
+      candidateKind: 'PAIRED_SCENARIOS' | 'INTERNAL_SPLIT';
+      suggestedSignature: string;
+      isStandard9: boolean;
+      splitLegIndex: number;
+      xWaveCandles: number;
+      xWaveValid: boolean;
+      coreRulesPassed: boolean;
+      confidence: number;
+      suggestedVertices: WaveVertex[];
+      reasonFa: string;
+    }>;
+    analyze: (
+      scenario: WaveScenario,
+      candles?: Candle[],
+      options?: ComplexAnalysisOptions
+    ) => {
+      detected: boolean;
+      isStandard9: boolean;
+      isStandardCombination: boolean;
+      signature: string;
+      firstCode: string;
+      secondCode: string;
+      combinationCategory: ComplexPatternReport['combinationCategory'];
+      rarityStatus: ComplexPatternReport['rarityStatus'];
+      labelFa: string;
+      xWaveValidation: ReturnType<typeof RulesEngine.XWaveValidator>;
+      coreRules: {
+        passed: boolean;
+        rule1Passed: boolean;
+        rule2Passed: boolean;
+        rule3Passed: boolean;
+        violatedRules: number[];
+        rules: RuleValidationItem[];
+        reasonFa: string;
+      };
+      report: ComplexPatternReport;
+      isValid: boolean;
+    };
+  } = {
     STANDARD_9_COMBINATIONS: [
       'Z-X-Z',
       'Z-X-F',
@@ -1437,21 +1569,7 @@ export class RulesEngine {
       'T-X-T'
     ] as const,
 
-    normalizePatternCode(
-      pattern:
-        | PatternFamily
-        | 'Z'
-        | 'F'
-        | 'T'
-        | 'I'
-        | 'G'
-        | 'ZIGZAG'
-        | 'FLAT'
-        | 'TRIANGLE'
-        | 'IDEAL'
-        | 'DIAGONAL'
-        | string
-    ): 'Z' | 'F' | 'T' | 'I' | 'G' {
+    normalizePatternCode(pattern: PatternFamily | string): 'Z' | 'F' | 'T' | 'I' | 'G' {
       const upper = String(pattern || 'Z').trim().toUpperCase();
       if (upper === 'Z' || upper === 'ZIGZAG') return 'Z';
       if (upper === 'F' || upper === 'FLAT' || upper.startsWith('FLAT_')) return 'F';
@@ -1470,20 +1588,7 @@ export class RulesEngine {
       return 'Z';
     },
 
-    detectStandardCombination(
-      signatureOrScenario: string | WaveScenario,
-      candles: Candle[] = []
-    ): {
-      detected: boolean;
-      isStandard9: boolean;
-      isStandardCombination: boolean;
-      signature: string;
-      firstCode: string;
-      secondCode: string;
-      combinationCategory: ComplexPatternReport['combinationCategory'];
-      rarityStatus: ComplexPatternReport['rarityStatus'];
-      labelFa: string;
-    } {
+    detectStandardCombination(signatureOrScenario: string | WaveScenario, candles: Candle[] = []) {
       const rawSig =
         typeof signatureOrScenario === 'string'
           ? signatureOrScenario
@@ -1516,15 +1621,7 @@ export class RulesEngine {
       wave5Len?: number;
       vertices?: WaveVertex[];
       direction?: WaveDirection;
-    }): {
-      passed: boolean;
-      rule1Passed: boolean;
-      rule2Passed: boolean;
-      rule3Passed: boolean;
-      violatedRules: number[];
-      rules: RuleValidationItem[];
-      reasonFa: string;
-    } {
+    }) {
       let len1 = params.wave1Len ?? 100;
       let len3 = params.wave3Len ?? 140;
       let len5 = params.wave5Len ?? 110;
@@ -1618,41 +1715,7 @@ export class RulesEngine {
       };
     },
 
-    linkPatterns(input: {
-      firstPattern: PatternFamily | string;
-      secondPattern: PatternFamily | string;
-      xWave?: {
-        kind?: 'ZIGZAG' | 'IMPULSIVE' | 'SINGLE' | 'SIMPLE_3_CANDLE' | 'AUTO' | string;
-        candleCount?: number;
-        subwaves?: number[];
-        vertices?: WaveVertex[];
-      };
-      direction?: WaveDirection;
-      waveMeasurements?: {
-        wave1Len: number;
-        wave2Len?: number;
-        wave2RetracePctOf1?: number;
-        wave3Len: number;
-        wave4Len?: number;
-        wave4RetracePctOf3?: number;
-        wave5Len: number;
-      };
-      vertices?: WaveVertex[];
-      candles?: Candle[];
-      timeframe?: string;
-      degree?: WaveDegree;
-    }): {
-      linked: boolean;
-      isValid: boolean;
-      signature: string;
-      isStandard9: boolean;
-      isMainIncluded: boolean;
-      rarityStatus: ComplexPatternReport['rarityStatus'];
-      xWaveValidation: ReturnType<typeof RulesEngine.XWaveValidator>;
-      coreRules: ReturnType<typeof RulesEngine.ComplexPatternEngine.validateCoreRules>;
-      scenario?: WaveScenario;
-      reasonFa: string;
-    } {
+    linkPatterns(input) {
       const code1 = RulesEngine.ComplexPatternEngine.normalizePatternCode(input.firstPattern);
       const code2 = RulesEngine.ComplexPatternEngine.normalizePatternCode(input.secondPattern);
       const signature = `${code1}-X-${code2}`;
@@ -1767,6 +1830,168 @@ export class RulesEngine {
         ...(scenario ? { scenario } : {}),
         reasonFa
       };
+    },
+
+    scanForComplexCandidates(
+      scenariosOrScenario: WaveScenario | WaveScenario[],
+      candles: Candle[] = []
+    ) {
+      const list = Array.isArray(scenariosOrScenario) ? scenariosOrScenario : [scenariosOrScenario];
+      const candidates: Array<{
+        candidateId: string;
+        sourceScenarioIds: string[];
+        sourceScenarioNames: string[];
+        candidateKind: 'PAIRED_SCENARIOS' | 'INTERNAL_SPLIT';
+        suggestedSignature: string;
+        isStandard9: boolean;
+        splitLegIndex: number;
+        xWaveCandles: number;
+        xWaveValid: boolean;
+        coreRulesPassed: boolean;
+        confidence: number;
+        suggestedVertices: WaveVertex[];
+        reasonFa: string;
+      }> = [];
+
+      const correctiveCodes = new Set(['ZIGZAG', 'FLAT_REGULAR', 'FLAT_EXPANDED', 'FLAT_RUNNING', 'TRIANGLE_CONVERGING', 'TRIANGLE_CONTRACTING', 'TRIANGLE_EXPANDING']);
+
+      // 1. Pairwise scan: detect two identified simple/corrective structures (e.g., Zigzag + Zigzag) separated by >= 3 candles
+      for (let i = 0; i < list.length; i++) {
+        for (let j = 0; j < list.length; j++) {
+          if (i === j) continue;
+          const sc1 = list[i];
+          const sc2 = list[j];
+          if (sc1.patternType === 'COMPLEX_COMBINATION' || sc2.patternType === 'COMPLEX_COMBINATION') continue;
+          if (!correctiveCodes.has(sc1.patternType) && !correctiveCodes.has(sc2.patternType)) continue;
+          if (sc1.vertices.length < 2 || sc2.vertices.length < 2) continue;
+
+          const sc1Start = sc1.vertices[0];
+          const sc1End = sc1.vertices[sc1.vertices.length - 1];
+          const sc2Start = sc2.vertices[0];
+          const sc2End = sc2.vertices[sc2.vertices.length - 1];
+          const xSpan = sc2Start.candleIndex - sc1End.candleIndex;
+          if (xSpan < 3) continue;
+
+          const c1 = RulesEngine.ComplexPatternEngine.normalizePatternCode(sc1.patternType);
+          const c2 = RulesEngine.ComplexPatternEngine.normalizePatternCode(sc2.patternType);
+          const sig = `${c1}-X-${c2}`;
+          const comboDet = RulesEngine.ComplexPatternEngine.detectStandardCombination(sig);
+          const suggestedVertices: WaveVertex[] = [
+            { ...sc1Start, label: '0' },
+            { ...sc1End, label: 'W' },
+            { ...sc2Start, label: 'X' },
+            { ...sc2End, label: 'Y' }
+          ];
+          const xCheck = RulesEngine.XWaveValidator({ vertices: suggestedVertices, candles }, candles);
+          const core = RulesEngine.ComplexPatternEngine.validateCoreRules({
+            vertices: suggestedVertices,
+            direction: sc1.direction
+          });
+
+          if (xCheck.isValid) {
+            candidates.push({
+              candidateId: `cand_pair_${sc1.id}_${sc2.id}`,
+              sourceScenarioIds: [sc1.id, sc2.id],
+              sourceScenarioNames: [sc1.name, sc2.name],
+              candidateKind: 'PAIRED_SCENARIOS',
+              suggestedSignature: sig,
+              isStandard9: comboDet.isStandard9,
+              splitLegIndex: 1,
+              xWaveCandles: xCheck.candleCount,
+              xWaveValid: xCheck.isValid,
+              coreRulesPassed: core.passed,
+              confidence: core.passed ? (comboDet.isStandard9 ? 86 : 74) : 52,
+              suggestedVertices,
+              reasonFa: `دو ساختار مجزای «${sc1.name}» و «${sc2.name}» با فاصله ${xCheck.candleCount} کندلی شناسایی شدند؛ پیشنهاد پیوند با موج رابط X در قالب ${sig}.`
+            });
+          }
+        }
+      }
+
+      // 2. Single-scenario internal split scan:
+      // Identify scenarios with 4+ vertices (3-wave A-B-C with deep B > 61.8%, or 5..7+ wave structures with two Zigzag wings)
+      for (const sc of list) {
+        const verts = sc.vertices;
+        if (verts.length < 4 || sc.patternType === 'COMPLEX_COMBINATION') continue;
+
+        if (verts.length >= 6) {
+          // Two consecutive wings joined by middle linking leg (verts[2] -> verts[3] or verts[1] -> verts[2])
+          const splitLegIndex = verts.length >= 7 ? 3 : 2;
+          const xStart = verts[splitLegIndex];
+          const xEnd = verts[splitLegIndex + 1];
+          const xSpan = xStart && xEnd ? Math.abs(xEnd.candleIndex - xStart.candleIndex) : 0;
+          if (xSpan >= 3) {
+            const firstHalfLen = Math.abs(verts[splitLegIndex].price - verts[0].price);
+            const secondHalfLen = Math.abs(verts[verts.length - 1].price - verts[splitLegIndex + 1].price);
+            const ratio2 = firstHalfLen > 0 ? secondHalfLen / firstHalfLen : 1;
+            const c1 = RulesEngine.ComplexPatternEngine.normalizePatternCode(sc.patternType);
+            const sig = c1 === 'Z' || c1 === 'F' || c1 === 'T' ? `${c1}-X-${ratio2 > 1.3 ? 'F' : 'Z'}` : 'Z-X-Z';
+            const comboDet = RulesEngine.ComplexPatternEngine.detectStandardCombination(sig);
+            const suggestedVertices: WaveVertex[] = [
+              { ...verts[0], label: '0' },
+              { ...verts[splitLegIndex], label: 'W' },
+              { ...verts[splitLegIndex + 1], label: 'X' },
+              { ...verts[verts.length - 1], label: 'Y' }
+            ];
+            const core = RulesEngine.ComplexPatternEngine.validateCoreRules({
+              vertices: suggestedVertices,
+              direction: sc.direction
+            });
+            candidates.push({
+              candidateId: `cand_split_${sc.id}_multi`,
+              sourceScenarioIds: [sc.id],
+              sourceScenarioNames: [sc.name],
+              candidateKind: 'INTERNAL_SPLIT',
+              suggestedSignature: sig,
+              isStandard9: comboDet.isStandard9,
+              splitLegIndex,
+              xWaveCandles: xSpan,
+              xWaveValid: true,
+              coreRulesPassed: core.passed,
+              confidence: core.passed ? 82 : 58,
+              suggestedVertices,
+              reasonFa: `ساختار چندبخشی «${sc.name}» دارای شکاف ${xSpan} کندلی بین دو ساختار زیگزاگ/اصلاحی است؛ پیشنهاد جداسازی با موج X (${sig}).`
+            });
+          }
+        } else if (verts.length >= 4 && (sc.patternType === 'ZIGZAG' || sc.patternType.startsWith('FLAT_'))) {
+          // 3-wave A-B-C where leg 1->2 (B) >= 3 candles and B/A >= 61.8% -> candidate for W-X-Y (Z-X-Z or Z-X-F)
+          const lenA = Math.max(0.0001, Math.abs(verts[1].price - verts[0].price));
+          const lenB = Math.abs(verts[2].price - verts[1].price);
+          const bRatioPct = (lenB / lenA) * 100;
+          const xSpan = Math.abs(verts[2].candleIndex - verts[1].candleIndex);
+          if (xSpan >= 3 && bRatioPct >= 61.8) {
+            const sig = sc.patternType.startsWith('FLAT_') ? 'Z-X-F' : 'Z-X-Z';
+            const comboDet = RulesEngine.ComplexPatternEngine.detectStandardCombination(sig);
+            const suggestedVertices: WaveVertex[] = [
+              { ...verts[0], label: '0' },
+              { ...verts[1], label: 'W' },
+              { ...verts[2], label: 'X' },
+              { ...verts[3], label: 'Y' }
+            ];
+            const core = RulesEngine.ComplexPatternEngine.validateCoreRules({
+              vertices: suggestedVertices,
+              direction: sc.direction
+            });
+            candidates.push({
+              candidateId: `cand_split_${sc.id}_abc`,
+              sourceScenarioIds: [sc.id],
+              sourceScenarioNames: [sc.name],
+              candidateKind: 'INTERNAL_SPLIT',
+              suggestedSignature: sig,
+              isStandard9: comboDet.isStandard9,
+              splitLegIndex: 1,
+              xWaveCandles: xSpan,
+              xWaveValid: true,
+              coreRulesPassed: core.passed,
+              confidence: core.passed ? 78 : 54,
+              suggestedVertices,
+              reasonFa: `در سناریوی «${sc.name}»، اصلاح موج میانی ${Math.round(bRatioPct)}٪ (≥ ۶۱.۸٪) با ${xSpan} کندل است؛ کاندیدای تبدیل به ترکیب ${sig} با موج رابط X.`
+            });
+          }
+        }
+      }
+
+      return candidates.sort((a, b) => b.confidence - a.confidence);
     },
 
     analyze(
@@ -4553,6 +4778,332 @@ export class RulesEngine {
   }
 
   /**
+   * Session 16 (§2.5 & §2.14): Evaluates whether the active scenario is placed
+   * in the right position in the 7-tier Elliott counting priority hierarchy:
+   * 1. Ideal Cycle -> 2. Diagonal -> 3. Terminal/Anti-Cycle -> 4. Zigzag -> 5. Flat -> 6. Triangle -> 7. Complex.
+   * Flags a suggested warning whenever Complex Combination (rank 7) is selected while
+   * a simpler valid pattern (e.g., Zigzag rank 4) is possible.
+   */
+  public static evaluatePriorityHierarchyStatus(
+    scenario: WaveScenario,
+    candles: Candle[] = [],
+    parentRole: WaveRole = 'ROOT',
+    parentWaveLabel: string = ''
+  ): {
+    currentPattern: PatternFamily;
+    currentRank: number;
+    currentLabelFa: string;
+    recommendedPattern: PatternFamily;
+    recommendedRank: number;
+    recommendedLabelFa: string;
+    status: 'OPTIMAL' | 'WARNING_SIMPLER_POSSIBLE' | 'WARNING_HIGHER_PRIORITY';
+    isRightPosition: boolean;
+    isComplexWithSimplerAlternative: boolean;
+    simplerAlternatives: Array<{
+      patternType: PatternFamily;
+      rank: number;
+      labelFa: string;
+      status: 'VALID' | 'WARNING';
+      confidenceScore: number;
+    }>;
+    badgeLabelFa: string;
+    warningMessageFa: string | null;
+    ladderSummaryFa: string;
+  } {
+    const PRIORITY_TIER_NAMES_FA: Record<number, string> = {
+      1: 'سیکل ایده‌آل',
+      2: 'الگوی قطر',
+      3: 'ترمینال / آنتی‌سیکل',
+      4: 'زیگزاگ',
+      5: 'فلت',
+      6: 'مثلث',
+      7: 'ترکیبی'
+    };
+    const ladderSummaryFa =
+      'سلسله‌مراتب اولویت بهاری: ۱.ایده‌آل ← ۲.قطر ← ۳.ترمینال/آنتی‌سیکل ← ۴.زیگزاگ ← ۵.فلت ← ۶.مثلث ← ۷.ترکیبی (آخرین راه‌حل)';
+
+    const currentPattern = scenario.patternType;
+    const currentRank = RulesEngine.getPatternPriorityRank(currentPattern);
+    const currentLabelFa = PRIORITY_TIER_NAMES_FA[currentRank] || PATTERN_LABELS_FA[currentPattern];
+    const resolvedParentLabel = parentWaveLabel || scenario.parentLegLabel || '';
+
+    if (scenario.vertices.length < 3) {
+      return {
+        currentPattern,
+        currentRank,
+        currentLabelFa,
+        recommendedPattern: currentPattern,
+        recommendedRank: currentRank,
+        recommendedLabelFa: currentLabelFa,
+        status: 'OPTIMAL',
+        isRightPosition: true,
+        isComplexWithSimplerAlternative: false,
+        simplerAlternatives: [],
+        badgeLabelFa: `اولویت ${currentRank}/۷ · جایگاه صحیح`,
+        warningMessageFa: null,
+        ladderSummaryFa
+      };
+    }
+
+    const evaluations = RulesEngine.evaluateAllPatterns(
+      scenario.vertices,
+      scenario.direction,
+      parentRole,
+      resolvedParentLabel,
+      candles,
+      currentPattern
+    );
+
+    const joinedLabels = scenario.vertices
+      .map(v => normalizeLabelAscii(v.label || ''))
+      .join(' ');
+    const isCorrectiveShape =
+      scenario.vertices.length <= 4 &&
+      (parentRole === 'CORRECTIVE' || /\b[ABCWXY]\b/.test(joinedLabels));
+    const isBullDir = scenario.direction === 'BULLISH';
+    const p0Price = scenario.vertices[0]?.price ?? 0;
+    const p2Price = scenario.vertices[2]?.price ?? 0;
+    const w2BreachesOrigin =
+      scenario.vertices.length >= 3 &&
+      (isBullDir ? p2Price <= p0Price + 1e-6 : p2Price >= p0Price - 1e-6);
+    const isMotive5Pattern = (p: PatternFamily) =>
+      p === 'IDEAL_CYCLE' ||
+      p === 'TERMINAL' ||
+      p === 'ANTI_TERMINAL' ||
+      p.includes('DIAGONAL');
+
+    const viableCandidates = evaluations
+      .filter(ev => {
+        if (ev.status === 'INVALID') return false;
+        if (ev.patternType === 'FLAT_RUNNING') return false;
+        if (isCorrectiveShape && isMotive5Pattern(ev.patternType)) return false;
+        if (ev.patternType === 'ANTI_CYCLE' && (isCorrectiveShape || parentRole === 'CORRECTIVE') && !w2BreachesOrigin) {
+          return false;
+        }
+        if (
+          (ev.patternType === 'TRIANGLE_CONVERGING' ||
+            ev.patternType === 'TRIANGLE_EXPANDING') &&
+          RulesEngine.isInvalidTriangle(
+            { ...scenario, patternType: ev.patternType },
+            candles,
+            { parentRole, parentWaveLabel: resolvedParentLabel }
+          )
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .map(ev => ({
+        patternType: ev.patternType,
+        rank: RulesEngine.getPatternPriorityRank(ev.patternType),
+        labelFa: ev.shortLabelFa,
+        status: ev.status as 'VALID' | 'WARNING',
+        confidenceScore: ev.confidenceScore,
+        isBestFit: ev.isBestFit
+      }))
+      .sort((a, b) => {
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        if (a.status !== b.status) return a.status === 'VALID' ? -1 : 1;
+        return b.confidenceScore - a.confidenceScore;
+      });
+
+    const currentEval = evaluations.find(e => e.patternType === currentPattern);
+    const simplerAlternatives = viableCandidates.filter(c => c.rank < currentRank);
+
+    if (currentRank === 7) {
+      const bestSimpler =
+        simplerAlternatives.find(c => c.status === 'VALID' && c.isBestFit) ||
+        simplerAlternatives.find(c => c.status === 'VALID') ||
+        simplerAlternatives.find(c => c.confidenceScore >= 58);
+
+      if (bestSimpler) {
+        const warningMessageFa = `هشدار اولویت: در حال استفاده از ترکیبی (رتبه ۷) هستید در حالی که الگوی ساده‌تر «${bestSimpler.labelFa}» (رتبه ${bestSimpler.rank}) ممکن است.`;
+        return {
+          currentPattern,
+          currentRank,
+          currentLabelFa,
+          recommendedPattern: bestSimpler.patternType,
+          recommendedRank: bestSimpler.rank,
+          recommendedLabelFa: bestSimpler.labelFa,
+          status: 'WARNING_SIMPLER_POSSIBLE',
+          isRightPosition: false,
+          isComplexWithSimplerAlternative: true,
+          simplerAlternatives,
+          badgeLabelFa: `رتبه ۷/۷ (ترکیبی) · ساده‌تر ممکن: ${bestSimpler.labelFa} (${bestSimpler.rank})`,
+          warningMessageFa,
+          ladderSummaryFa
+        };
+      }
+    }
+
+    const strictHigherValid = simplerAlternatives.find(
+      c =>
+        c.status === 'VALID' &&
+        (c.isBestFit ||
+          currentEval?.status === 'INVALID' ||
+          (currentEval?.status === 'WARNING' && c.confidenceScore >= (currentEval.confidenceScore || 0)) ||
+          (c.rank === 1 && currentRank > 1))
+    );
+
+    if (strictHigherValid) {
+      const warningMessageFa = `اولویت بالاتر موجود است: «${strictHigherValid.labelFa}» (رتبه ${strictHigherValid.rank}) بر «${currentLabelFa}» (رتبه ${currentRank}) مقدم است.`;
+      return {
+        currentPattern,
+        currentRank,
+        currentLabelFa,
+        recommendedPattern: strictHigherValid.patternType,
+        recommendedRank: strictHigherValid.rank,
+        recommendedLabelFa: strictHigherValid.labelFa,
+        status: 'WARNING_HIGHER_PRIORITY',
+        isRightPosition: false,
+        isComplexWithSimplerAlternative: false,
+        simplerAlternatives,
+        badgeLabelFa: `اولویت ${currentRank}/۷ · پیشنهاد بالاتر: ${strictHigherValid.labelFa} (${strictHigherValid.rank})`,
+        warningMessageFa,
+        ladderSummaryFa
+      };
+    }
+
+    return {
+      currentPattern,
+      currentRank,
+      currentLabelFa,
+      recommendedPattern: currentPattern,
+      recommendedRank: currentRank,
+      recommendedLabelFa: currentLabelFa,
+      status: 'OPTIMAL',
+      isRightPosition: true,
+      isComplexWithSimplerAlternative: false,
+      simplerAlternatives,
+      badgeLabelFa: `اولویت ${currentRank}/۷ (${currentLabelFa}) · جایگاه صحیح`,
+      warningMessageFa: null,
+      ladderSummaryFa
+    };
+  }
+
+  /**
+   * Session 16 (§2.6): Computes analysis credibility score (1..100) based on
+   * Complex pattern usage. Higher count or chained complexity strictly lowers
+   * the credibility score because only ~1% of traders (~1,000 of 100,000 total /
+   * 20,000 Elliotticians) recognize complex patterns.
+   */
+  public static evaluateAnalysisConfidence(
+    activeScenario: WaveScenario,
+    scenarios: WaveScenario[] = []
+  ): {
+    score: number; // 1..100
+    complexScenarioCount: number;
+    effectiveComplexUnits: number;
+    credibilityTier: 'HIGH' | 'MEDIUM' | 'LOW';
+    tierLabelFa: string;
+    publicVisibilityPct: number;
+    summaryFa: string;
+    statsTooltipFa: string;
+    analystFunnel: Array<{ labelFa: string; countFa: string; shareFa: string }>;
+  } {
+    const activeList = (scenarios.length > 0 ? scenarios : [activeScenario]).filter(
+      sc => !sc.isDiscarded
+    );
+    const uniqueById = new Map<string, WaveScenario>();
+    uniqueById.set(activeScenario.id, activeScenario);
+    for (const sc of activeList) {
+      uniqueById.set(sc.id, sc);
+    }
+    const allConsidered = Array.from(uniqueById.values());
+
+    const isComplexScenario = (sc: WaveScenario): boolean => {
+      if (sc.patternType === 'COMPLEX_COMBINATION') return true;
+      const sig = sc.metadata?.complexSignature;
+      if (sig && sig.includes('-X-')) return true;
+      const labels = sc.vertices.map(v => normalizeLabelAscii(v.label || ''));
+      return labels.includes('W') && labels.includes('X') && labels.includes('Y');
+    };
+
+    const complexScenarios = allConsidered.filter(isComplexScenario);
+    const complexScenarioCount = complexScenarios.length;
+
+    let extraChainPenaltyUnits = 0;
+    for (const sc of complexScenarios) {
+      const sig = sc.metadata?.complexSignature;
+      if (sig) {
+        const evalSig = PatternEngines.evaluateComplexCombinationSignature(sig);
+        if (evalSig.parts.length >= 3) {
+          extraChainPenaltyUnits += evalSig.parts.length - 2;
+        }
+      } else if (sc.vertices.length >= 6) {
+        const labels = sc.vertices.map(v => normalizeLabelAscii(v.label || ''));
+        if (labels.some(l => l === 'X2' || l === 'XX' || l === 'Z')) {
+          extraChainPenaltyUnits += 1;
+        }
+      }
+    }
+
+    const effectiveComplexUnits = complexScenarioCount + extraChainPenaltyUnits;
+    const activeIsComplex = isComplexScenario(activeScenario);
+    const hasSimpleValidCounterpart = allConsidered.some(
+      sc => !isComplexScenario(sc) && !sc.rulesResults?.some(r => r.type === 'HARD' && !r.passed)
+    );
+
+    const baseScore =
+      activeScenario.patternType === 'IDEAL_CYCLE'
+        ? 96
+        : activeScenario.patternType.includes('DIAGONAL') ||
+          activeScenario.patternType === 'ZIGZAG'
+        ? 92
+        : 88;
+
+    let rawScore = baseScore;
+    if (effectiveComplexUnits > 0) {
+      // First complex usage cuts ~38 points; each extra complex scenario/chain cuts 18 points
+      const firstPenalty = activeIsComplex ? 40 : 28;
+      const additionalPenalty = Math.max(0, effectiveComplexUnits - 1) * 18;
+      const confirmationBonus = activeIsComplex && hasSimpleValidCounterpart ? 6 : 0;
+      rawScore = baseScore - firstPenalty - additionalPenalty + confirmationBonus;
+    }
+
+    const score = Math.max(1, Math.min(100, Math.round(rawScore)));
+    const credibilityTier: 'HIGH' | 'MEDIUM' | 'LOW' =
+      score >= 75 ? 'HIGH' : score >= 45 ? 'MEDIUM' : 'LOW';
+
+    const tierLabelFa =
+      credibilityTier === 'HIGH'
+        ? 'اعتبار بالا (شمارش ساده و عمومی)'
+        : credibilityTier === 'MEDIUM'
+        ? 'اعتبار متوسط (ترکیبی با تأیید ساده)'
+        : 'اعتبار پایین (استفاده زیاد از ترکیبی)';
+
+    const publicVisibilityPct =
+      complexScenarioCount === 0 ? 80 : hasSimpleValidCounterpart && complexScenarioCount === 1 ? 25 : 1;
+
+    const summaryFa =
+      complexScenarioCount === 0
+        ? 'شمارش بدون الگوی ترکیبی است و بیشترین هم‌راستایی با دید عمومی معامله‌گران را دارد.'
+        : `تعداد ${complexScenarioCount} الگوی ترکیبی شناسایی شد؛ افزایش الگوهای ترکیبی باعث کاهش هم‌گرایی با محدوده‌های عمومی بازار می‌شود.`;
+
+    const statsTooltipFa =
+      'آمار مستند جلسه ۱۶: از ۱۰۰,۰۰۰ معامله‌گر بازار، ۲۰,۰۰۰ نفر الیوت‌کار هستند، ۱۰,۰۰۰ نفر تحلیل کامل انجام می‌دهند و تنها ۱,۰۰۰ نفر (۱٪ کل معامله‌گران) به الگوهای ترکیبی می‌رسند؛ بنابراین شمارش‌های ساده‌تر اعتبار عمومی بسیار بالاتری دارند.';
+
+    const analystFunnel = [
+      { labelFa: 'کل معامله‌گران', countFa: '۱۰۰,۰۰۰ نفر', shareFa: '۱۰۰٪' },
+      { labelFa: 'تحلیلگران الیوت‌کار', countFa: '۲۰,۰۰۰ نفر', shareFa: '۲۰٪' },
+      { labelFa: 'تحلیلگران کامل', countFa: '۱۰,۰۰۰ نفر', shareFa: '۱۰٪' },
+      { labelFa: 'ترکیبی‌کاران', countFa: '۱,۰۰۰ نفر', shareFa: '۱٪' }
+    ];
+
+    return {
+      score,
+      complexScenarioCount,
+      effectiveComplexUnits,
+      credibilityTier,
+      tierLabelFa,
+      publicVisibilityPct,
+      summaryFa,
+      statsTooltipFa,
+      analystFunnel
+    };
+  }
+
+  /**
    * Automatically discovers all plausible scenarios (Ideal, Partial Developing, Terminal, Diagonal, Corrective, etc.)
    * for a given candle slice, starting anchor index, degree, and optional parent role.
    */
@@ -6817,6 +7368,136 @@ export class RulesEngine {
       complexDetails
     };
   }
+
+  /**
+   * Serializes a user's approved wave scenarios into a structured JSON bundle
+   * for sharing or backup, filtering out discarded, excluded Running Flat,
+   * invalid Triangle, and HARD-rule-failing scenarios when includeOnlyApproved is true.
+   */
+  public static exportApprovedScenariosToJson(
+    scenariosOrScenario: WaveScenario | WaveScenario[],
+    options?: {
+      candles?: Candle[];
+      assetSymbol?: string;
+      timeframe?: string;
+      includeOnlyApproved?: boolean;
+      pretty?: boolean;
+      parentRole?: WaveRole;
+      parentWaveLabel?: string;
+    }
+  ): {
+    json: string;
+    bundle: ApprovedScenarioExportBundle;
+    approvedCount: number;
+    excludedCount: number;
+    exportedScenarioIds: string[];
+    excludedScenarioIds: string[];
+  } {
+    const inputList: WaveScenario[] = Array.isArray(scenariosOrScenario)
+      ? scenariosOrScenario
+      : [scenariosOrScenario];
+    const includeOnlyApproved = options?.includeOnlyApproved ?? true;
+    const candles = options?.candles;
+
+    const approved: WaveScenario[] = [];
+    const excludedIds: string[] = [];
+
+    for (const sc of inputList) {
+      if (!includeOnlyApproved) {
+        approved.push(sc);
+        continue;
+      }
+
+      const hasFailedHardRule = Boolean(
+        sc.rulesResults?.some(r => r.type === 'HARD' && !r.passed)
+      );
+      const isExcludedRunning =
+        Boolean(sc.isExcludedRunningFlat) || RulesEngine.isExcludedFlat(sc, candles);
+      const isInvalidTri =
+        Boolean(sc.isInvalidTriangle) ||
+        RulesEngine.isInvalidTriangle(sc, candles, {
+          parentRole: options?.parentRole,
+          parentWaveLabel: options?.parentWaveLabel || sc.parentLegLabel
+        });
+      const isUserApprovedOrSelected = Boolean(
+        sc.isSelectedForTree ||
+          sc.isPrimary ||
+          sc.isLocked ||
+          sc.source === 'USER_EDITED' ||
+          sc.source === 'MANUAL_DRAW'
+      );
+
+      if (
+        !sc.isDiscarded &&
+        !hasFailedHardRule &&
+        !isExcludedRunning &&
+        !isInvalidTri &&
+        isUserApprovedOrSelected
+      ) {
+        approved.push(sc);
+      } else {
+        excludedIds.push(sc.id);
+      }
+    }
+
+    const clonedScenarios: WaveScenario[] = approved.map(sc => ({
+      ...sc,
+      vertices: sc.vertices.map(v => ({ ...v })),
+      targets: sc.targets.map(t => ({ ...t })),
+      rulesResults: sc.rulesResults.map(r => ({ ...r }))
+    }));
+
+    const exportedScenarioIds = clonedScenarios.map(s => s.id);
+    const resolvedTimeframe =
+      options?.timeframe || clonedScenarios[0]?.timeframe || inputList[0]?.timeframe;
+
+    const bundle: ApprovedScenarioExportBundle = {
+      schemaVersion: '1.0.0',
+      exporter: 'FEI-RulesEngine',
+      exportedAt: new Date().toISOString(),
+      ...(options?.assetSymbol ? { assetSymbol: options.assetSymbol } : {}),
+      ...(resolvedTimeframe ? { timeframe: resolvedTimeframe } : {}),
+      approvedCount: clonedScenarios.length,
+      excludedCount: excludedIds.length,
+      exportedScenarioIds,
+      excludedScenarioIds: excludedIds,
+      scenarios: clonedScenarios
+    };
+
+    const json = JSON.stringify(bundle, null, options?.pretty === false ? 0 : 2);
+
+    return {
+      json,
+      bundle,
+      approvedCount: clonedScenarios.length,
+      excludedCount: excludedIds.length,
+      exportedScenarioIds,
+      excludedScenarioIds: excludedIds
+    };
+  }
+}
+
+export interface ApprovedScenarioExportBundle {
+  schemaVersion: '1.0.0';
+  exporter: 'FEI-RulesEngine';
+  exportedAt: string;
+  assetSymbol?: string;
+  timeframe?: string;
+  approvedCount: number;
+  excludedCount: number;
+  exportedScenarioIds: string[];
+  excludedScenarioIds: string[];
+  scenarios: WaveScenario[];
+}
+
+/**
+ * Top-level helper: Serializes approved wave scenarios into a portable JSON bundle.
+ */
+export function exportApprovedScenariosToJson(
+  scenariosOrScenario: WaveScenario | WaveScenario[],
+  options?: Parameters<typeof RulesEngine.exportApprovedScenariosToJson>[1]
+) {
+  return RulesEngine.exportApprovedScenariosToJson(scenariosOrScenario, options);
 }
 
 /**

@@ -12,7 +12,8 @@ import {
   Candle,
   ComplexAnalysisOptions,
   PatternFamily,
-  WaveScenario
+  WaveScenario,
+  WaveVertex
 } from '../types/elliott';
 import { RulesEngine } from '../engine/rulesEngine';
 import { PatternEngines } from '../engine/patternEngines';
@@ -23,13 +24,16 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   RotateCcw,
-  ArrowUpLeft
+  ArrowUpLeft,
+  Sparkles
 } from 'lucide-react';
 
 interface ComplexPatternInspectorProps {
   scenario: WaveScenario;
+  scenarios?: WaveScenario[];
   candles: Candle[];
   onApplyPattern?: (pattern: PatternFamily) => void;
+  onApplyVertices?: (vertices: WaveVertex[]) => void;
   compact?: boolean;
 }
 
@@ -53,8 +57,10 @@ type SimContextMode = 'AUTO' | 'PAST_KNOT' | 'MARKET_END_NO_CONF' | 'MARKET_END_
 
 export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = ({
   scenario,
+  scenarios,
   candles,
   onApplyPattern,
+  onApplyVertices,
   compact = false
 }) => {
   const [sigMode, setSigMode] = useState<SimSignatureMode>('AUTO');
@@ -156,6 +162,15 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
         xWaveCandles: report.xWaveCandleCount
       }),
     [sigMode, report.threeCardinalPassed, report.xWaveCandleCount]
+  );
+
+  const conversionCandidates = useMemo(
+    () =>
+      RulesEngine.ComplexPatternEngine.scanForComplexCandidates(
+        scenarios && scenarios.length > 0 ? scenarios : [scenario],
+        candles
+      ),
+    [scenarios, scenario, candles]
   );
 
   const priorityLadder = [
@@ -413,6 +428,59 @@ export const ComplexPatternInspector: React.FC<ComplexPatternInspectorProps> = (
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Detected Complex Conversion Candidates (ComplexPatternEngine.scanForComplexCandidates) */}
+      {!compact && conversionCandidates.length > 0 && (
+        <div
+          data-testid="complex-conversion-candidates"
+          className="border-t border-slate-800/80 pt-3 space-y-2"
+        >
+          <div className="flex items-center justify-between text-[11px] font-bold text-violet-300">
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span>کاندیداهای خودکار تبدیل به الگوی ترکیبی (اسکن سناریوها)</span>
+            </span>
+            <span className="font-mono tabular-nums text-[10px] text-slate-400">
+              {conversionCandidates.length} مورد
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {conversionCandidates.slice(0, 3).map(cand => (
+              <div
+                key={cand.candidateId}
+                className="rounded-lg bg-slate-900/75 border border-slate-800 p-2.5 flex items-center justify-between gap-2"
+              >
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2 text-[11px] font-bold text-white font-mono tabular-nums">
+                    <span className="text-violet-300">{cand.suggestedSignature}</span>
+                    <span className="text-slate-500">·</span>
+                    <span>{cand.xWaveCandles} کندل X</span>
+                    <span className="text-slate-500">·</span>
+                    <span className={cand.coreRulesPassed ? 'text-emerald-300' : 'text-amber-300'}>
+                      اطمینان {cand.confidence}%
+                    </span>
+                  </div>
+                  <p className="text-[10.5px] text-slate-400 leading-relaxed">{cand.reasonFa}</p>
+                </div>
+                {onApplyPattern && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onApplyVertices && cand.suggestedVertices.length >= 4) {
+                        onApplyVertices(cand.suggestedVertices);
+                      }
+                      onApplyPattern('COMPLEX_COMBINATION');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/50 text-violet-100 text-[10px] font-bold whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    تبدیل با X-Wave
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}

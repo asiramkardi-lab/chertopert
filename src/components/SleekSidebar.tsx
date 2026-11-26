@@ -29,6 +29,7 @@ import { SmartRuleAlertWidget } from './SmartRuleAlertWidget';
 import { TargetProjectionPanel } from './TargetProjectionPanel';
 import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import { RulesEngineComplianceCard } from './RulesEngineComplianceCard';
+import { AnalysisConfidenceWidget } from './AnalysisConfidenceWidget';
 import { FlatPatternInspector } from './FlatSidebarVisualizer';
 import { TrianglePatternInspector } from './TrianglePatternInspector';
 import { ComplexPatternInspector } from './ComplexPatternInspector';
@@ -48,7 +49,11 @@ import {
   Sparkles,
   CheckCircle2,
   AlertTriangle,
-  Trash2
+  Trash2,
+  Download,
+  Copy,
+  Check,
+  X
 } from 'lucide-react';
 
 const FLAT_MARKET_PHASE_TOOLTIP =
@@ -141,6 +146,60 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   const [showInlineFlatToggle, setShowInlineFlatToggle] = useState<boolean>(false);
   const [showInlineTriangleToggle, setShowInlineTriangleToggle] = useState<boolean>(false);
   const [showInlineComplexToggle, setShowInlineComplexToggle] = useState<boolean>(false);
+  const [exportFeedback, setExportFeedback] = useState<{
+    json: string;
+    approvedCount: number;
+    excludedCount: number;
+    filename: string;
+    copied: boolean;
+  } | null>(null);
+
+  const handleExportScenarios = () => {
+    const result = RulesEngine.exportApprovedScenariosToJson(scenarios, {
+      candles,
+      timeframe: activeTimeframe,
+      parentRole: drillContext?.role || 'ROOT',
+      parentWaveLabel: drillContext?.waveLabel || ''
+    });
+
+    const safeTf = (activeTimeframe || '1D').replace(/[^a-zA-Z0-9_-]/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filename = `elliott-approved-scenarios-${safeTf}-${stamp}.json`;
+
+    try {
+      if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+        const blob = new Blob([result.json], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      // Safe fallback in restricted/headless environments
+    }
+
+    let copied = false;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(result.json);
+        copied = true;
+      }
+    } catch {
+      copied = false;
+    }
+
+    setExportFeedback({
+      json: result.json,
+      approvedCount: result.approvedCount,
+      excludedCount: result.excludedCount,
+      filename,
+      copied
+    });
+  };
 
   const liveFlatFlag = useMemo(
     () =>
@@ -385,6 +444,61 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
           </div>
         )}
 
+        {exportFeedback && (
+          <div
+            data-testid="sidebar-export-preview"
+            className="rounded-xl bg-emerald-950/25 border border-emerald-500/40 p-3 space-y-2 text-[11px]"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-emerald-200 font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>
+                  خروجی JSON آماده شد ({exportFeedback.approvedCount} تاییدشده
+                  {exportFeedback.excludedCount > 0 ? ` · ${exportFeedback.excludedCount} ردشده` : ''})
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      void navigator.clipboard?.writeText(exportFeedback.json);
+                      setExportFeedback(prev => (prev ? { ...prev, copied: true } : prev));
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[10px] font-semibold whitespace-nowrap"
+                >
+                  {exportFeedback.copied ? (
+                    <Check className="w-3 h-3 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                  <span>{exportFeedback.copied ? 'کپی شد' : 'کپی JSON'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExportFeedback(null)}
+                  aria-label="بستن پیش‌نمایش خروجی"
+                  className="p-0.5 rounded text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            <div className="text-[10px] text-slate-400 font-mono truncate" dir="ltr">
+              {exportFeedback.filename}
+            </div>
+            <pre
+              dir="ltr"
+              className="max-h-28 overflow-auto rounded-lg bg-slate-950/90 border border-slate-800 p-2 text-[10px] text-slate-300 font-mono leading-relaxed"
+            >
+              {exportFeedback.json}
+            </pre>
+          </div>
+        )}
+
         {activeTab === 'COPILOT' && (
           <div className="space-y-4">
             {/* Live Visual RulesEngine Radar & Progress Bar Compliance Card */}
@@ -394,6 +508,12 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               parentRole={drillContext?.role || 'ROOT'}
               parentWaveLabel={drillContext?.waveLabel || ''}
               onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+            />
+
+            {/* Session 16 Credibility Cost Score (1..100) & Analyst Statistics Tooltip */}
+            <AnalysisConfidenceWidget
+              activeScenario={activeScenario}
+              scenarios={scenarios}
             />
 
             {/* Studio Sidebar Flat Pattern Inspector (Activates ONLY when a 3-3-5 scenario is selected) */}
@@ -599,8 +719,10 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                   <div className="p-2.5 pt-0 border-t border-slate-800/80">
                     <ComplexPatternInspector
                       scenario={activeScenario}
+                      scenarios={scenarios}
                       candles={candles}
                       onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                      onApplyVertices={verts => onUpdateVertices?.(verts, activeScenario.id)}
                       compact
                     />
                   </div>
@@ -667,6 +789,24 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onSelectTimeframe={onSelectTimeframe}
               compact
             />
+
+            {/* Pattern Management & Approved Scenario Export Toolbar */}
+            <div className="rounded-xl bg-slate-900/75 border border-slate-800 px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                <FolderGit2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span>ابزار مدیریت الگو و خروجی سناریو</span>
+              </div>
+              <button
+                type="button"
+                data-testid="sidebar-export-scenario-btn"
+                onClick={handleExportScenarios}
+                title="خروجی JSON از سناریوهای تاییدشده برای اشتراک‌گذاری و پشتیبان‌گیری"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/50 text-indigo-100 text-[11px] font-bold transition-colors whitespace-nowrap shrink-0"
+              >
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span>Export Scenario</span>
+              </button>
+            </div>
 
             {/* Strict PatternValidator Stepper */}
             <PatternValidator
@@ -754,8 +894,10 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
           <div className="space-y-4">
             <ComplexPatternInspector
               scenario={activeScenario}
+              scenarios={scenarios}
               candles={candles}
               onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+              onApplyVertices={verts => onUpdateVertices?.(verts, activeScenario.id)}
             />
           </div>
         )}
@@ -890,9 +1032,18 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                 data-testid="sleek-sidebar-scenario-list"
                 className="rounded-xl bg-slate-950/70 border border-slate-800/90 p-2.5 space-y-1.5"
               >
-                <div className="flex items-center justify-between text-[10.5px] text-slate-400 px-1">
-                  <span>لیست سریع سناریوها</span>
-                  <span className="font-mono tabular-nums">{scenarios.length}</span>
+                <div className="flex items-center justify-between text-[10.5px] text-slate-400 px-1 gap-2">
+                  <span>لیست سریع سناریوها ({scenarios.length})</span>
+                  <button
+                    type="button"
+                    data-testid="sidebar-scenarios-export-btn"
+                    onClick={handleExportScenarios}
+                    title="خروجی JSON از سناریوهای تاییدشده"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/45 text-indigo-100 text-[10px] font-bold transition-colors whitespace-nowrap shrink-0"
+                  >
+                    <Download className="w-3 h-3 shrink-0" />
+                    <span>Export Scenario</span>
+                  </button>
                 </div>
                 <div className="space-y-1">
                   {scenarios.map(sc => {

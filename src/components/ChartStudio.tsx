@@ -15,6 +15,7 @@ import { TrendStrengthIndicator, TrendSignalLevel } from '../engine/trendStrengt
 import { guardManualVertexEdit } from '../engine/waveToleranceLayer';
 import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import { PatternValidator } from './PatternValidator';
+import { PatternPriorityIndicator } from './PatternPriorityIndicator';
 import { RuleViolationToast, ActiveViolationToast, ValidWaveSnapshot } from './RuleViolationToast';
 import {
   filterPatternsForRole
@@ -1831,6 +1832,15 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 </span>
               </button>
             ) : null}
+
+            {/* 7-Tier Counting Priority Hierarchy Indicator Component */}
+            <PatternPriorityIndicator
+              activeScenario={activeScenario}
+              candles={candles}
+              parentRole={parentRole}
+              parentWaveLabel={parentWaveLabel}
+              onApplyPattern={onPatternChange}
+            />
           </div>
 
           <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-0.5">
@@ -3772,6 +3782,29 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
+                  {sc.vertices.slice(0, -1).map((ovStart, ovLegIdx) => {
+                    const ovEnd = sc.vertices[ovLegIdx + 1];
+                    const ovEndLbl = (ovEnd.label || '').trim().toUpperCase();
+                    const ovIsX =
+                      ovEndLbl === 'X' ||
+                      ovEndLbl === 'XX' ||
+                      ovEndLbl === 'X1' ||
+                      ovEndLbl === 'X2';
+                    if (!ovIsX) return null;
+                    return (
+                      <line
+                        key={`ov-xwave-${sc.id}-${ovLegIdx}`}
+                        x1={getX(ovStart.candleIndex)}
+                        y1={getY(ovStart.price)}
+                        x2={getX(ovEnd.candleIndex)}
+                        y2={getY(ovEnd.price)}
+                        stroke="#c084fc"
+                        strokeWidth="2.4"
+                        strokeDasharray="7 3 2 3"
+                        strokeLinecap="round"
+                      />
+                    );
+                  })}
                   {sc.vertices.map((v, vIdx) => (
                     <g key={`ov-${sc.id}-${vIdx}`}>
                       <circle cx={getX(v.candleIndex)} cy={getY(v.price)} r="3.5" fill={sc.color} stroke="#080d1a" strokeWidth="1" />
@@ -3844,10 +3877,23 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 highlightedLegIndex === legIdx ||
                 validatorHighlightLeg === legIdx;
               const candleSpan = Math.abs(vEnd.candleIndex - vStart.candleIndex) + 1;
+              const endLbl = (vEnd.label || '').trim().toUpperCase();
+              const startLbl = (vStart.label || '').trim().toUpperCase();
+              const isXWaveLeg =
+                endLbl === 'X' ||
+                endLbl === 'XX' ||
+                endLbl === 'X1' ||
+                endLbl === 'X2' ||
+                (activeScenario.patternType === 'COMPLEX_COMBINATION' &&
+                  legIdx === 1 &&
+                  startLbl === 'W');
+              const legStrokeColor = isXWaveLeg ? '#c084fc' : scenarioColor;
 
               return (
                 <g
                   key={`leg-${legIdx}`}
+                  data-xwave-leg={isXWaveLeg ? 'true' : undefined}
+                  data-testid={isXWaveLeg ? `chart-xwave-leg-${legIdx}` : undefined}
                   onMouseEnter={() => setHoveredLeg(legIdx)}
                   onMouseLeave={() => setHoveredLeg(null)}
                   onClick={e => {
@@ -3871,26 +3917,69 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                       y1={y1}
                       x2={x2}
                       y2={y2}
-                      stroke={scenarioColor}
+                      stroke={legStrokeColor}
                       strokeWidth="8.5"
                       strokeOpacity="0.35"
+                      strokeDasharray={isXWaveLeg ? '7 4 2 4' : undefined}
                       strokeLinecap="round"
                       filter="url(#elliott-wave-glow)"
                       pointerEvents="none"
                     />
                   )}
-                  {/* Visible Wave Segment */}
+                  {isXWaveLeg && (
+                    <line
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      stroke="#a855f7"
+                      strokeWidth="6.5"
+                      strokeOpacity="0.22"
+                      strokeDasharray="7 4 2 4"
+                      strokeLinecap="round"
+                      pointerEvents="none"
+                    />
+                  )}
+                  {/* Visible Wave Segment (X-Wave legs use distinct dash-dot pattern & subtle violet highlight) */}
                   <line
                     x1={x1}
                     y1={y1}
                     x2={x2}
                     y2={y2}
-                    stroke={scenarioColor}
-                    strokeWidth={isLegHovered ? '4.8' : '2.8'}
+                    stroke={legStrokeColor}
+                    strokeWidth={isLegHovered ? '4.8' : isXWaveLeg ? '3.1' : '2.8'}
+                    strokeDasharray={isXWaveLeg ? '7 4 2 4' : undefined}
                     strokeLinecap="round"
                     opacity={hoveredTraceData && hoveredTraceData.scenario.id !== activeScenario.id ? 0.32 : 1}
                     style={{ transition: 'opacity 180ms ease' }}
                   />
+                  {isXWaveLeg && hoveredLeg !== legIdx && (
+                    <g transform={`translate(${(x1 + x2) / 2}, ${(y1 + y2) / 2 - 11})`} pointerEvents="none">
+                      <rect
+                        x="-26"
+                        y="-8"
+                        width="52"
+                        height="15"
+                        rx="4"
+                        fill="#1e1b4b"
+                        fillOpacity="0.9"
+                        stroke="#c084fc"
+                        strokeOpacity="0.75"
+                        strokeWidth="0.9"
+                      />
+                      <text
+                        x="0"
+                        y="2.5"
+                        textAnchor="middle"
+                        fill="#e9d5ff"
+                        fontSize="8.5"
+                        fontWeight="700"
+                        fontFamily="JetBrains Mono, monospace"
+                      >
+                        X-Wave
+                      </text>
+                    </g>
+                  )}
                   {/* Invisible thick hit target for easy hover & click drill-down */}
                   <line
                     x1={x1}
@@ -3902,9 +3991,11 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                   />
                   {onDoubleClickWaveLeg && interactionMode === 'EDIT' && hoveredLeg === legIdx && (
                     <g transform={`translate(${(x1 + x2) / 2}, ${(y1 + y2) / 2 - 14})`} pointerEvents="none">
-                      <rect x="-102" y="-11" width="204" height="20" rx="5" fill="#0f172a" stroke={scenarioColor} strokeWidth="1" />
+                      <rect x="-108" y="-11" width="216" height="20" rx="5" fill="#0f172a" stroke={legStrokeColor} strokeWidth="1" />
                       <text x="0" y="3" textAnchor="middle" fill="#f8fafc" fontSize="9.5" fontWeight="600">
-                        {nextLowerValidTF
+                        {isXWaveLeg
+                          ? `موج رابط X (${candleSpan} کندل) · ${nextLowerValidTF ? `کلیک: ${nextLowerValidTF}` : lowestValidTimeframe || timeframe}`
+                          : nextLowerValidTF
                           ? `کلیک: داده‌ها و سناریوهای ${nextLowerValidTF} (${candleSpan} کندل)`
                           : `پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe})`}
                       </text>
