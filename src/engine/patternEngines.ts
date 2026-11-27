@@ -6158,14 +6158,34 @@ export class PatternEngines {
 
       if (lbl === '1' || i === 0) {
         role = 'MOTIVE';
-        traitFa = 'موج ۱: آغازگر تغییر روند؛ معمولاً کندتر از موج ۳ با حجم متوسط و واگرایی در کف قبلی.';
+        const w1Trait =
+          w3Len > 0
+            ? PatternEngines.evaluateWave1Characteristics({
+                wave1Len: segLen,
+                wave3Len: w3Len,
+                wave5Len: w5Len > 0 ? w5Len : segLen * 1.1,
+                volumeProfile
+              })
+            : null;
+        traitFa = w1Trait?.isExtended
+          ? 'موج ۱: کشیدگی موج ۱ (نادر — بلندتر از موج ۳) با آغاز تغییر روند.'
+          : 'موج ۱: ضعیف و کم‌حجم با ساختار شتابدار یا قطری در فضای دودلی بازار (معمولاً کوتاه‌تر از موج ۳ و ۵).';
       } else if (lbl === '2' || i === 1) {
         role = 'CORRECTIVE';
         lengthPctOfRef = w1Len > 0 ? Math.round((segLen / w1Len) * 100) : null;
-        const ideal2 = lengthPctOfRef !== null && lengthPctOfRef >= 50 && lengthPctOfRef <= 65;
-        traitFa = ideal2
-          ? `موج ۲ (${lengthPctOfRef}٪ موج ۱): اصلاح ایده‌آل ۵۰–۶۱.۸٪ (زیگزاگ و نقطه طلایی ورود به موج ۳).`
-          : `موج ۲ (${lengthPctOfRef ?? '--'}٪ موج ۱): اغلب زیگزاگ با اصلاح ۵۰ تا ۶۱.۸٪ و نقطه مناسب ورود.`;
+        const w2Eval =
+          lengthPctOfRef !== null
+            ? PatternEngines.evaluateWave2Characteristics({
+                retracePct: lengthPctOfRef,
+                structureType: 'ZIGZAG'
+              })
+            : null;
+        traitFa =
+          w2Eval?.classification === 'ANTI_CYCLE_VIOLATION'
+            ? `موج ۲ (${lengthPctOfRef}٪ > ۱۰۰٪ موج ۱): نقض قانون ۱ — تغییر سناریو به آنتی‌سیکل.`
+            : w2Eval?.classification === 'IDEAL'
+            ? `موج ۲ (${lengthPctOfRef}٪ موج ۱): اصلاح ایده‌آل ۵۰–۶۱.۸٪ (زیگزاگ، کاهش شدید حجم و اوج دودلی معامله‌گران).`
+            : `موج ۲ (${lengthPctOfRef ?? '--'}٪ موج ۱): معمولاً زیگزاگ با کاهش شدید حجم و اصلاح ۵۰ تا ۶۱.۸٪ (یا ۷۸.۶٪ در فلت).`;
         valid = valid && (scenario.patternType === 'ANTI_CYCLE' || lengthPctOfRef === null || lengthPctOfRef < 100);
       } else if (lbl === '3' || i === 2) {
         role = 'MOTIVE';
@@ -6193,9 +6213,9 @@ export class PatternEngines {
           );
         }
         traitFa =
-          lengthPctOfRef !== null && lengthPctOfRef >= 161.8
-            ? `موج ۳ (${lengthPctOfRef}٪ موج ۱): قوی‌ترین و پرحجم‌ترین موج روند؛ حالت کشیدگی فعال و فرصت ترید اصلی.`
-            : `موج ۳ (${lengthPctOfRef ?? '--'}٪ موج ۱): پرتکرارترین موج قوی با حجم بالا و بدون هم‌پوشانی.`;
+          lengthPctOfRef !== null && lengthPctOfRef > 161.8
+            ? `موج ۳ (${lengthPctOfRef}٪ > ۱۶۱.۸٪ موج ۱): قوی‌ترین موج با شیب تند، بیشترین حجم و کشیدگی رایج (فرصت ترید اصلی).`
+            : `موج ۳ (${lengthPctOfRef ?? '--'}٪ موج ۱): قوی و پرشتاب با شیب تند، بیشترین حجم معاملات و ساختار ۵موجی ایده‌آل.`;
       } else if (lbl === '4' || i === 3) {
         role = 'CORRECTIVE';
         lengthPctOfRef = w3Len > 0 ? Math.round((segLen / w3Len) * 100) : null;
@@ -6203,38 +6223,67 @@ export class PatternEngines {
       } else if (lbl === '5' || i === 4) {
         role = 'MOTIVE';
         lengthPctOfRef = w3Len > 0 ? Math.round((segLen / w3Len) * 100) : null;
+        const w4Len = len(3);
         const w5CoversW4 = verts[3] ? (isBull ? v1.price >= verts[3].price * 0.999 : v1.price <= verts[3].price * 1.001) : true;
+        const w5Eval = PatternEngines.evaluateWave5Characteristics({
+          wave5Len: segLen,
+          wave3Len: w3Len > 0 ? w3Len : segLen * 1.1,
+          wave4Len: w5CoversW4 ? undefined : Math.max(w4Len, segLen + 1),
+          structureType: scenario.patternType === 'ENDING_DIAGONAL' ? 'ENDING_DIAGONAL' : 'IMPULSIVE'
+        });
         if (!w5CoversW4) {
           valid = false;
           warnings.push('خطای جلسه ۱۹ (CB-Wave): موج ۵ حداقل ۱۰۰٪ موج ۴ را پوشش نداده است.');
         }
-        traitFa = `موج ۵ (${lengthPctOfRef ?? '--'}٪ موج ۳): مستعد واگرایی، کاهش حجم، قطر پایانی یا کوتاه‌شدگی در پایان روند.`;
+        traitFa = `موج ۵ (${lengthPctOfRef ?? '--'}٪ موج ۳): ${w5Eval.reasonFa}`;
       } else if (lbl === 'A' || i === 5) {
         role = 'MOTIVE';
+        lengthPctOfRef = w5Len > 0 ? Math.round((segLen / w5Len) * 100) : null;
         const w5Item = items[4];
-        if (w5Item && w5Item.estimatedSubwaves === 3 && subwaves === 5) {
+        const w5Subs: 3 | 5 = w5Item && w5Item.estimatedSubwaves <= 3 ? 3 : 5;
+        const wASubs: 3 | 5 = subwaves >= 5 ? 5 : 3;
+        const wAEval = PatternEngines.evaluateWaveACharacteristics({
+          wave5Subwaves: w5Subs,
+          waveASubwaves: wASubs,
+          waveARetracePctOf5: lengthPctOfRef ?? 0
+        });
+        if (wAEval.classification === 'STANDARD') {
           waveASubwaveMatchStandard = true;
         }
-        traitFa =
-          'موج A: سخت‌ترین موج برای تشخیص به دلیل شباهت به موج ۴؛ در صورت موج ۵ سه‌موجی، خود A ساختار ۵موجی می‌گیرد.';
+        traitFa = `موج A (${lengthPctOfRef ?? '--'}٪ موج ۵): ${wAEval.reasonFa}`;
       } else if (lbl === 'B' || i === 6) {
         role = 'CORRECTIVE';
         const aLen = len(5);
         lengthPctOfRef = aLen > 0 ? Math.round((segLen / aLen) * 100) : null;
-        traitFa = `موج B (${lengthPctOfRef ?? '--'}٪ موج A): شبیه موج X؛ اصلاح بالای ۶۱.۸٪ مرز تشکیل فلت است.`;
+        const wBEval = PatternEngines.evaluateWaveBCharacteristics({
+          subwaves: subwaves >= 5 ? 5 : 3,
+          retracePctOfA: lengthPctOfRef ?? 0
+        });
+        traitFa = `موج B (${lengthPctOfRef ?? '--'}٪ موج A): ${wBEval.reasonFa}`;
       } else {
         role = 'MOTIVE';
         const bLen = len(6);
         lengthPctOfRef = bLen > 0 ? Math.round((segLen / bLen) * 100) : null;
         const cCoversB100 = bLen <= 0 || segLen >= bLen * 0.999;
         const cMeets92W5 = w5Len <= 0 || segLen >= w5Len * 0.92;
+        const cPctOfW5 = w5Len > 0 ? Math.round((segLen / w5Len) * 100) : 100;
+        const wCEval = PatternEngines.evaluateWaveCCharacteristics({
+          coversWaveB100Pct: cCoversB100,
+          pctOfWave5: cPctOfW5,
+          structureType:
+            scenario.patternType === 'TERMINAL'
+              ? 'TERMINAL'
+              : scenario.patternType === 'ENDING_DIAGONAL'
+              ? 'DIAGONAL'
+              : 'IMPULSIVE'
+        });
         if (!cCoversB100) {
           valid = false;
           warnings.push('خطای جلسه ۱۹ (T-19.22): موج C باید ۱۰۰٪ موج B را پوشش دهد.');
         } else if (!cMeets92W5) {
           warnings.push('هشدار جلسه ۱۹ (T-19.23): موج C هنوز به حداقل ۹۲٪ موج ۵ نرسیده است.');
         }
-        traitFa = `موج C (${lengthPctOfRef ?? '--'}٪ موج B): تکمیل‌کننده اصلاح؛ الزام پوشش ۱۰۰٪ B و دست‌کم ۹۲٪ موج ۵.`;
+        traitFa = `موج C (${lengthPctOfRef ?? '--'}٪ موج B): ${wCEval.reasonFa}`;
       }
 
       items.push({
@@ -6266,6 +6315,17 @@ export class PatternEngines {
       '۴. ثبت تاریخچه: مستندسازی خطاهای موج‌شماری و پایبندی به ساده‌ترین سناریوی معتبر.'
     ];
 
+    const signalGenerationChecklistFa = [
+      'سیگنال‌گیری ۳بعدی (جلسه ۱۹):',
+      '۱. اندیکاتورها: واگرایی MACD/RSI و میانگین متحرک هم‌راستا با جهت موج شماری.',
+      '۲. الگوهای کلاسیک: شکست خط روند، حمایت/مقاومت و کندل‌های تأییدی روی نقاط PRZ.',
+      '۳. تابلوخوانی: بررسی حجم معاملات، جریان نقدینگی، کد به کد، نسبت خریدار/فروشنده و عوامل غیرتکنیکال/خبر.'
+    ];
+    const riskManagementSummaryFa =
+      'مدیریت ریسک (جلسه ۱۹): فعال‌سازی حد ضرر متحرک (Trailing Stop) روی سطوح TMV و سیو سود پله‌ای؛ بدون Trailing Stop ریسک معامله بالا است.';
+    const priceActionRoleFa =
+      'جایگاه پرایس اکشن: ابزار ستاپ‌گیری در کنار موج‌شماری است نه یک استراتژی مستقل؛ ترکیب پرایس اکشن + اندیکاتور + تابلوخوانی + موج‌شماری کامل‌ترین رویکرد است.';
+
     const validPct = items.length ? items.filter(i => i.valid).length / items.length : 0.8;
     const overallConfidence = Math.round(65 + validPct * 30);
 
@@ -6274,9 +6334,640 @@ export class PatternEngines {
       waveAIdentificationWarningFa,
       waveASubwaveMatchStandard,
       capitalManagementChecklistFa,
+      signalGenerationChecklistFa,
+      riskManagementSummaryFa,
+      priceActionRoleFa,
       overallConfidence,
       warnings
     };
+  }
+
+  /**
+   * Session 19 (§2.1, T-19.1..3): Wave 1 Characteristics
+   */
+  public static evaluateWave1Characteristics(params: {
+    wave1Len: number;
+    wave3Len: number;
+    wave5Len: number;
+    internalStructure?: 'DIAGONAL' | 'IMPULSIVE' | 'IDEAL_5_WAVE';
+    volumeProfile?: 'LOW' | 'MODERATE' | 'HIGH';
+  }): {
+    classification: 'WEAK_STANDARD' | 'EXTENDED_RARE' | 'IDEAL_5_POSSIBLE_RARE';
+    isWeak: boolean;
+    isExtended: boolean;
+    possible: boolean;
+    reasonFa: string;
+  } {
+    if (params.wave1Len > params.wave3Len) {
+      return {
+        classification: 'EXTENDED_RARE',
+        isWeak: false,
+        isExtended: true,
+        possible: true,
+        reasonFa: 'موج ۱ بلندتر از موج ۳ است — کشیدگی موج ۱ (نادر).'
+      };
+    }
+    if (params.internalStructure === 'IDEAL_5_WAVE') {
+      return {
+        classification: 'IDEAL_5_POSSIBLE_RARE',
+        isWeak: params.wave1Len < params.wave3Len && params.wave1Len < params.wave5Len,
+        isExtended: false,
+        possible: true,
+        reasonFa: 'ساختار ۵موجی ایده‌آل در موج ۱ ممکن است اما نادر محسوب می‌شود.'
+      };
+    }
+    return {
+      classification: 'WEAK_STANDARD',
+      isWeak: params.wave1Len < params.wave3Len && params.wave1Len < params.wave5Len,
+      isExtended: false,
+      possible: true,
+      reasonFa: 'موج ۱ ضعیف و کم‌حجم با ساختار شتابدار/قطری و فضای تردید بازار است.'
+    };
+  }
+
+  /**
+   * Session 19 (§2.2, T-19.4..6): Wave 2 Characteristics
+   */
+  public static evaluateWave2Characteristics(params: {
+    retracePct: number;
+    structureType: 'ZIGZAG' | 'FLAT' | 'TRIANGLE';
+  }): {
+    classification: 'IDEAL' | 'POSSIBLE' | 'RARE_20_PCT' | 'ANTI_CYCLE_VIOLATION';
+    validImpulseWave2: boolean;
+    reasonFa: string;
+  } {
+    if (params.retracePct > 100) {
+      return {
+        classification: 'ANTI_CYCLE_VIOLATION',
+        validImpulseWave2: false,
+        reasonFa: 'اصلاح موج ۲ بیش از ۱۰۰٪ موج ۱ است؛ نقض قانون ۱ و تغییر سناریو به آنتی‌سیکل.'
+      };
+    }
+    if (params.structureType === 'TRIANGLE') {
+      return {
+        classification: 'RARE_20_PCT',
+        validImpulseWave2: true,
+        reasonFa: 'موج ۲ مثلث بسیار نادر است (احتمال حدود ۲۰٪).'
+      };
+    }
+    if (params.structureType === 'ZIGZAG' && params.retracePct >= 50 && params.retracePct <= 65) {
+      return {
+        classification: 'IDEAL',
+        validImpulseWave2: true,
+        reasonFa: `موج ۲ زیگزاگ با اصلاح ${params.retracePct}٪ (محدوده ۵۰–۶۱.۸٪) ایده‌آل است.`
+      };
+    }
+    return {
+      classification: 'POSSIBLE',
+      validImpulseWave2: true,
+      reasonFa: `ساختار ${params.structureType} با اصلاح ${params.retracePct}٪ برای موج ۲ ممکن است.`
+    };
+  }
+
+  /**
+   * Session 19 (§2.3, T-19.7..9): Wave 3 Characteristics
+   */
+  public static evaluateWave3Characteristics(params: {
+    wave1Len: number;
+    wave3Len: number;
+    wave5Len: number;
+    subwaveCount?: 3 | 5;
+  }): {
+    classification: 'IDEAL' | 'EXTENDED' | 'STANDARD_NON_SHORTEST' | 'INVALID_3_WAVE' | 'INVALID_SHORTEST';
+    valid: boolean;
+    extended: boolean;
+    reasonFa: string;
+  } {
+    if (params.subwaveCount === 3) {
+      return {
+        classification: 'INVALID_3_WAVE',
+        valid: false,
+        extended: false,
+        reasonFa: 'خطا: موج ۳ نمی‌تواند ساختار ۳موجی باشد؛ شمارش اشتباه است.'
+      };
+    }
+    if (params.wave3Len < params.wave1Len && params.wave3Len < params.wave5Len) {
+      return {
+        classification: 'INVALID_SHORTEST',
+        valid: false,
+        extended: false,
+        reasonFa: 'خطا: موج ۳ کوتاه‌ترین موج بین امواج ۱، ۳ و ۵ است (نقض قانون ۲).'
+      };
+    }
+    const pctOf1 = params.wave1Len > 0 ? (params.wave3Len / params.wave1Len) * 100 : 0;
+    if (pctOf1 > 161.8) {
+      return {
+        classification: 'EXTENDED',
+        valid: true,
+        extended: true,
+        reasonFa: `موج ۳ کشیده (${Math.round(pctOf1 * 10) / 10}٪ > ۱۶۱.۸٪ موج ۱) با شیب تند، قدرت و حجم بالا.`
+      };
+    }
+    const isLongest = params.wave3Len > params.wave1Len && params.wave3Len > params.wave5Len;
+    if (isLongest) {
+      return {
+        classification: 'IDEAL',
+        valid: true,
+        extended: false,
+        reasonFa: 'موج ۳ قوی‌ترین موج (بلندتر از موج ۱ و ۵) با شیب تند، حجم بالا و ساختار ۵موجی ایده‌آل است.'
+      };
+    }
+    return {
+      classification: 'STANDARD_NON_SHORTEST',
+      valid: true,
+      extended: false,
+      reasonFa: 'موج ۳ معتبر است (کوتاه‌ترین موج نیست، اما بلندترین موج روند نیز نمی‌باشد).'
+    };
+  }
+
+  /**
+   * Session 19 (§2.4, T-19.10..12): Wave 4 Characteristics
+   */
+  public static evaluateWave4Characteristics(params: {
+    retracePctOf3: number;
+    structureType: 'TRIANGLE' | 'FLAT' | 'ZIGZAG' | 'COMPLEX';
+  }): {
+    classification: 'IDEAL' | 'POSSIBLE' | 'DEEP_CORRECTION' | 'TERMINAL_OR_DIAGONAL';
+    reasonFa: string;
+  } {
+    if (params.retracePctOf3 > 100) {
+      return {
+        classification: 'TERMINAL_OR_DIAGONAL',
+        reasonFa: 'موج ۴ بیش از ۱۰۰٪ اصلاح کرده یا وارد حریم موج ۱ شده؛ سناریو ترمینال/قطر است.'
+      };
+    }
+    if (params.retracePctOf3 > 50) {
+      return {
+        classification: 'DEEP_CORRECTION',
+        reasonFa: `موج ۴ (${params.retracePctOf3}٪ > ۵۰٪ موج ۳) اصلاح عمیق دارد؛ ممکن است اما غیرمعمول.`
+      };
+    }
+    if (params.structureType === 'TRIANGLE' && params.retracePctOf3 >= 23 && params.retracePctOf3 <= 40) {
+      return {
+        classification: 'IDEAL',
+        reasonFa: `موج ۴ مثلث با اصلاح ${params.retracePctOf3}٪ (۲۳–۳۸.۲٪) ایده‌آل است.`
+      };
+    }
+    return {
+      classification: 'POSSIBLE',
+      reasonFa: `ساختار ${params.structureType} با اصلاح ${params.retracePctOf3}٪ برای موج ۴ ممکن است.`
+    };
+  }
+
+  /**
+   * Session 19 (§2.5, T-19.13..15): Wave 5 Characteristics
+   */
+  public static evaluateWave5Characteristics(params: {
+    wave5Len: number;
+    wave3Len: number;
+    wave4Len?: number;
+    structureType?: 'IMPULSIVE' | 'ENDING_DIAGONAL';
+  }): {
+    classification: 'STANDARD' | 'COMMON_ENDING_DIAGONAL' | 'EXTENDED_RARE' | 'INVALID_CB_WAVE';
+    valid: boolean;
+    reasonFa: string;
+  } {
+    if (params.wave4Len !== undefined && params.wave5Len < params.wave4Len) {
+      return {
+        classification: 'INVALID_CB_WAVE',
+        valid: false,
+        reasonFa: 'نقض موج ۵: پوشش کمتر از ۱۰۰٪ موج ۴ (احتمال CB-Wave).'
+      };
+    }
+    if (params.structureType === 'ENDING_DIAGONAL') {
+      return {
+        classification: 'COMMON_ENDING_DIAGONAL',
+        valid: true,
+        reasonFa: 'موج ۵ به صورت قطر پایانی (Ending Diagonal) تشکیل شده که بسیار رایج است.'
+      };
+    }
+    if (params.wave5Len > params.wave3Len) {
+      return {
+        classification: 'EXTENDED_RARE',
+        valid: true,
+        reasonFa: 'موج ۵ بلندتر از موج ۳ است — کشیدگی موج ۵ (نادر و هشدار واگرایی).'
+      };
+    }
+    return {
+      classification: 'STANDARD',
+      valid: true,
+      reasonFa: 'موج ۵ کوتاه‌تر از موج ۳ با کاهش حجم و واگرایی استاندارد است.'
+    };
+  }
+
+  /**
+   * Session 19 (§2.6, T-19.16..18): Wave A Characteristics
+   */
+  public static evaluateWaveACharacteristics(params: {
+    wave5Subwaves: 3 | 5;
+    waveASubwaves: 3 | 5;
+    waveARetracePctOf5: number;
+  }): {
+    classification: 'STANDARD' | 'POSSIBLE' | 'MISMATCH';
+    confirmed: boolean;
+    hardestWaveWarningFa: string;
+    reasonFa: string;
+  } {
+    const confirmed = params.waveARetracePctOf5 > 38.2;
+    let classification: 'STANDARD' | 'POSSIBLE' | 'MISMATCH' = 'MISMATCH';
+    let reasonFa = '';
+    if (params.wave5Subwaves === 3 && params.waveASubwaves === 5) {
+      classification = 'STANDARD';
+      reasonFa = 'موج ۵ سه‌موجی و موج A پنج‌موجی است — ساختار استاندارد موج A.';
+    } else if (params.wave5Subwaves === 5 && params.waveASubwaves === 3) {
+      classification = 'POSSIBLE';
+      reasonFa = 'موج ۵ پنج‌موجی و موج A سه‌موجی است — ساختار ممکن برای موج A.';
+    } else {
+      classification = 'POSSIBLE';
+      reasonFa = 'الگوی ریزموجی موج A نیاز به بررسی دقیق‌تر دارد.';
+    }
+    if (confirmed) {
+      reasonFa += ` عبور موج A از ۳۸.۲٪ موج ۵ (${params.waveARetracePctOf5}٪) تغییر روند را تأیید می‌کند.`;
+    } else {
+      reasonFa += ` اصلاح موج A (${params.waveARetracePctOf5}٪ ≤ ۳۸.۲٪ موج ۵) هنوز تأیید قطعی ندارد؛ سخت‌ترین موج برای شناسایی است.`;
+    }
+    return {
+      classification,
+      confirmed,
+      hardestWaveWarningFa: 'موج A سخت‌ترین موج برای تشخیص پایان است؛ با حمایت/مقاومت و سقف موج ۳/۴/۵ تأیید بگیرید.',
+      reasonFa
+    };
+  }
+
+  /**
+   * Session 19 (§2.7, T-19.19..21): Wave B Characteristics
+   */
+  public static evaluateWaveBCharacteristics(params: {
+    subwaves: 3 | 5;
+    retracePctOfA: number;
+  }): {
+    patternType: 'FLAT' | 'SIMPLE_ZIGZAG' | 'IRREGULAR_FLAT';
+    isXWaveLike: boolean;
+    reasonFa: string;
+  } {
+    if (params.retracePctOfA > 100) {
+      return {
+        patternType: 'IRREGULAR_FLAT',
+        isXWaveLike: true,
+        reasonFa: `موج B (${params.retracePctOfA}٪ > ۱۰۰٪ موج A) الگوی فلت نامنظم با رفتار X-Wave و پیوت کلیدی معامله‌گران است.`
+      };
+    }
+    if (params.subwaves === 3 && params.retracePctOfA >= 61.8 - 0.1) {
+      return {
+        patternType: 'FLAT',
+        isXWaveLike: true,
+        reasonFa: `موج B سه‌موجی با اصلاح ${params.retracePctOfA}٪ (≥ ۶۱.۸٪ موج A) الگوی فلت و پیوت مهم X-Wave تشکیل می‌دهد.`
+      };
+    }
+    return {
+      patternType: 'SIMPLE_ZIGZAG',
+      isXWaveLike: true,
+      reasonFa: `موج B (${params.retracePctOfA}٪ < ۶۱.۸٪ موج A) نشانگر زیگزاگ ساده و پیوت کلیدی شبیه X-Wave است.`
+    };
+  }
+
+  /**
+   * Session 19 (§2.8, T-19.22..24): Wave C Characteristics
+   */
+  public static evaluateWaveCCharacteristics(params: {
+    coversWaveB100Pct: boolean;
+    pctOfWave5: number;
+    structureType?: 'IMPULSIVE' | 'DIAGONAL' | 'TERMINAL';
+  }): {
+    status: 'STANDARD' | 'VALID_BELOW_92_W5' | 'POSSIBLE_DIAGONAL_TERMINAL' | 'INVALID_MISSING_B_COVERAGE';
+    valid: boolean;
+    meets92PctWave5: boolean;
+    reasonFa: string;
+  } {
+    if (!params.coversWaveB100Pct) {
+      return {
+        status: 'INVALID_MISSING_B_COVERAGE',
+        valid: false,
+        meets92PctWave5: params.pctOfWave5 >= 92,
+        reasonFa: 'خطا: موج C باید حداقل ۱۰۰٪ موج B را پوشش دهد.'
+      };
+    }
+    if (params.structureType === 'DIAGONAL' || params.structureType === 'TERMINAL') {
+      return {
+        status: 'POSSIBLE_DIAGONAL_TERMINAL',
+        valid: true,
+        meets92PctWave5: params.pctOfWave5 >= 92,
+        reasonFa: `تشکیل موج C به صورت ${params.structureType === 'TERMINAL' ? 'ترمینال' : 'قطر'} (با پوشش ۱۰۰٪ B) ممکن است.`
+      };
+    }
+    const meets92PctWave5 = params.pctOfWave5 >= 92;
+    return {
+      status: meets92PctWave5 ? 'STANDARD' : 'VALID_BELOW_92_W5',
+      valid: true,
+      meets92PctWave5,
+      reasonFa: meets92PctWave5
+        ? `موج C با پوشش ۱۰۰٪ B و ${params.pctOfWave5}٪ (≥ ۹۲٪) موج ۵ استاندارد و معتبر است.`
+        : `موج C ۱۰۰٪ B را پوشش داده اما هنوز به هدف استاندارد ۹۲٪ موج ۵ نرسیده است.`
+    };
+  }
+
+  /**
+   * Session 19 (§2.9, T-19.25..26): Capital Management Post Chart Engineering
+   */
+  public static evaluateCapitalManagementPostChart(params: {
+    hasWaveCounting: boolean;
+    hasRiskManagement: boolean;
+    hasPositionSizing: boolean;
+    hasExitPlan: boolean;
+  }): {
+    status: 'COMPLETE' | 'INCOMPLETE' | 'NO_DIRECTION';
+    complete: boolean;
+    reasonFa: string;
+  } {
+    if (!params.hasWaveCounting) {
+      return {
+        status: 'NO_DIRECTION',
+        complete: false,
+        reasonFa: 'مدیریت سرمایه بدون موج‌شماری فاقد جهت تحلیلی است.'
+      };
+    }
+    const complete = params.hasRiskManagement && params.hasPositionSizing && params.hasExitPlan;
+    return {
+      status: complete ? 'COMPLETE' : 'INCOMPLETE',
+      complete,
+      reasonFa: complete
+        ? 'چرخه مهندسی چارت + مدیریت ریسک، مدیریت سرمایه و برنامه خروج کامل است.'
+        : 'موج‌شماری بدون مدیریت سرمایه/ریسک/خروج ناقص است.'
+    };
+  }
+
+  /**
+   * Session 19 (§2.10, T-19.27..28): Signal Generation Methods
+   */
+  public static evaluateSignalGenerationMethods(params: {
+    hasWaveCounting: boolean;
+    usesIndicators?: boolean;
+    usesClassicPatterns?: boolean;
+    usesTabloFlow?: boolean;
+  }): {
+    status: 'COMPLETE' | 'UNCONFIRMED_ENTRY' | 'UNCLEAR_DIRECTION';
+    complete: boolean;
+    methodsCount: number;
+    reasonFa: string;
+  } {
+    if (!params.hasWaveCounting) {
+      return {
+        status: 'UNCLEAR_DIRECTION',
+        complete: false,
+        methodsCount: 0,
+        reasonFa: 'سیگنال‌گیری بدون موج‌شماری جهت بازار را نامشخص می‌گذارد.'
+      };
+    }
+    const count =
+      Number(Boolean(params.usesIndicators)) +
+      Number(Boolean(params.usesClassicPatterns)) +
+      Number(Boolean(params.usesTabloFlow));
+    const complete = count >= 1;
+    return {
+      status: complete ? 'COMPLETE' : 'UNCONFIRMED_ENTRY',
+      complete,
+      methodsCount: count,
+      reasonFa: complete
+        ? `موج‌شماری همراه با ${count} ابزار سیگنال‌گیری (اندیکاتور/کلاسیک/تابلو) کامل است.`
+        : 'موج‌شماری بدون سیگنال‌گیری، ورود بدون تأیید محسوب می‌شود (ناقص).'
+    };
+  }
+
+  /**
+   * Session 19 (§2.11, T-19.29..30): Risk Management (Trailing Stop & Stepped Take Profit)
+   */
+  public static evaluateRiskManagementReadiness(params: {
+    trailingStopActive: boolean;
+    steppedTakeProfit?: boolean;
+  }): {
+    status: 'COMPLETE_RISK_MANAGEMENT' | 'HIGH_RISK';
+    riskLevel: 'CONTROLLED' | 'HIGH';
+    reasonFa: string;
+  } {
+    if (params.trailingStopActive) {
+      return {
+        status: 'COMPLETE_RISK_MANAGEMENT',
+        riskLevel: 'CONTROLLED',
+        reasonFa: 'Trailing Stop فعال است؛ مدیریت ریسک و سیو سود کامل ارزیابی می‌شود.'
+      };
+    }
+    return {
+      status: 'HIGH_RISK',
+      riskLevel: 'HIGH',
+      reasonFa: 'بدون Trailing Stop معامله دارای ریسک بالا است.'
+    };
+  }
+
+  /**
+   * Session 19 (§2.12, T-19.31..32): Price Action as Tool, Not Strategy
+   */
+  public static evaluatePriceActionRole(params: {
+    usesPriceAction: boolean;
+    hasWaveCounting: boolean;
+    usesIndicators?: boolean;
+    usesTablo?: boolean;
+  }): {
+    status: 'COMPLETE' | 'USEFUL_TOOL' | 'INCOMPLETE_STANDALONE';
+    isUseful: boolean;
+    reasonFa: string;
+  } {
+    if (params.usesPriceAction && !params.hasWaveCounting) {
+      return {
+        status: 'INCOMPLETE_STANDALONE',
+        isUseful: false,
+        reasonFa: 'پرایس اکشن به‌تنهایی استراتژی کامل نیست و بدون موج‌شماری ناقص است.'
+      };
+    }
+    if (params.usesPriceAction && params.hasWaveCounting && params.usesIndicators && params.usesTablo) {
+      return {
+        status: 'COMPLETE',
+        isUseful: true,
+        reasonFa: 'پرایس اکشن + موج‌شماری + اندیکاتور + تابلوخوانی یک سیستم کامل است.'
+      };
+    }
+    return {
+      status: 'USEFUL_TOOL',
+      isUseful: params.usesPriceAction && params.hasWaveCounting,
+      reasonFa: 'پرایس اکشن در کنار موج‌شماری یک ابزار ستاپ‌گیری بسیار مفید است.'
+    };
+  }
+
+  /**
+   * Session 19 (§2.13, T-19.33..34): Post-Course Learning Path
+   */
+  public static evaluatePostCoursePath(params: {
+    readsGlennNeelyBook: boolean;
+    studiesPackages: boolean;
+    practicesCharts: boolean;
+  }): {
+    status: 'COMPLETE' | 'INCOMPLETE';
+    complete: boolean;
+    reasonFa: string;
+  } {
+    const complete = params.readsGlennNeelyBook && params.studiesPackages && params.practicesCharts;
+    return {
+      status: complete ? 'COMPLETE' : 'INCOMPLETE',
+      complete,
+      reasonFa: complete
+        ? 'مسیر پس از دوره (کتاب گلن نیلی + پکیج‌های تخصصی + تمرین صدها تحلیل) کامل است.'
+        : 'اکتفا به بخشی از مسیر بدون تمرین و مطالعه تکمیلی ناقص است.'
+    };
+  }
+
+  /**
+   * Session 19 (§2.14, T-19.35..36): Final Advice on Wave Counting Affinity
+   */
+  public static evaluateFinalWaveCountingFit(params: {
+    connectsWithWaveCounting: boolean;
+  }): {
+    decision: 'CONTINUE' | 'STOP_DO_NOT_WASTE_TIME';
+    shouldContinue: boolean;
+    reasonFa: string;
+  } {
+    if (params.connectsWithWaveCounting) {
+      return {
+        decision: 'CONTINUE',
+        shouldContinue: true,
+        reasonFa: 'ارتباط با موج‌شماری برقرار شده است؛ با تمرین مستمر ادامه دهید.'
+      };
+    }
+    return {
+      decision: 'STOP_DO_NOT_WASTE_TIME',
+      shouldContinue: false,
+      reasonFa: 'اگر با موج‌شماری ارتباط برقرار نکردید، ادامه ندهید تا وقت و سرمایه هدر نرود.'
+    };
+  }
+
+  /**
+   * Session 19 CLI JSON Contract (`018-eight-waves-characteristics`).
+   */
+  public static runSession19CharacteristicsCli(jsonInput: string): string {
+    try {
+      const req = JSON.parse(jsonInput) as {
+        action?: string;
+        payload?: Record<string, unknown>;
+      };
+      const p = req.payload || {};
+      let result: unknown;
+      switch (req.action) {
+        case 'evaluate_wave1':
+          result = PatternEngines.evaluateWave1Characteristics({
+            wave1Len: Number(p.wave1Len ?? 100),
+            wave3Len: Number(p.wave3Len ?? 160),
+            wave5Len: Number(p.wave5Len ?? 120),
+            internalStructure: p.internalStructure as 'DIAGONAL' | 'IMPULSIVE' | 'IDEAL_5_WAVE' | undefined
+          });
+          break;
+        case 'evaluate_wave2':
+          result = PatternEngines.evaluateWave2Characteristics({
+            retracePct: Number(p.retracePct ?? 61.8),
+            structureType: (p.structureType as 'ZIGZAG' | 'FLAT' | 'TRIANGLE') ?? 'ZIGZAG'
+          });
+          break;
+        case 'evaluate_wave3':
+          result = PatternEngines.evaluateWave3Characteristics({
+            wave1Len: Number(p.wave1Len ?? 100),
+            wave3Len: Number(p.wave3Len ?? 180),
+            wave5Len: Number(p.wave5Len ?? 110),
+            subwaveCount: p.subwaveCount as 3 | 5 | undefined
+          });
+          break;
+        case 'evaluate_wave4':
+          result = PatternEngines.evaluateWave4Characteristics({
+            retracePctOf3: Number(p.retracePctOf3 ?? 38.2),
+            structureType: (p.structureType as 'TRIANGLE' | 'FLAT' | 'ZIGZAG' | 'COMPLEX') ?? 'TRIANGLE'
+          });
+          break;
+        case 'evaluate_wave5':
+          result = PatternEngines.evaluateWave5Characteristics({
+            wave5Len: Number(p.wave5Len ?? 90),
+            wave3Len: Number(p.wave3Len ?? 160),
+            wave4Len: p.wave4Len !== undefined ? Number(p.wave4Len) : undefined,
+            structureType: p.structureType as 'IMPULSIVE' | 'ENDING_DIAGONAL' | undefined
+          });
+          break;
+        case 'evaluate_wave_a':
+          result = PatternEngines.evaluateWaveACharacteristics({
+            wave5Subwaves: (Number(p.wave5Subwaves ?? 3) === 5 ? 5 : 3) as 3 | 5,
+            waveASubwaves: (Number(p.waveASubwaves ?? 5) === 3 ? 3 : 5) as 3 | 5,
+            waveARetracePctOf5: Number(p.waveARetracePctOf5 ?? 45)
+          });
+          break;
+        case 'evaluate_wave_b':
+          result = PatternEngines.evaluateWaveBCharacteristics({
+            subwaves: (Number(p.subwaves ?? 3) === 5 ? 5 : 3) as 3 | 5,
+            retracePctOfA: Number(p.retracePctOfA ?? 61.8)
+          });
+          break;
+        case 'evaluate_wave_c':
+          result = PatternEngines.evaluateWaveCCharacteristics({
+            coversWaveB100Pct: Boolean(p.coversWaveB100Pct ?? true),
+            pctOfWave5: Number(p.pctOfWave5 ?? 95),
+            structureType: p.structureType as 'IMPULSIVE' | 'DIAGONAL' | 'TERMINAL' | undefined
+          });
+          break;
+        case 'evaluate_capital_management':
+          result = PatternEngines.evaluateCapitalManagementPostChart({
+            hasWaveCounting: Boolean(p.hasWaveCounting ?? true),
+            hasRiskManagement: Boolean(p.hasRiskManagement ?? true),
+            hasPositionSizing: Boolean(p.hasPositionSizing ?? true),
+            hasExitPlan: Boolean(p.hasExitPlan ?? true)
+          });
+          break;
+        case 'evaluate_signal_generation':
+          result = PatternEngines.evaluateSignalGenerationMethods({
+            hasWaveCounting: Boolean(p.hasWaveCounting ?? true),
+            usesIndicators: Boolean(p.usesIndicators ?? true),
+            usesClassicPatterns: Boolean(p.usesClassicPatterns ?? false),
+            usesTabloFlow: Boolean(p.usesTabloFlow ?? false)
+          });
+          break;
+        case 'evaluate_risk_management':
+          result = PatternEngines.evaluateRiskManagementReadiness({
+            trailingStopActive: Boolean(p.trailingStopActive ?? true),
+            steppedTakeProfit: Boolean(p.steppedTakeProfit ?? true)
+          });
+          break;
+        case 'evaluate_price_action_role':
+          result = PatternEngines.evaluatePriceActionRole({
+            usesPriceAction: Boolean(p.usesPriceAction ?? true),
+            hasWaveCounting: Boolean(p.hasWaveCounting ?? true),
+            usesIndicators: Boolean(p.usesIndicators ?? false),
+            usesTablo: Boolean(p.usesTablo ?? false)
+          });
+          break;
+        case 'evaluate_post_course_path':
+          result = PatternEngines.evaluatePostCoursePath({
+            readsGlennNeelyBook: Boolean(p.readsGlennNeelyBook ?? true),
+            studiesPackages: Boolean(p.studiesPackages ?? true),
+            practicesCharts: Boolean(p.practicesCharts ?? true)
+          });
+          break;
+        case 'evaluate_final_fit':
+          result = PatternEngines.evaluateFinalWaveCountingFit({
+            connectsWithWaveCounting: Boolean(p.connectsWithWaveCounting ?? true)
+          });
+          break;
+        default:
+          return JSON.stringify({
+            status: 'error',
+            feature: '018-eight-waves-characteristics',
+            message: `Unknown action: ${req.action}`
+          });
+      }
+      return JSON.stringify({
+        status: 'ok',
+        feature: '018-eight-waves-characteristics',
+        action: req.action,
+        result
+      });
+    } catch (err) {
+      return JSON.stringify({
+        status: 'error',
+        feature: '018-eight-waves-characteristics',
+        message: err instanceof Error ? err.message : 'Invalid JSON payload'
+      });
+    }
   }
 }
 

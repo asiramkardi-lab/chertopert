@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SddAndCodeViewer: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSION16' | 'SESSION17' | 'SESSION18' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
+  const [activeTab, setActiveTab] = useState<'CATALOG' | 'SESSION2' | 'SESSIONS_3_8' | 'SESSION11' | 'SESSION12' | 'SESSION13' | 'SESSION14' | 'SESSION15' | 'SESSION16' | 'SESSION17' | 'SESSION18' | 'SESSION19' | 'SESSIONS_9_19' | 'SDD' | 'FASTAPI' | 'NUXT4'>('CATALOG');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -594,6 +594,61 @@ def calculate_tmv(req: TmvRequest):
       <div>TMV Prime: {{ tmv.tmvPrime }}</div>
       <div>TMV Ideal: {{ tmv.tmvIdeal100 }}</div>
       <div>TMV Alt 161.8%: {{ tmv.tmvAlternate1618 }}</div>
+    </div>
+  </UCard>
+</template>
+\`\`\`
+`;
+
+  const session19Markdown = `# جلسه ۱۹: شخصیت‌شناسی ۸ موج و مدیریت سرمایه (018-eight-waves-characteristics) — Spec-Kit SDD + Backend & Frontend
+
+## بخش ۱: ۱۴ مفهوم استخراج‌شده جلسه ۱۹ (۱۹-۱ تا ۱۹-۱۴) و تست‌های مرزی (T-19.1 تا T-19.36)
+| کد | مفهوم | شرایط مرزی و خروجی موتور | تست‌ها |
+|----|-------|--------------------------|--------|
+| ۱۹-۱ | ویژگی‌های موج ۱ | کوتاه‌تر از ۳ و ۵ ← ضعیف و کم‌حجم؛ > ۳ ← کشیدگی نادر؛ ۵موجی ایده‌آل ← نادر | T-19.1..3 |
+| ۱۹-۲ | ویژگی‌های موج ۲ | زیگزاگ + ۵۰–۶۱.۸٪ ← ایده‌آل؛ فلت + ۷۸.۶٪ ← ممکن؛ > ۱۰۰٪ ← آنتی‌سیکل | T-19.4..6 |
+| ۱۹-۳ | ویژگی‌های موج ۳ | > ۱ و ۵ ← ایده‌آل؛ > ۱۶۱.۸٪ ← کشیدگی؛ ساختار ۳موجی ← خطا (شمارش اشتباه) | T-19.7..9 |
+| ۱۹-۴ | ویژگی‌های موج ۴ | مثلث + ۲۳–۳۸.۲٪ ← ایده‌آل؛ > ۵۰٪ ← اصلاح عمیق؛ > ۱۰۰٪ ← ترمینال/قطر | T-19.10..12 |
+| ۱۹-۵ | ویژگی‌های موج ۵ | < ۳ ← استاندارد؛ قطر پایانی ← رایج؛ > ۳ ← کشیدگی؛ < ۱۰۰٪ ۴ ← CB-Wave | T-19.13..15 |
+| ۱۹-۶ | ویژگی‌های موج A | ۵(۳)+A(5) ← استاندارد؛ ۵(۵)+A(3) ← ممکن؛ > ۳۸.۲٪ ← تأیید (سخت‌ترین موج) | T-19.16..18 |
+| ۱۹-۷ | ویژگی‌های موج B | ۳موجی + ۶۱.۸٪ ← فلت؛ < ۶۱.۸٪ ← زیگزاگ ساده؛ > ۱۰۰٪ ← فلت نامنظم (شبیه X) | T-19.19..21 |
+| ۱۹-۸ | ویژگی‌های موج C | > ۱۰۰٪ B ← معتبر؛ ≥ ۹۲٪ موج ۵ ← استاندارد؛ قطر/ترمینال ← ممکن | T-19.22..24 |
+| ۱۹-۹ | مدیریت سرمایه | موج‌شماری + مدیریت ریسک/سرمایه/خروج ← کامل؛ بدون آن ← ناقص | T-19.25..26 |
+| ۱۹-۱۰ | سیگنال‌گیری | اندیکاتور + کلاسیک + تابلوخوانی همراه با موج‌شماری ← کامل | T-19.27..28 |
+| ۱۹-۱۱ | مدیریت ریسک | Trailing Stop فعال ← کنترل ریسک کامل؛ بدون آن ← ریسک بالا | T-19.29..30 |
+| ۱۹-۱۲ | پرایس اکشن | ابزار کمکی در کنار موج‌شماری (نه استراتژی مستقل) | T-19.31..32 |
+| ۱۹-۱۳ | مسیر پس از دوره | کتاب گلن نیلی + پکیج تخصصی + تمرین صدها چارت ← کامل | T-19.33..34 |
+| ۱۹-۱۴ | نصیحت نهایی | برقراری ارتباط ← ادامه؛ عدم ارتباط با موج‌شماری ← توقف | T-19.35..36 |
+
+## بخش ۲: سند Spec-Kit SDD (018-eight-waves-characteristics)
+- **Contract CLI (JSON in/out):** \`PatternEngines.runSession19CharacteristicsCli(json)\` با اکشن‌های \`evaluate_wave1\` .. \`evaluate_final_fit\`.
+
+## بخش ۳: معماری Backend FastAPI (پایتون)
+\`\`\`python
+from pydantic import BaseModel
+
+class Wave3TraitRequest(BaseModel):
+    wave1_len: float
+    wave3_len: float
+    wave5_len: float
+    subwave_count: int = 5
+
+def evaluate_wave3_trait(req: Wave3TraitRequest):
+    if req.subwave_count == 3:
+        return {"valid": False, "classification": "INVALID_3_WAVE"}
+    extended = req.wave1_len > 0 and (req.wave3_len / req.wave1_len) * 100 > 161.8
+    return {"valid": True, "classification": "EXTENDED" if extended else "IDEAL"}
+\`\`\`
+
+## بخش ۴: کامپوننت‌های Nuxt 4 (UI v4)
+\`\`\`vue
+<template>
+  <UCard class="bg-default border border-muted" dir="rtl">
+    <template #header>
+      <span class="font-bold">شخصیت‌شناسی ۸ موج و چک‌لیست سرمایه (جلسه ۱۹)</span>
+    </template>
+    <div v-for="w in report.items" :key="w.label" class="text-xs py-1 border-b border-muted">
+      <strong>{{ w.label }}</strong> — {{ w.traitFa }}
     </div>
   </UCard>
 </template>
@@ -1333,6 +1388,18 @@ const runAnalysis = async () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('SESSION19')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'SESSION19'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-lg shadow-emerald-600/30'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>جلسه ۱۹ (018 — شخصیت ۸ موج)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('SESSIONS_9_19')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
               activeTab === 'SESSIONS_9_19'
@@ -1406,6 +1473,8 @@ const runAnalysis = async () => {
               ? session17Markdown
               : activeTab === 'SESSION18'
               ? session18Markdown
+              : activeTab === 'SESSION19'
+              ? session19Markdown
               : activeTab === 'SESSIONS_9_19'
               ? sessions9to19Markdown
               : activeTab === 'SDD'
@@ -1436,6 +1505,7 @@ const runAnalysis = async () => {
           activeTab === 'SESSION16' ||
           activeTab === 'SESSION17' ||
           activeTab === 'SESSION18' ||
+          activeTab === 'SESSION19' ||
           activeTab === 'SESSIONS_9_19'
             ? 'rtl'
             : 'ltr'
@@ -1453,6 +1523,7 @@ const runAnalysis = async () => {
         {activeTab === 'SESSION16' && session16Markdown}
         {activeTab === 'SESSION17' && session17Markdown}
         {activeTab === 'SESSION18' && session18Markdown}
+        {activeTab === 'SESSION19' && session19Markdown}
         {activeTab === 'SESSIONS_9_19' && sessions9to19Markdown}
         {activeTab === 'SDD' && sddMarkdown}
         {activeTab === 'FASTAPI' && fastApiCode}

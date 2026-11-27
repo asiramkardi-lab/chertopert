@@ -1162,6 +1162,30 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                       </div>
                     ))}
                   </div>
+                  {auditResult.waveCharacteristics.signalGenerationChecklistFa && (
+                    <div className="p-2 rounded bg-slate-900/80 border border-slate-800 space-y-1 text-slate-300">
+                      {auditResult.waveCharacteristics.signalGenerationChecklistFa.map((line, i) => (
+                        <div key={i} className={i === 0 ? 'font-bold text-cyan-300' : 'leading-relaxed'}>
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(auditResult.waveCharacteristics.riskManagementSummaryFa ||
+                    auditResult.waveCharacteristics.priceActionRoleFa) && (
+                    <div className="p-2 rounded bg-slate-900/80 border border-slate-800 space-y-1 text-slate-300 leading-relaxed">
+                      {auditResult.waveCharacteristics.riskManagementSummaryFa && (
+                        <div className="text-amber-200">
+                          {auditResult.waveCharacteristics.riskManagementSummaryFa}
+                        </div>
+                      )}
+                      {auditResult.waveCharacteristics.priceActionRoleFa && (
+                        <div className="text-slate-300">
+                          {auditResult.waveCharacteristics.priceActionRoleFa}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

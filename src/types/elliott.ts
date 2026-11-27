@@ -603,6 +603,9 @@ export interface WaveCharacteristicsReport {
   waveAIdentificationWarningFa?: string;
   waveASubwaveMatchStandard?: boolean;
   capitalManagementChecklistFa: string[];
+  signalGenerationChecklistFa?: string[];
+  riskManagementSummaryFa?: string;
+  priceActionRoleFa?: string;
   overallConfidence: number;
   warnings: string[];
 }
