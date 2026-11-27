@@ -101,6 +101,8 @@ export default function App() {
       : null
   );
   const [scenarioCreationError, setScenarioCreationError] = useState<string | null>(null);
+  const [studioHoveredLegIndex, setStudioHoveredLegIndex] = useState<number | null>(null);
+  const [studioMobileView, setStudioMobileView] = useState<'SPLIT' | 'CHART' | 'PANEL'>('SPLIT');
 
   const currentAsset = useMemo(() => {
     return SUPPORTED_ASSETS.find(a => a.id === selectedAssetId) || SUPPORTED_ASSETS[0];
@@ -1000,13 +1002,13 @@ export default function App() {
 
   return (
     <div
-      className="h-screen w-screen bg-[#070b14] text-slate-100 flex flex-col overflow-hidden font-['Vazirmatn',sans-serif] selection:bg-indigo-500 selection:text-white"
+      className="min-h-screen lg:h-screen w-full bg-[#070b14] text-slate-100 flex flex-col lg:overflow-hidden font-['Vazirmatn',sans-serif] selection:bg-indigo-500 selection:text-white"
       dir="rtl"
     >
-      {/* Top 3-Zone Header Bar (Strict Single-Line Contract) */}
-      <header className="h-14 bg-[#0a101f] border-b border-slate-800 px-4 flex items-center justify-between gap-4 shrink-0">
+      {/* Top 3-Zone Header Bar (Responsive across mobile, tablet, desktop) */}
+      <header className="min-h-14 bg-[#0a101f] border-b border-slate-800 px-3 sm:px-4 py-1.5 lg:py-0 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-4 shrink-0">
         {/* Zone 1: Brand Wordmark */}
-        <div className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
+        <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
           <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
             <BrainCircuit className="w-4.5 h-4.5 text-white" />
           </div>
@@ -1014,10 +1016,10 @@ export default function App() {
         </div>
 
         {/* Zone 2: Primary Mode Navigation */}
-        <nav className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 whitespace-nowrap shrink-0">
+        <nav className="order-3 sm:order-2 w-full sm:w-auto flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 whitespace-nowrap overflow-x-auto scrollbar-none">
           <button
             onClick={() => setAppMode('WIZARD')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
               appMode === 'WIZARD' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -1027,7 +1029,7 @@ export default function App() {
 
           <button
             onClick={() => setAppMode('STUDIO')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
               appMode === 'STUDIO' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -1037,7 +1039,7 @@ export default function App() {
 
           <button
             onClick={() => setAppMode('SDD')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
               appMode === 'SDD' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -1049,10 +1051,11 @@ export default function App() {
         {/* Zone 3: 1 Primary Action */}
         <button
           onClick={handleReset}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-200 whitespace-nowrap shrink-0 transition-colors"
+          className="order-2 sm:order-3 flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-200 whitespace-nowrap shrink-0 transition-colors"
         >
           <RotateCcw className="w-3.5 h-3.5" />
-          <span>شروع مجدد تحلیل</span>
+          <span className="hidden sm:inline">شروع مجدد تحلیل</span>
+          <span className="sm:hidden">شروع مجدد</span>
         </button>
       </header>
 
@@ -1136,7 +1139,7 @@ export default function App() {
 
       {/* Main Content */}
       {appMode === 'WIZARD' && (
-        <main className="flex-1 flex flex-col p-3 overflow-hidden">
+        <main className="flex-1 flex flex-col p-2 sm:p-3 lg:overflow-hidden">
           <WizardWorkspace
             asset={currentAsset}
             resetSignal={wizardResetCounter}
@@ -1147,122 +1150,167 @@ export default function App() {
       )}
 
       {appMode === 'STUDIO' && (
-        <main className="flex-1 flex flex-col lg:flex-row gap-3 p-3 overflow-hidden">
-          <section className="flex-1 h-full flex flex-col min-w-0 gap-2">
-            {scenarioCreationError && (
-              <div
-                data-testid="xwave-creation-blocked-alert"
-                role="alert"
-                className="px-3.5 py-2 rounded-xl bg-rose-950/50 border border-rose-500/55 text-rose-200 text-xs flex items-center justify-between gap-2 shrink-0"
-              >
-                <span>{scenarioCreationError}</span>
-                <button
-                  type="button"
-                  onClick={() => setScenarioCreationError(null)}
-                  className="px-2 py-0.5 rounded bg-rose-900/60 hover:bg-rose-800/70 text-[11px] font-bold shrink-0"
-                >
-                  بستن
-                </button>
-              </div>
-            )}
-            <ChartStudio
-              candles={effectiveCandles}
-              activeScenario={effectiveActiveScenario}
-              overlayScenarios={effectiveScenarios.filter(s => s.isSelectedForTree && s.id !== effectiveActiveScenario.id)}
-              onUpdateVertices={handleUpdateVertices}
-              onPatternChange={handlePatternChange}
-              onToggleLock={() => handleToggleLock()}
-              onResetToAI={handleReset}
-              timeframe={effectiveTimeframe}
-              assetSymbol={currentAsset.symbol}
-              interactionMode={studioInteractionMode}
-              onChangeInteractionMode={setStudioInteractionMode}
-              onStartScratchDraw={() => handleNewScenario(true)}
-              lowestValidTimeframe={boundaryReport.lowestValidTF}
-              validTimeframes={boundaryReport.recommendedTFs}
-              onDoubleClickWaveLeg={handleStudioDoubleClickWaveLeg}
-              parentWindowHighlight={
-                currentStudioDrill
-                  ? {
-                      startTs: currentStudioDrill.startTimestamp,
-                      endTs: currentStudioDrill.endTimestamp,
-                      label: `${currentStudioDrill.waveLabel} (${currentStudioDrill.parentTimeframe})`
-                    }
-                  : null
-              }
-              drillTrail={studioDrillStack.map(d => ({
-                label: d.waveLabel,
-                timeframe: d.targetTimeframe
-              }))}
-              onJumpDrillLevel={handleStudioJumpDrillLevel}
-              onSwitchDrillTimeframe={handleStudioSwitchDrillTimeframe}
-              hoveredScenario={hoveredStudioScenario}
-              parentRole={currentStudioDrill?.role || 'ROOT'}
-              parentWaveLabel={currentStudioDrill?.waveLabel || ''}
-              onValidateActiveScenario={handleValidateScenario}
-            />
-          </section>
+        <main className="flex-1 flex flex-col gap-2.5 p-2 sm:p-3 lg:overflow-hidden">
+          {/* Mobile & Tablet Focused View Switcher */}
+          <div className="lg:hidden grid grid-cols-3 gap-1 bg-[#0b1120] border border-slate-800 rounded-xl p-1 text-xs shrink-0">
+            <button
+              type="button"
+              onClick={() => setStudioMobileView('SPLIT')}
+              className={`py-1.5 rounded-lg font-semibold transition-colors ${
+                studioMobileView === 'SPLIT' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              چارت و پنل
+            </button>
+            <button
+              type="button"
+              onClick={() => setStudioMobileView('CHART')}
+              className={`py-1.5 rounded-lg font-semibold transition-colors ${
+                studioMobileView === 'CHART' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              فقط چارت
+            </button>
+            <button
+              type="button"
+              onClick={() => setStudioMobileView('PANEL')}
+              className={`py-1.5 rounded-lg font-semibold transition-colors ${
+                studioMobileView === 'PANEL' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              فقط پنل تحلیل
+            </button>
+          </div>
 
-          <SleekSidebar
-            activeScenario={effectiveActiveScenario}
-            scenarios={effectiveScenarios}
-            activeScenarioId={effectiveActiveScenario.id}
-            onSelectScenario={id => {
-              if (currentStudioDrill) {
-                setStudioActiveSubIdByKey(prev => ({ ...prev, [currentStudioDrill.key]: id }));
-              } else {
-                setActiveScenarioId(id);
-              }
-            }}
-            onDuplicateScenario={handleDuplicateScenario}
-            onToggleLock={handleToggleLock}
-            onDeleteScenario={handleDeleteScenario}
-            onNewScenario={() => handleNewScenario(false)}
-            onPatternChange={handlePatternChange}
-            currentDegree={effectiveActiveScenario.degree}
-            onSelectDegree={handleSelectDegree}
-            onBranchScenario={handleBranchScenario}
-            boundaryReport={boundaryReport}
-            activeTimeframe={effectiveTimeframe}
-            onSelectTimeframe={tf => {
-              setStudioDrillStack([]);
-              setSelectedTimeframe(tf);
-            }}
-            onValidateScenario={handleValidateScenario}
-            onHoverScenario={setHoveredStudioScenarioId}
-            onUpdateVertices={handleUpdateVertices}
-            interactionMode={studioInteractionMode}
-            onChangeInteractionMode={setStudioInteractionMode}
-            drillContext={
-              currentStudioDrill
-                ? {
-                    key: currentStudioDrill.key,
-                    waveLabel: currentStudioDrill.waveLabel,
-                    parentTimeframe: currentStudioDrill.parentTimeframe,
-                    targetTimeframe: currentStudioDrill.targetTimeframe,
-                    role: currentStudioDrill.role,
-                    candleCount: effectiveCandles.length
+          <div className="flex-1 flex flex-col lg:flex-row gap-3 lg:overflow-hidden">
+            <section
+              className={`flex-1 flex-col min-w-0 gap-2 ${
+                studioMobileView === 'PANEL'
+                  ? 'hidden lg:flex lg:h-full'
+                  : studioMobileView === 'CHART'
+                  ? 'flex h-[76vh] min-h-[440px] lg:h-full'
+                  : 'flex h-[58vh] min-h-[380px] lg:h-full'
+              }`}
+            >
+              {scenarioCreationError && (
+                <div
+                  data-testid="xwave-creation-blocked-alert"
+                  role="alert"
+                  className="px-3.5 py-2 rounded-xl bg-rose-950/50 border border-rose-500/55 text-rose-200 text-xs flex items-center justify-between gap-2 shrink-0"
+                >
+                  <span>{scenarioCreationError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setScenarioCreationError(null)}
+                    className="px-2 py-0.5 rounded bg-rose-900/60 hover:bg-rose-800/70 text-[11px] font-bold shrink-0"
+                  >
+                    بستن
+                  </button>
+                </div>
+              )}
+              <ChartStudio
+                candles={effectiveCandles}
+                activeScenario={effectiveActiveScenario}
+                overlayScenarios={effectiveScenarios.filter(s => s.isSelectedForTree && s.id !== effectiveActiveScenario.id)}
+                onUpdateVertices={handleUpdateVertices}
+                onPatternChange={handlePatternChange}
+                onToggleLock={() => handleToggleLock()}
+                onResetToAI={handleReset}
+                timeframe={effectiveTimeframe}
+                assetSymbol={currentAsset.symbol}
+                interactionMode={studioInteractionMode}
+                onChangeInteractionMode={setStudioInteractionMode}
+                onStartScratchDraw={() => handleNewScenario(true)}
+                lowestValidTimeframe={boundaryReport.lowestValidTF}
+                validTimeframes={boundaryReport.recommendedTFs}
+                onDoubleClickWaveLeg={handleStudioDoubleClickWaveLeg}
+                parentWindowHighlight={
+                  currentStudioDrill
+                    ? {
+                        startTs: currentStudioDrill.startTimestamp,
+                        endTs: currentStudioDrill.endTimestamp,
+                        label: `${currentStudioDrill.waveLabel} (${currentStudioDrill.parentTimeframe})`
+                      }
+                    : null
+                }
+                drillTrail={studioDrillStack.map(d => ({
+                  label: d.waveLabel,
+                  timeframe: d.targetTimeframe
+                }))}
+                onJumpDrillLevel={handleStudioJumpDrillLevel}
+                onSwitchDrillTimeframe={handleStudioSwitchDrillTimeframe}
+                hoveredScenario={hoveredStudioScenario}
+                highlightedLegIndex={studioHoveredLegIndex}
+                parentRole={currentStudioDrill?.role || 'ROOT'}
+                parentWaveLabel={currentStudioDrill?.waveLabel || ''}
+                onValidateActiveScenario={handleValidateScenario}
+              />
+            </section>
+
+            <div className={studioMobileView === 'CHART' ? 'hidden lg:flex lg:h-full' : 'flex lg:h-full'}>
+              <SleekSidebar
+                activeScenario={effectiveActiveScenario}
+                scenarios={effectiveScenarios}
+                activeScenarioId={effectiveActiveScenario.id}
+                onSelectScenario={id => {
+                  if (currentStudioDrill) {
+                    setStudioActiveSubIdByKey(prev => ({ ...prev, [currentStudioDrill.key]: id }));
+                  } else {
+                    setActiveScenarioId(id);
                   }
-                : null
-            }
-            onExitDrill={
-              currentStudioDrill
-                ? () => handleStudioJumpDrillLevel(studioDrillStack.length - 2)
-                : undefined
-            }
-            candles={effectiveCandles}
-            candlesByTf={multiTfData}
-            marketType={currentAsset.marketType}
-            onPromoteDegree={handlePromoteScenarioDegree}
-            liveTreeContext={{
-              rootScenarios: scenarios,
-              activeRootScenarioId: activeScenarioId,
-              subScenariosByKey: studioSubScenariosByKey,
-              activeSubIdByKey: studioActiveSubIdByKey,
-              drillStack: studioDrillStack,
-              onJumpToLevel: handleStudioJumpDrillLevel
-            }}
-          />
+                }}
+                onDuplicateScenario={handleDuplicateScenario}
+                onToggleLock={handleToggleLock}
+                onDeleteScenario={handleDeleteScenario}
+                onNewScenario={() => handleNewScenario(false)}
+                onPatternChange={handlePatternChange}
+                currentDegree={effectiveActiveScenario.degree}
+                onSelectDegree={handleSelectDegree}
+                onBranchScenario={handleBranchScenario}
+                boundaryReport={boundaryReport}
+                activeTimeframe={effectiveTimeframe}
+                onSelectTimeframe={tf => {
+                  setStudioDrillStack([]);
+                  setSelectedTimeframe(tf);
+                }}
+                onValidateScenario={handleValidateScenario}
+                onHoverScenario={setHoveredStudioScenarioId}
+                onHoverLeg={setStudioHoveredLegIndex}
+                onUpdateVertices={handleUpdateVertices}
+                interactionMode={studioInteractionMode}
+                onChangeInteractionMode={setStudioInteractionMode}
+                drillContext={
+                  currentStudioDrill
+                    ? {
+                        key: currentStudioDrill.key,
+                        waveLabel: currentStudioDrill.waveLabel,
+                        parentTimeframe: currentStudioDrill.parentTimeframe,
+                        targetTimeframe: currentStudioDrill.targetTimeframe,
+                        role: currentStudioDrill.role,
+                        candleCount: effectiveCandles.length
+                      }
+                    : null
+                }
+                onExitDrill={
+                  currentStudioDrill
+                    ? () => handleStudioJumpDrillLevel(studioDrillStack.length - 2)
+                    : undefined
+                }
+                candles={effectiveCandles}
+                candlesByTf={multiTfData}
+                marketType={currentAsset.marketType}
+                onPromoteDegree={handlePromoteScenarioDegree}
+                liveTreeContext={{
+                  rootScenarios: scenarios,
+                  activeRootScenarioId: activeScenarioId,
+                  subScenariosByKey: studioSubScenariosByKey,
+                  activeSubIdByKey: studioActiveSubIdByKey,
+                  drillStack: studioDrillStack,
+                  onJumpToLevel: handleStudioJumpDrillLevel
+                }}
+              />
+            </div>
+          </div>
         </main>
       )}
 

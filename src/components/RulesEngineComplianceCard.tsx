@@ -125,7 +125,7 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
   const primaryBars = [
     {
       key: 'validity',
-      label: 'نمره اعتبار (Validity)',
+      label: 'نمره اعتبار ساختار',
       value: summary.validityScore,
       barColor:
         summary.validityScore >= 80
@@ -142,7 +142,7 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
     },
     {
       key: 'idealness',
-      label: 'شاخص ایده‌آل بودن (Idealness)',
+      label: 'شاخص ایده‌آل بودن',
       value: summary.idealnessScore,
       barColor:
         summary.idealnessScore >= 80
@@ -159,7 +159,7 @@ export const RulesEngineComplianceCard: React.FC<RulesEngineComplianceCardProps>
     },
     {
       key: 'confidence',
-      label: 'سطح اطمینان (Confidence)',
+      label: 'سطح اطمینان کلی',
       value: summary.confidenceScore,
       barColor:
         summary.confidenceScore >= 80

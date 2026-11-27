@@ -111,6 +111,7 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
   const [isInspectingLowerWindow, setIsInspectingLowerWindow] = useState<boolean>(
     () => initialDraft?.isInspectingLowerWindow || false
   );
+  const [wizardMobileView, setWizardMobileView] = useState<'SPLIT' | 'CHART' | 'PANEL'>('SPLIT');
 
   const highestTfCandles = useMemo(() => {
     return dataByTf[confirmedHighestTF] || dataByTf[asset.timeframes[0]] || [];
@@ -1157,14 +1158,14 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
   const wizardSteps = [
     { num: 1 as const, label: 'مرز تایم‌فریم و کف مطلق', icon: Compass },
     { num: 2 as const, label: 'سناریوهای کلان و ویرایش', icon: Layers },
-    { num: 3 as const, label: 'درخت فرکتالی و ریزش', icon: GitBranch }
+    { num: 3 as const, label: 'درخت فرکتالی و ریزشماری', icon: GitBranch }
   ];
 
   return (
-    <div className="flex-1 flex flex-col gap-2.5 overflow-hidden">
+    <div className="flex-1 flex flex-col gap-2.5 lg:overflow-hidden">
       {/* Sleek 3-Step Horizontal Stepper Strip */}
-      <div className="bg-[#0b1120] border border-slate-800 rounded-xl px-4 py-2 flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto">
+      <div className="bg-[#0b1120] border border-slate-800 rounded-xl px-3 sm:px-4 py-2 flex items-center justify-between gap-4 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto scrollbar-none">
           {wizardSteps.map((ws, idx) => {
             const Icon = ws.icon;
             const isCurrent = step === ws.num;
@@ -1220,10 +1221,49 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
         </div>
       </div>
 
+      {/* Mobile & Tablet Focused View Switcher */}
+      <div className="lg:hidden grid grid-cols-3 gap-1 bg-[#0b1120] border border-slate-800 rounded-xl p-1 text-xs shrink-0">
+        <button
+          type="button"
+          onClick={() => setWizardMobileView('SPLIT')}
+          className={`py-1.5 rounded-lg font-semibold transition-colors ${
+            wizardMobileView === 'SPLIT' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          چارت و پنل
+        </button>
+        <button
+          type="button"
+          onClick={() => setWizardMobileView('CHART')}
+          className={`py-1.5 rounded-lg font-semibold transition-colors ${
+            wizardMobileView === 'CHART' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          فقط چارت
+        </button>
+        <button
+          type="button"
+          onClick={() => setWizardMobileView('PANEL')}
+          className={`py-1.5 rounded-lg font-semibold transition-colors ${
+            wizardMobileView === 'PANEL' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          فقط پنل گام {step}
+        </button>
+      </div>
+
       {/* Main Split Workspace: Chart on RIGHT (first in RTL), Step Controls on LEFT (second in RTL) */}
-      <div className="flex-1 flex flex-col lg:flex-row gap-3 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row gap-3 lg:overflow-hidden">
         {/* RIGHT: Interactive Candlestick Chart */}
-        <section className="flex-1 h-full flex flex-col min-w-0">
+        <section
+          className={`flex-1 flex-col min-w-0 ${
+            wizardMobileView === 'PANEL'
+              ? 'hidden lg:flex lg:h-full'
+              : wizardMobileView === 'CHART'
+              ? 'flex h-[76vh] min-h-[440px] lg:h-full'
+              : 'flex h-[58vh] min-h-[380px] lg:h-full'
+          }`}
+        >
           <ChartStudio
             candles={activeChartCandles}
             activeScenario={activeScenarioForChart}
@@ -1301,7 +1341,11 @@ export const WizardWorkspace: React.FC<WizardWorkspaceProps> = ({
         </section>
 
         {/* LEFT: Step-Specific Sleek Sidebar */}
-        <aside className="w-full lg:w-[440px] xl:w-[480px] h-full flex flex-col bg-[#0b1120] border border-slate-800 rounded-xl overflow-hidden shrink-0">
+        <aside
+          className={`w-full lg:w-[440px] xl:w-[480px] lg:h-full flex-col bg-[#0b1120] border border-slate-800 rounded-xl overflow-hidden shrink-0 ${
+            wizardMobileView === 'CHART' ? 'hidden lg:flex' : 'flex'
+          }`}
+        >
           {step === 1 && (
             <WizardStep1Timeframes
               assetMarketType={asset.marketType}

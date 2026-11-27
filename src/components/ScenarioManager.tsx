@@ -128,7 +128,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
         tMap[sc.id] = {
           warningLabelFa: 'هشدار انتهای بازار: فلت ابزار گره‌گشایی گذشته است و نباید در فاز پایانی بدون احتیاط شدید استفاده شود',
           warningReasonFa:
-            "Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase.",
+            'الگوهای فلت عمدتاً برای گره‌گشایی ساختارهای گذشته کاربرد دارند و نباید در فاز پایانی فعلی بازار بدون احتیاط شدید استفاده شوند.',
           distanceFromEndCandles: 0
         };
       }
@@ -195,7 +195,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
       <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3 flex-wrap">
         <div className="flex items-center gap-2">
           <FolderGit2 className="w-5 h-5 text-indigo-400" />
-          <h3 className="text-sm font-bold text-white">مدیریت سناریوهای موازی (Scenario Universe)</h3>
+          <h3 className="text-sm font-bold text-white">مدیریت سناریوهای موازی</h3>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {activeScenario && onUpdateVertices && (
@@ -219,7 +219,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
               title="ارسال سناریوی فعال به RulesEngine و بررسی اعتبار قوانین"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>تأیید (Validate)</span>
+              <span>اعتبارسنجی قوانین</span>
             </button>
           )}
           <button
@@ -405,7 +405,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                       {terminalWarningsById[sc.id] && (
                         <span
                           data-testid="scenario-market-terminal-warning"
-                          title="Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase."
+                          title="الگوهای فلت برای گره‌گشایی ساختارهای گذشته کاربرد دارند و در فاز پایانی فعلی توصیه نمی‌شوند."
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold border bg-rose-500/20 border-rose-500/50 text-rose-200"
                         >
                           <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
@@ -419,8 +419,8 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                             data-testid="scenario-triangle-type-badge"
                             title={
                               triangleChecksById[sc.id]!.isContracting
-                                ? 'Contracting Triangle (خطوط روند همگرا — ۳-۳-۳-۳-۳)'
-                                : 'Expanding Triangle (خطوط روند واگرا — ۳-۳-۳-۳-۳)'
+                                ? 'مثلث انقباضی (خطوط روند همگرا — ساختار ۳-۳-۳-۳-۳)'
+                                : 'مثلث انبساطی (خطوط روند واگرا — ساختار ۳-۳-۳-۳-۳)'
                             }
                             className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold border whitespace-nowrap ${
                               triangleChecksById[sc.id]!.isContracting
@@ -428,7 +428,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                                 : 'bg-amber-500/15 border-amber-500/45 text-amber-200'
                             }`}
                           >
-                            {triangleChecksById[sc.id]!.isContracting ? 'مثلث مانع (Contracting)' : 'مثلث گستشی (Expanding)'}
+                            {triangleChecksById[sc.id]!.isContracting ? 'مثلث انقباضی (همگرا)' : 'مثلث انبساطی (واگرا)'}
                           </span>
                         )}
                       {invalidTrianglesById[sc.id] && (
@@ -436,7 +436,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                           data-testid="scenario-invalid-triangle-badge"
                           title={
                             triangleChecksById[sc.id]?.invalidTriangleReasonFa ||
-                            'Invalid Triangle: Triangle pattern placed in wave 1, 3, or 5 or violates 3-3-3-3-3 internal structure.'
+                            'مثلث نامعتبر: الگوی مثلث نباید در موج ۱، ۳ یا ۵ قرار بگیرد و ساختار داخلی آن باید ۳-۳-۳-۳-۳ باشد.'
                           }
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold border bg-rose-500/20 border-rose-500/50 text-rose-200 whitespace-nowrap"
                         >
@@ -596,7 +596,7 @@ export const ScenarioManager: React.FC<ScenarioManagerProps> = ({
                 }`}
               >
                 <Move className="w-3 h-3" />
-                <span>درگ نقاط</span>
+                <span>جابجایی نقاط</span>
               </button>
               <button
                 onClick={() => onChangeInteractionMode('ADD_VERTEX')}

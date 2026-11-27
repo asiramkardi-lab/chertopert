@@ -893,7 +893,7 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                           : 'text-amber-300 font-bold'
                       }
                     >
-                      {chk.passed ? 'PASS' : chk.severity}
+                      {chk.passed ? 'تایید' : chk.severity === 'ERROR' ? 'خطا' : 'هشدار'}
                     </span>
                   </div>
                 </div>
@@ -953,7 +953,7 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                     <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                     <span>کشیدگی فعال (جلسه ۴): {auditResult.summary.detectedExtension}</span>
                   </span>
-                  <span className="font-mono text-[10px] text-amber-300">EXTENDED</span>
+                  <span className="font-mono text-[10px] text-amber-300">کشیده</span>
                 </div>
               )}
 
@@ -1136,7 +1136,7 @@ export const PatternValidator: React.FC<PatternValidatorProps> = ({
                           <div className="font-bold text-white flex items-center gap-1.5">
                             <span className="font-mono text-cyan-300">{w.label}</span>
                             <span className="text-slate-400">
-                              ({w.estimatedSubwaves} ریز‌موج · {w.candleSpan} کندل)
+                              ({w.estimatedSubwaves} ریزموج · {w.candleSpan} کندل)
                             </span>
                           </div>
                           <p className="text-slate-300 leading-relaxed">{w.traitFa}</p>

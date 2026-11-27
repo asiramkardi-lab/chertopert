@@ -36,6 +36,11 @@ import {
   formatCandleAxisTime
 } from '../engine/chartToolsEngine';
 import {
+  TradingViewLightweightCanvas,
+  TradingViewCanvasBridge
+} from './TradingViewLightweightCanvas';
+import { TradingViewAdvancedWidget } from './TradingViewAdvancedWidget';
+import {
   Lock,
   Unlock,
   RotateCcw,
@@ -59,6 +64,7 @@ import {
   ZoomOut,
   MousePointer2,
   TrendingUp,
+  TrendingDown,
   ArrowUpRight,
   Minus,
   Ruler,
@@ -66,8 +72,22 @@ import {
   CandlestickChart,
   SlidersHorizontal,
   Undo2,
+  Redo2,
   Columns2,
-  Sparkles
+  Sparkles,
+  Camera,
+  Maximize2,
+  Minimize2,
+  Eye,
+  EyeOff,
+  Magnet,
+  Brush,
+  Compass,
+  FlipVertical,
+  ArrowLeftRight,
+  Globe,
+  Scan,
+  Pin
 } from 'lucide-react';
 
 export type ChartInteractionMode = 'EDIT' | 'ADD_VERTEX' | 'DRAW_SCRATCH' | 'PICK_BOTTOM';
@@ -150,11 +170,23 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   hideZoneControls = false,
   highlightedLegIndex = null
 }) => {
+  const rootWrapperRef = useRef<HTMLDivElement>(null);
+  const tvBridgeRef = useRef<TradingViewCanvasBridge | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const dragMovedRef = useRef<boolean>(false);
   const frozenBoundsRef = useRef<{ minPrice: number; priceRange: number } | null>(null);
+  const [chartEngineMode, setChartEngineMode] = useState<'LIGHTWEIGHT_PRO' | 'TRADINGVIEW_LIVE'>('LIGHTWEIGHT_PRO');
+  const [tvEngineAvailable, setTvEngineAvailable] = useState<boolean>(false);
+  const [tvSyncTick, setTvSyncTick] = useState<number>(0);
+  const [tvCrosshairInfo, setTvCrosshairInfo] = useState<{
+    candleIndex: number | null;
+    price: number | null;
+    x: number | null;
+    y: number | null;
+  }>({ candleIndex: null, price: null, x: null, y: null });
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [draggingVertexIndex, setDraggingVertexIndex] = useState<number | null>(null);
   const [draggingBottom, setDraggingBottom] = useState<boolean>(false);
   const [dragMoved, setDragMoved] = useState<boolean>(false);
@@ -173,6 +205,8 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [tmvCustomRatio, setTmvCustomRatio] = useState<number | null>(null);
   const [draggingTmvEdge, setDraggingTmvEdge] = useState<boolean>(false);
   const [priceZoom, setPriceZoom] = useState<number>(1);
+  const [invertScale, setInvertScale] = useState<boolean>(false);
+  const [autoScale, setAutoScale] = useState<boolean>(true);
   const [showVolume, setShowVolume] = useState<boolean>(true);
   const [showTrendStrength, setShowTrendStrength] = useState<boolean>(true);
   const [snapToCandleExtreme, setSnapToCandleExtreme] = useState<boolean>(true);
@@ -182,14 +216,24 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   const [scaleMode, setScaleMode] = useState<PriceScaleMode>('LINEAR');
   const [drawingTool, setDrawingTool] = useState<DrawingToolKind>('SELECT');
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
-  const [pendingDrawPoint, setPendingDrawPoint] = useState<DrawingPoint | null>(null);
+  const [redoStack, setRedoStack] = useState<ChartDrawing[]>([]);
+  const [pendingDrawPoints, setPendingDrawPoints] = useState<DrawingPoint[]>([]);
+  const [drawColor, setDrawColor] = useState<string>('#38bdf8');
+  const [stayInDrawMode, setStayInDrawMode] = useState<boolean>(true);
+  const [hideDrawings, setHideDrawings] = useState<boolean>(false);
+  const [lockDrawings, setLockDrawings] = useState<boolean>(false);
+  const [editingNoteDraft, setEditingNoteDraft] = useState<{ id: string; text: string } | null>(null);
   const [viewRange, setViewRange] = useState<{ start: number; end: number } | null>(null);
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const panStartRef = useRef<{ clientX: number; startIdx: number; endIdx: number } | null>(null);
   const [showEMA20, setShowEMA20] = useState<boolean>(false);
   const [showEMA50, setShowEMA50] = useState<boolean>(false);
+  const [showEMA200, setShowEMA200] = useState<boolean>(false);
+  const [showSMA20, setShowSMA20] = useState<boolean>(false);
   const [showBB, setShowBB] = useState<boolean>(false);
+  const [showVWAP, setShowVWAP] = useState<boolean>(false);
   const [showRSI, setShowRSI] = useState<boolean>(false);
+  const [showMACD, setShowMACD] = useState<boolean>(false);
   const [showIndicatorsMenu, setShowIndicatorsMenu] = useState<boolean>(false);
   const [drillNotice, setDrillNotice] = useState<string | null>(null);
   const [diagnosticOpenById, setDiagnosticOpenById] = useState<Record<string, boolean>>({});
@@ -273,20 +317,42 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     setValidatorOpenById({});
     setValidatorHighlightLeg(null);
     setViewRange(null);
-    setPendingDrawPoint(null);
+    setPendingDrawPoints([]);
+    setEditingNoteDraft(null);
   }, [timeframe, assetSymbol]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') {
-        setPendingDrawPoint(null);
+        if (drawingTool === 'BRUSH' && pendingDrawPoints.length >= 2) {
+          setDrawings(prev => [
+            ...prev,
+            {
+              id: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              kind: 'BRUSH',
+              points: pendingDrawPoints,
+              color: drawColor
+            }
+          ]);
+          setRedoStack([]);
+        }
+        setPendingDrawPoints([]);
         setDrawingTool('SELECT');
         setShowIndicatorsMenu(false);
+        setEditingNoteDraft(null);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [drawingTool, pendingDrawPoints, drawColor]);
 
   // Keep active scenario's open diagnostic summary live whenever vertices or pattern change
   useEffect(() => {
@@ -537,6 +603,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       candles
     );
     setDiagnosticSummaryById(prev => ({ ...prev, [activeScenario.id]: summary }));
+    setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
     setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: true }));
     onValidateActiveScenario?.(activeScenario.id, summary);
   };
@@ -590,10 +657,23 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   };
 
   const { width, height } = dimensions;
-  const padding = { top: 48, right: 86, bottom: 26, left: 22 };
+  const tvPlotGeom =
+    tvEngineAvailable && tvBridgeRef.current?.isReady()
+      ? tvBridgeRef.current.getPlotGeometry()
+      : null;
   const volumeHeight = showVolume ? 52 : 0;
   const rsiHeight = showRSI ? 66 : 0;
-  const bottomReserved = padding.bottom + volumeHeight + rsiHeight;
+  const padding = tvPlotGeom
+    ? {
+        top: 10,
+        right: Math.max(54, width - tvPlotGeom.plotWidth),
+        bottom: Math.max(24, height - tvPlotGeom.plotHeight),
+        left: 8
+      }
+    : { top: 48, right: 86, bottom: 26, left: 22 };
+  const bottomReserved = tvPlotGeom
+    ? Math.max(0, height - tvPlotGeom.plotHeight)
+    : padding.bottom + volumeHeight + rsiHeight;
 
   const displayCandles = useMemo(() => {
     return chartStyle === 'HEIKIN_ASHI' ? toHeikinAshi(candles) : candles;
@@ -758,12 +838,24 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   ]);
 
   const getX = (index: number) => {
+    if (tvEngineAvailable && tvBridgeRef.current?.isReady()) {
+      const tvX = tvBridgeRef.current.getX(index);
+      if (tvX !== null && Number.isFinite(tvX)) {
+        return tvX;
+      }
+    }
     const usableWidth = width - padding.left - padding.right;
     const step = usableWidth / Math.max(1, visSpan);
     return padding.left + (index - visStart) * step;
   };
 
   const getY = (price: number) => {
+    if (tvEngineAvailable && tvBridgeRef.current?.isReady()) {
+      const tvY = tvBridgeRef.current.getY(price);
+      if (tvY !== null && Number.isFinite(tvY)) {
+        return tvY;
+      }
+    }
     const usableHeight = Math.max(20, height - padding.top - bottomReserved);
     const scaled = transformPrice(price, scaleMode, percentBaseline);
     const normalized = (scaled - sMin) / sRange;
@@ -771,19 +863,32 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   };
 
   const getIndexAndPriceFromCoords = (mouseX: number, mouseY: number, forceLowSnap = false) => {
-    const usableWidth = width - padding.left - padding.right;
-    const step = usableWidth / Math.max(1, visSpan);
-    const rawIndex = Math.round((mouseX - padding.left) / step) + visStart;
-    const candleIndex = Math.max(0, Math.min(candles.length - 1, rawIndex));
-    const usableHeight = Math.max(1, height - padding.top - bottomReserved);
-    const bounds = frozenBoundsRef.current || { minPrice, priceRange };
-    const normalized = (height - bottomReserved - mouseY) / usableHeight;
-    let rawPrice = bounds.minPrice + normalized * bounds.priceRange;
-    if (scaleMode !== 'LINEAR' && !frozenBoundsRef.current) {
-      const scaled = sMin + normalized * sRange;
-      rawPrice = inverseTransformPrice(scaled, scaleMode, percentBaseline);
+    let candleIndex = 0;
+    let rawPrice = 0;
+
+    const tvHit =
+      tvEngineAvailable && tvBridgeRef.current?.isReady()
+        ? tvBridgeRef.current.getIndexAndPrice(mouseX, mouseY)
+        : null;
+
+    if (tvHit) {
+      candleIndex = tvHit.candleIndex;
+      rawPrice = tvHit.price;
+    } else {
+      const usableWidth = width - padding.left - padding.right;
+      const step = usableWidth / Math.max(1, visSpan);
+      const rawIndex = Math.round((mouseX - padding.left) / step) + visStart;
+      candleIndex = Math.max(0, Math.min(candles.length - 1, rawIndex));
+      const usableHeight = Math.max(1, height - padding.top - bottomReserved);
+      const bounds = frozenBoundsRef.current || { minPrice, priceRange };
+      const normalized = (height - bottomReserved - mouseY) / usableHeight;
+      rawPrice = bounds.minPrice + normalized * bounds.priceRange;
+      if (scaleMode !== 'LINEAR' && !frozenBoundsRef.current) {
+        const scaled = sMin + normalized * sRange;
+        rawPrice = inverseTransformPrice(scaled, scaleMode, percentBaseline);
+      }
+      rawPrice = Math.round(rawPrice * 10) / 10;
     }
-    rawPrice = Math.round(rawPrice * 10) / 10;
 
     const candle = candles[candleIndex];
     let finalPrice = rawPrice;
@@ -800,6 +905,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     return {
       candleIndex,
       price: finalPrice,
+      rawPrice,
       timestamp: candle?.timestamp ?? Date.now()
     };
   };
@@ -849,6 +955,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   };
 
   const handleWheel = (e: React.WheelEvent) => {
+    if (tvEngineAvailable) return;
     if (candles.length < 16) return;
     const { mouseX } = getSvgCoords(e);
     const usableWidth = Math.max(1, width - padding.left - padding.right);
@@ -871,6 +978,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (tvEngineAvailable) return;
     if (
       drawingTool !== 'SELECT' ||
       interactionMode !== 'EDIT' ||
@@ -1020,55 +1128,73 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     }
 
     if (drawingTool !== 'SELECT') {
+      if (lockDrawings) return;
       const ptInfo = getIndexAndPriceFromCoords(mouseX, mouseY, false);
-      // For drawing tools, compute raw unsnapped price at cursor unless magnet is forced
-      const usableHeight = Math.max(1, height - padding.top - bottomReserved);
-      const norm = (height - bottomReserved - mouseY) / usableHeight;
-      const cursorPrice = Math.round(inverseTransformPrice(sMin + norm * sRange, scaleMode, percentBaseline) * 10) / 10;
       const dp: DrawingPoint = {
         candleIndex: ptInfo.candleIndex,
-        price: snapToCandleExtreme ? ptInfo.price : cursorPrice,
+        price: snapToCandleExtreme ? ptInfo.price : ptInfo.rawPrice,
         timestamp: ptInfo.timestamp
       };
 
+      const defaultToolColor = (kind: Exclude<DrawingToolKind, 'SELECT'>): string => {
+        if (kind === 'HLINE') return '#f59e0b';
+        if (kind === 'VLINE') return '#a855f7';
+        if (kind === 'FIB_RETRACE' || kind === 'FIB_EXTENSION') return '#eab308';
+        if (kind === 'LONG_POSITION' || kind === 'MEASURE') return '#10b981';
+        if (kind === 'SHORT_POSITION') return '#f43f5e';
+        if (kind === 'CHANNEL' || kind === 'PITCHFORK') return '#c084fc';
+        return drawColor || '#38bdf8';
+      };
+
+      const commitDrawing = (kind: Exclude<DrawingToolKind, 'SELECT'>, pts: DrawingPoint[], label?: string) => {
+        const newDrawing: ChartDrawing = {
+          id: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          kind,
+          points: pts,
+          color: defaultToolColor(kind),
+          label,
+          visible: true
+        };
+        setDrawings(prev => [...prev, newDrawing]);
+        setRedoStack([]);
+        setPendingDrawPoints([]);
+        if (kind === 'TEXT') {
+          setEditingNoteDraft({ id: newDrawing.id, text: label || 'یادداشت' });
+        }
+        if (!stayInDrawMode) {
+          setDrawingTool('SELECT');
+        }
+      };
+
       if (drawingTool === 'HLINE' || drawingTool === 'VLINE' || drawingTool === 'TEXT') {
-        const color =
-          drawingTool === 'HLINE' ? '#f59e0b' : drawingTool === 'VLINE' ? '#a855f7' : '#38bdf8';
-        setDrawings(prev => [
-          ...prev,
-          {
-            id: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            kind: drawingTool,
-            points: [dp],
-            color,
-            label: drawingTool === 'TEXT' ? `یادداشت ${formatScalePrice(dp.price, scaleMode, percentBaseline)}` : undefined
-          }
-        ]);
-        setPendingDrawPoint(null);
+        commitDrawing(
+          drawingTool,
+          [dp],
+          drawingTool === 'TEXT' ? `یادداشت ${formatScalePrice(dp.price, scaleMode, percentBaseline)}` : undefined
+        );
         return;
       }
 
-      if (!pendingDrawPoint) {
-        setPendingDrawPoint(dp);
+      if (drawingTool === 'PITCHFORK' || drawingTool === 'FIB_EXTENSION') {
+        const nextPts = [...pendingDrawPoints, dp];
+        if (nextPts.length < 3) {
+          setPendingDrawPoints(nextPts);
+        } else {
+          commitDrawing(drawingTool, nextPts);
+        }
+        return;
+      }
+
+      if (drawingTool === 'BRUSH') {
+        const nextPts = [...pendingDrawPoints, dp];
+        setPendingDrawPoints(nextPts);
+        return;
+      }
+
+      if (pendingDrawPoints.length === 0) {
+        setPendingDrawPoints([dp]);
       } else {
-        const color =
-          drawingTool === 'FIB_RETRACE'
-            ? '#eab308'
-            : drawingTool === 'MEASURE'
-            ? '#10b981'
-            : drawingTool === 'CHANNEL'
-            ? '#c084fc'
-            : '#38bdf8';
-        setDrawings(prev => [
-          ...prev,
-          {
-            id: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            kind: drawingTool,
-            points: [pendingDrawPoint, dp],
-            color
-          }
-        ]);
-        setPendingDrawPoint(null);
+        commitDrawing(drawingTool, [pendingDrawPoints[0], dp]);
       }
       return;
     }
@@ -1150,6 +1276,88 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     setSelectedVertexIndex(null);
   };
 
+  const handleFitContent = () => {
+    setViewRange(null);
+    setPriceZoom(1);
+    setAutoScale(true);
+    if (tvEngineAvailable && tvBridgeRef.current?.isReady()) {
+      tvBridgeRef.current.fitContent();
+      tvBridgeRef.current.resetAutoScale();
+    }
+    setTvSyncTick(t => t + 1);
+  };
+
+  const handleToggleFullscreen = () => {
+    const el = rootWrapperRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
+
+  const handleDownloadScreenshot = async () => {
+    try {
+      const baseCanvas = tvEngineAvailable ? tvBridgeRef.current?.takeScreenshot() : null;
+      const outW = baseCanvas?.width || width;
+      const outH = baseCanvas?.height || height;
+      const composite = document.createElement('canvas');
+      composite.width = outW;
+      composite.height = outH;
+      const ctx = composite.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = '#080d1a';
+      ctx.fillRect(0, 0, outW, outH);
+      if (baseCanvas) {
+        ctx.drawImage(baseCanvas, 0, 0, outW, outH);
+      }
+      if (svgRef.current) {
+        const serializer = new XMLSerializer();
+        const svgStr = serializer.serializeToString(svgRef.current);
+        const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(svgBlob);
+        await new Promise<void>(resolve => {
+          const img = new Image();
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0, outW, outH);
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+          img.src = url;
+        });
+      }
+      const link = document.createElement('a');
+      link.download = `${assetSymbol}_${timeframe}_tradingview.png`;
+      link.href = composite.toDataURL('image/png');
+      link.click();
+    } catch {
+      // Ignore canvas export errors in restricted environments
+    }
+  };
+
+  const finishBrushStroke = () => {
+    if (drawingTool === 'BRUSH' && pendingDrawPoints.length >= 2) {
+      const stroke: ChartDrawing = {
+        id: `draw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: 'BRUSH',
+        points: pendingDrawPoints,
+        color: drawColor,
+        visible: true
+      };
+      setDrawings(prev => [...prev, stroke]);
+      setRedoStack([]);
+    }
+    setPendingDrawPoints([]);
+    if (!stayInDrawMode) {
+      setDrawingTool('SELECT');
+    }
+  };
+
   const degreeInfo = DEGREE_CONFIGS[activeScenario.degree];
   const scenarioColor = activeScenario.color || degreeInfo.color;
 
@@ -1200,7 +1408,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       pathD,
       totalLength: Math.max(1, Math.ceil(totalLength))
     };
-  }, [activeHoveredScenario, candles.length, width, height, minPrice, priceRange, sMin, sRange, scaleMode, percentBaseline, visStart, visEnd, showVolume, showRSI]);
+  }, [activeHoveredScenario, candles.length, width, height, minPrice, priceRange, sMin, sRange, scaleMode, percentBaseline, visStart, visEnd, showVolume, showRSI, tvEngineAvailable, tvSyncTick]);
 
   // Scale-adaptive & Timeframe-Synchronized PRZ Horizontal Bounding Box coordinates
   const renderedPrzBoxes = useMemo(() => {
@@ -1303,7 +1511,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     percentBaseline,
     visStart,
     visEnd,
-    priceZoom
+    priceZoom,
+    tvEngineAvailable,
+    tvSyncTick,
+    invertScale
   ]);
 
   // Scale-adaptive TMV Horizontal Bounding Box coordinates (mirrors PRZ horizontal geometry)
@@ -1396,7 +1607,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     visEnd,
     priceZoom,
     tmvSpanMode,
-    tmvCustomRatio
+    tmvCustomRatio,
+    tvEngineAvailable,
+    tvSyncTick,
+    invertScale
   ]);
 
   // Active Wave Leg X-Y-Z 3-Point Projection TMV + PRZ + Overlap / Primary-Target Highlighting
@@ -1651,7 +1865,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
     percentBaseline,
     visStart,
     visEnd,
-    priceZoom
+    priceZoom,
+    tvEngineAvailable,
+    tvSyncTick,
+    invertScale
   ]);
 
   const gridSteps = 6;
@@ -1664,7 +1881,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       lines.push({ price: p, label: formatScalePrice(p, scaleMode, percentBaseline), y });
     }
     return lines;
-  }, [sMin, sRange, scaleMode, percentBaseline, height, bottomReserved]);
+  }, [sMin, sRange, scaleMode, percentBaseline, height, bottomReserved, tvEngineAvailable, tvSyncTick, invertScale]);
 
   const lastCandle = displayCandles[displayCandles.length - 1];
   const lastPrice = lastCandle?.close || 0;
@@ -1714,6 +1931,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
   return (
     <div
+      ref={rootWrapperRef}
       className="flex-1 flex flex-col h-full bg-[#080d1a] border border-slate-800 rounded-xl overflow-hidden relative select-none"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -1722,7 +1940,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
       }}
     >
       {/* Top Pro Chart Toolbar */}
-      <div className="min-h-12 bg-[#0c1427] border-b border-slate-800 px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+      <div className="min-h-12 bg-[#0c1427] border-b border-slate-800 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
         {/* Right side in RTL: Symbol, TF, Pattern Selector */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
@@ -1843,101 +2061,154 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             />
           </div>
 
-          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-0.5">
-            <CandlestickChart className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <select
-              value={chartStyle}
-              onChange={e => setChartStyle(e.target.value as ChartStyleType)}
-              title="نوع نمایش چارت قیمت (TradingView Chart Styles)"
-              className="bg-transparent text-[11px] text-slate-200 font-medium py-0.5 focus:outline-none cursor-pointer"
-            >
-              <option value="CANDLES" className="bg-slate-900">شمعی</option>
-              <option value="HOLLOW" className="bg-slate-900">توخالی</option>
-              <option value="HEIKIN_ASHI" className="bg-slate-900">هیکین‌آشی</option>
-              <option value="BARS" className="bg-slate-900">میله‌ای OHLC</option>
-              <option value="LINE" className="bg-slate-900">خطی</option>
-              <option value="AREA" className="bg-slate-900">مساحتی</option>
-            </select>
-          </div>
-
-          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5" title="مقیاس محور قیمت">
-            {(
-              [
-                { id: 'LINEAR', label: 'عادی' },
-                { id: 'LOG', label: 'لگ' },
-                { id: 'PERCENT', label: '٪' }
-              ] as const
-            ).map(m => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setScaleMode(m.id)}
-                className={`px-1.5 py-0.5 text-[10px] font-mono rounded-md transition-colors ${
-                  scaleMode === m.id
-                    ? 'bg-indigo-600 text-white font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="relative">
+          {/* Dual-Mode TradingView Engine Switcher */}
+          <div
+            className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 shrink-0"
+            title="انتخاب موتور چارت: بوم تعاملی موج‌شماری TradingView یا ویجت زنده کامل TradingView"
+          >
             <button
               type="button"
-              onClick={() => setShowIndicatorsMenu(prev => !prev)}
-              className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded-lg border transition-colors ${
-                showEMA20 || showEMA50 || showBB || showRSI
-                  ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200 font-semibold'
-                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+              onClick={() => setChartEngineMode('LIGHTWEIGHT_PRO')}
+              className={`flex items-center gap-1 px-2 py-1 text-[10.5px] rounded-md transition-colors whitespace-nowrap ${
+                chartEngineMode === 'LIGHTWEIGHT_PRO'
+                  ? 'bg-cyan-600 text-white font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="اندیکاتورهای تکنیکال (EMA, Bollinger Bands, RSI)"
             >
-              <SlidersHorizontal className="w-3 h-3" />
-              <span>اندیکاتورها</span>
+              <CandlestickChart className="w-3 h-3 shrink-0" />
+              <span>بوم تعاملی TradingView</span>
             </button>
-            {showIndicatorsMenu && (
-              <div
-                onClick={e => e.stopPropagation()}
-                className="absolute right-0 top-full mt-1.5 w-48 bg-[#0b1326] border border-slate-700 rounded-xl p-2 shadow-2xl z-40 space-y-1 text-[11px]"
-              >
-                {[
-                  { label: 'EMA (20)', active: showEMA20, toggle: () => setShowEMA20(v => !v), color: 'text-amber-300' },
-                  { label: 'EMA (50)', active: showEMA50, toggle: () => setShowEMA50(v => !v), color: 'text-sky-300' },
-                  { label: 'Bollinger (20, 2)', active: showBB, toggle: () => setShowBB(v => !v), color: 'text-indigo-300' },
-                  { label: 'RSI (14) زیرچارت', active: showRSI, toggle: () => setShowRSI(v => !v), color: 'text-violet-300' }
-                ].map(ind => (
+            <button
+              type="button"
+              onClick={() => setChartEngineMode('TRADINGVIEW_LIVE')}
+              className={`flex items-center gap-1 px-2 py-1 text-[10.5px] rounded-md transition-colors whitespace-nowrap ${
+                chartEngineMode === 'TRADINGVIEW_LIVE'
+                  ? 'bg-indigo-600 text-white font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Globe className="w-3 h-3 shrink-0" />
+              <span>چارت زنده TradingView</span>
+            </button>
+          </div>
+
+          {chartEngineMode === 'LIGHTWEIGHT_PRO' && (
+            <>
+              <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-0.5">
+                <CandlestickChart className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <select
+                  value={chartStyle}
+                  onChange={e => setChartStyle(e.target.value as ChartStyleType)}
+                  title="نوع نمایش چارت قیمت (TradingView Chart Styles)"
+                  className="bg-transparent text-[11px] text-slate-200 font-medium py-0.5 focus:outline-none cursor-pointer"
+                >
+                  <option value="CANDLES" className="bg-slate-900">شمعی</option>
+                  <option value="HOLLOW" className="bg-slate-900">توخالی</option>
+                  <option value="HEIKIN_ASHI" className="bg-slate-900">هیکین‌آشی</option>
+                  <option value="BARS" className="bg-slate-900">میله‌ای OHLC</option>
+                  <option value="LINE" className="bg-slate-900">خطی</option>
+                  <option value="AREA" className="bg-slate-900">مساحتی</option>
+                  <option value="BASELINE" className="bg-slate-900">خط مبنا (Baseline)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5" title="مقیاس محور قیمت TradingView">
+                {(
+                  [
+                    { id: 'LINEAR', label: 'عادی' },
+                    { id: 'LOG', label: 'لگ' },
+                    { id: 'PERCENT', label: '٪' }
+                  ] as const
+                ).map(m => (
                   <button
-                    key={ind.label}
+                    key={m.id}
                     type="button"
-                    onClick={ind.toggle}
-                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg border transition-colors ${
-                      ind.active
-                        ? 'bg-slate-800 border-cyan-500/40 text-white'
-                        : 'bg-slate-950/60 border-transparent text-slate-400 hover:bg-slate-900'
+                    onClick={() => setScaleMode(m.id)}
+                    className={`px-1.5 py-0.5 text-[10px] font-mono rounded-md transition-colors ${
+                      scaleMode === m.id
+                        ? 'bg-indigo-600 text-white font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <span className={`font-mono ${ind.active ? ind.color : ''}`}>{ind.label}</span>
-                    <span className="text-[10px]">{ind.active ? '✓' : ''}</span>
+                    {m.label}
                   </button>
                 ))}
+                <div className="w-px h-3.5 bg-slate-800 mx-0.5" />
+                <button
+                  type="button"
+                  onClick={() => setInvertScale(v => !v)}
+                  title="معکوس کردن محور عمودی قیمت (Invert Scale)"
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded-md transition-colors ${
+                    invertScale
+                      ? 'bg-amber-500/20 text-amber-300 font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <FlipVertical className="w-3 h-3" />
+                  <span>معکوس</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFitContent}
+                  title="تنظیم خودکار نمای کل چارت"
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded-md transition-colors ${
+                    autoScale && viewRange === null && priceZoom === 1
+                      ? 'text-cyan-300 hover:bg-slate-800'
+                      : 'bg-cyan-500/20 text-cyan-200 font-semibold'
+                  }`}
+                >
+                  <Scan className="w-3 h-3" />
+                  <span>تنظیم خودکار</span>
+                </button>
               </div>
-            )}
-          </div>
 
-          {(viewRange !== null || priceZoom !== 1) && (
-            <button
-              type="button"
-              onClick={() => {
-                setViewRange(null);
-                setPriceZoom(1);
-              }}
-              className="px-2 py-1 text-[10.5px] rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/35"
-              title="بازنشانی زوم افقی و عمودی چارت"
-            >
-              بازنشانی زوم
-            </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowIndicatorsMenu(prev => !prev)}
+                  className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded-lg border transition-colors ${
+                    showEMA20 || showEMA50 || showEMA200 || showSMA20 || showBB || showVWAP || showRSI || showMACD
+                      ? 'bg-cyan-500/15 border-cyan-500/45 text-cyan-200 font-semibold'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                  }`}
+                  title="اندیکاتورهای تکنیکال TradingView (EMA, SMA, Bollinger, VWAP, RSI, MACD)"
+                >
+                  <SlidersHorizontal className="w-3 h-3" />
+                  <span>اندیکاتورها</span>
+                </button>
+                {showIndicatorsMenu && (
+                  <div
+                    onClick={e => e.stopPropagation()}
+                    className="absolute right-0 top-full mt-1.5 w-56 bg-[#0b1326] border border-slate-700 rounded-xl p-2 shadow-2xl z-40 space-y-1 text-[11px]"
+                  >
+                    {[
+                      { label: 'EMA (20)', active: showEMA20, toggle: () => setShowEMA20(v => !v), color: 'text-amber-300' },
+                      { label: 'EMA (50)', active: showEMA50, toggle: () => setShowEMA50(v => !v), color: 'text-sky-300' },
+                      { label: 'EMA (200)', active: showEMA200, toggle: () => setShowEMA200(v => !v), color: 'text-pink-300' },
+                      { label: 'SMA (20)', active: showSMA20, toggle: () => setShowSMA20(v => !v), color: 'text-teal-300' },
+                      { label: 'Bollinger (20, 2)', active: showBB, toggle: () => setShowBB(v => !v), color: 'text-indigo-300' },
+                      { label: 'VWAP', active: showVWAP, toggle: () => setShowVWAP(v => !v), color: 'text-orange-300' },
+                      { label: 'RSI (14) زیرچارت', active: showRSI, toggle: () => setShowRSI(v => !v), color: 'text-violet-300' },
+                      { label: 'MACD (12, 26, 9) زیرچارت', active: showMACD, toggle: () => setShowMACD(v => !v), color: 'text-cyan-300' }
+                    ].map(ind => (
+                      <button
+                        key={ind.label}
+                        type="button"
+                        onClick={ind.toggle}
+                        className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg border transition-colors ${
+                          ind.active
+                            ? 'bg-slate-800 border-cyan-500/40 text-white'
+                            : 'bg-slate-950/60 border-transparent text-slate-400 hover:bg-slate-900'
+                        }`}
+                      >
+                        <span className={`font-mono ${ind.active ? ind.color : ''}`}>{ind.label}</span>
+                        <span className="text-[10px]">{ind.active ? '✓' : ''}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
 
@@ -2003,18 +2274,6 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               )}
             </div>
           )}
-
-          <button
-            onClick={() => setSnapToCandleExtreme(!snapToCandleExtreme)}
-            className={`px-2 py-1 text-[11px] rounded-lg border transition-colors ${
-              snapToCandleExtreme
-                ? 'bg-slate-800 border-slate-700 text-cyan-300'
-                : 'bg-slate-900 border-slate-800 text-slate-500'
-            }`}
-            title="آهنربای سقف و کف کندل"
-          >
-            آهنربا
-          </button>
 
           <button
             onClick={() => setRuleGuardEnabled(prev => !prev)}
@@ -2124,26 +2383,41 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
 
               <div
                 className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 shrink-0"
-                title="تغییر اسکیل قیمتی چارت و بروزرسانی PRZ/TMV"
+                title="تغییر اسکیل و زوم چارت TradingView"
               >
                 <button
-                  onClick={() => setPriceZoom(z => Math.max(0.6, Math.round((z - 0.15) * 100) / 100))}
+                  type="button"
+                  onClick={() => {
+                    if (tvEngineAvailable && tvBridgeRef.current?.isReady()) {
+                      tvBridgeRef.current.zoomOut();
+                    } else {
+                      setPriceZoom(z => Math.max(0.6, Math.round((z - 0.15) * 100) / 100));
+                    }
+                  }}
                   className="p-1 text-slate-400 hover:text-white rounded-md transition-colors"
-                  title="بزرگ‌تر کردن دامنه قیمت (Zoom Out)"
+                  title="کوچک‌نمایی (Zoom Out)"
                 >
                   <ZoomOut className="w-3 h-3" />
                 </button>
                 <button
-                  onClick={() => setPriceZoom(1)}
+                  type="button"
+                  onClick={handleFitContent}
                   className="px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-slate-300 hover:text-white whitespace-nowrap"
-                  title="بازنشانی اسکیل قیمتی به حالت استاندارد"
+                  title="بازنشانی زوم و تنظیم خودکار چارت"
                 >
-                  {Math.round(priceZoom * 100)}%
+                  {tvEngineAvailable ? 'خودکار' : `${Math.round(priceZoom * 100)}%`}
                 </button>
                 <button
-                  onClick={() => setPriceZoom(z => Math.min(2.4, Math.round((z + 0.15) * 100) / 100))}
+                  type="button"
+                  onClick={() => {
+                    if (tvEngineAvailable && tvBridgeRef.current?.isReady()) {
+                      tvBridgeRef.current.zoomIn();
+                    } else {
+                      setPriceZoom(z => Math.min(2.4, Math.round((z + 0.15) * 100) / 100));
+                    }
+                  }}
                   className="p-1 text-slate-400 hover:text-white rounded-md transition-colors"
-                  title="تمرکز بیشتر روی اسکیل قیمتی (Zoom In)"
+                  title="بزرگ‌نمایی (Zoom In)"
                 >
                   <ZoomIn className="w-3 h-3" />
                 </button>
@@ -2152,6 +2426,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           )}
 
           <button
+            type="button"
             onClick={() => setShowVolume(!showVolume)}
             className={`px-2 py-1 text-[11px] rounded-lg border transition-colors ${
               showVolume
@@ -2163,6 +2438,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={() => setShowTrendStrength(prev => !prev)}
             title="نمایش یا مخفی کردن آیکون قدرت روند (واگرایی RSI و مومنتوم وزنی حجم) کنار هر رأس موج"
             className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded-lg border transition-colors ${
@@ -2178,10 +2454,21 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           {!hideToolbarLockAndReset && (
             <>
               <button
-                onClick={evaluateCurrentCount}
-                title="ارزیابی موج‌شماری فعلی با قوانین بهاری و نمایش پیشنهادهای اصلاح"
+                type="button"
+                onClick={() => {
+                  if (diagnosticOpen || validatorOpen) {
+                    setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                    setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                    setValidatorHighlightLeg(null);
+                  } else {
+                    evaluateCurrentCount();
+                  }
+                }}
+                title="ارزیابی قوانین بهاری، تشخیص خودکار اصلاح و ممیزی ۴مرحله‌ای ساختار"
                 className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all ${
-                  activeHardFailsCount > 0
+                  diagnosticOpen || validatorOpen
+                    ? 'bg-cyan-600 text-white border-cyan-500'
+                    : activeHardFailsCount > 0
                     ? 'bg-rose-600/20 hover:bg-rose-600/35 border-rose-500/50 text-rose-200'
                     : isUserModifiedCount
                     ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-sm shadow-emerald-950/50'
@@ -2189,7 +2476,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 }`}
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>ارزیابی قوانین</span>
+                <span>ارزیابی و ممیزی</span>
                 {activeHardFailsCount > 0 && (
                   <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9.5px] font-mono tabular-nums">
                     {activeHardFailsCount}
@@ -2198,22 +2485,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               </button>
 
               <button
-                onClick={() => {
-                  setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
-                  setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: !prev[activeScenario.id] }));
-                }}
-                title="اعتبارسنجی سخت‌گیرانه گام‌به‌گام (PatternValidator)"
-                className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors ${
-                  validatorOpen
-                    ? 'bg-cyan-600 text-white border-cyan-500'
-                    : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-cyan-300'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>ممیزی الگو</span>
-              </button>
-
-              <button
+                type="button"
                 onClick={onToggleLock}
                 className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors ${
                   activeScenario.isLocked
@@ -2226,6 +2498,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={onResetToAI}
                 title="بازنشانی به پیشنهاد الگوریتم"
                 className="p-1.5 text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors"
@@ -2234,6 +2507,28 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               </button>
             </>
           )}
+
+          {/* Screenshot & Fullscreen Controls */}
+          <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5 shrink-0">
+            {chartEngineMode === 'LIGHTWEIGHT_PRO' && (
+              <button
+                type="button"
+                onClick={handleDownloadScreenshot}
+                title="ذخیره تصویر PNG از چارت و موج‌شماری"
+                className="p-1 text-slate-400 hover:text-cyan-300 rounded-md transition-colors"
+              >
+                <Camera className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleToggleFullscreen}
+              title={isFullscreen ? 'خروج از تمام‌صفحه' : 'نمایش تمام‌صفحه چارت'}
+              className="p-1 text-slate-400 hover:text-white rounded-md transition-colors"
+            >
+              {isFullscreen ? <Minimize2 className="w-3.5 h-3.5 text-cyan-300" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2294,11 +2589,20 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
         </div>
       )}
 
-      {/* Main Chart Body: Right-aligned Canvas + Left Vertical TradingView Drawing Dock */}
-      <div className="flex-1 flex min-h-[380px] relative overflow-hidden">
-        {/* Left-Edge TradingView Drawing & Measurement Vertical Toolbar */}
+      {/* Main Chart Body: TradingView Live Widget OR Interactive TradingView Canvas + 15-Tool Dock */}
+      {chartEngineMode === 'TRADINGVIEW_LIVE' ? (
+        <div className="flex-1 flex min-h-[340px] lg:min-h-[420px] relative overflow-hidden">
+          <TradingViewAdvancedWidget
+            assetSymbol={assetSymbol}
+            timeframe={timeframe}
+            onBackToInteractiveCanvas={() => setChartEngineMode('LIGHTWEIGHT_PRO')}
+          />
+        </div>
+      ) : (
+      <div className="flex-1 flex min-h-[320px] lg:min-h-[380px] relative overflow-hidden">
+        {/* Left-Edge TradingView Drawing & Measurement Vertical Toolbar (15 Pro Tools) */}
         <div
-          className="w-10 bg-[#0a1020] border-l border-slate-800 py-2 flex flex-col items-center gap-1 shrink-0 z-20"
+          className="w-11 bg-[#0a1020] border-l border-slate-800 py-1.5 flex flex-col items-center gap-1 shrink-0 z-20 overflow-y-auto overflow-x-hidden"
           title="ابزارهای ترسیم و اندازه‌گیری TradingView (کلیک روی چارت)"
         >
           {(
@@ -2306,12 +2610,18 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               { id: 'SELECT', icon: MousePointer2, title: 'انتخاب و جابجایی / پن (Esc)' },
               { id: 'TRENDLINE', icon: TrendingUp, title: 'خط روند (۲ کلیک)' },
               { id: 'RAY', icon: ArrowUpRight, title: 'پرتو روند ممتد (۲ کلیک)' },
+              { id: 'EXTENDED_LINE', icon: ArrowLeftRight, title: 'خط ممتد دوطرفه (۲ کلیک)' },
               { id: 'HLINE', icon: Minus, title: 'خط حمایت / مقاومت افقی (۱ کلیک)' },
               { id: 'VLINE', icon: Columns2, title: 'خط عمودی زمانی (۱ کلیک)' },
-              { id: 'FIB_RETRACE', icon: Layers, title: 'فیبوناچی اصلاحی دلخواه (۲ کلیک)' },
-              { id: 'MEASURE', icon: Ruler, title: 'خط‌کش قیمت و زمان (۲ کلیک)' },
               { id: 'CHANNEL', icon: GitBranch, title: 'کانال موازی (۲ کلیک)' },
-              { id: 'TEXT', icon: Type, title: 'یادداشت قیمتی (۱ کلیک)' }
+              { id: 'PITCHFORK', icon: Compass, title: 'چنگال اندروز Pitchfork (۳ کلیک)' },
+              { id: 'FIB_RETRACE', icon: Layers, title: 'فیبوناچی اصلاحی (۲ کلیک)' },
+              { id: 'FIB_EXTENSION', icon: Sparkles, title: 'فیبوناچی اکستنشن ۳ نقطه‌ای (۳ کلیک)' },
+              { id: 'LONG_POSITION', icon: TrendingUp, title: 'پوزیشن خرید Long R:R (۲ کلیک)' },
+              { id: 'SHORT_POSITION', icon: TrendingDown, title: 'پوزیشن فروش Short R:R (۲ کلیک)' },
+              { id: 'MEASURE', icon: Ruler, title: 'خط‌کش قیمت و زمان (۲ کلیک)' },
+              { id: 'BRUSH', icon: Brush, title: 'براش ترسیم آزاد (چند کلیک + Esc/ثبت)' },
+              { id: 'TEXT', icon: Type, title: 'یادداشت قیمتی قابل ویرایش (۱ کلیک)' }
             ] as const
           ).map(tool => {
             const Icon = tool.icon;
@@ -2322,12 +2632,16 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 type="button"
                 onClick={() => {
                   setDrawingTool(tool.id);
-                  setPendingDrawPoint(null);
+                  setPendingDrawPoints([]);
                 }}
                 title={tool.title}
-                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
                   active
                     ? 'bg-cyan-600 text-white shadow-sm'
+                    : tool.id === 'LONG_POSITION'
+                    ? 'text-emerald-400/80 hover:text-emerald-300 hover:bg-slate-800/80'
+                    : tool.id === 'SHORT_POSITION'
+                    ? 'text-rose-400/80 hover:text-rose-300 hover:bg-slate-800/80'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
                 }`}
               >
@@ -2336,38 +2650,141 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             );
           })}
 
-          <div className="w-5 h-px bg-slate-800 my-1" />
+          <div className="w-5 h-px bg-slate-800 my-0.5 shrink-0" />
+
+          {/* Color Cycler */}
+          <button
+            type="button"
+            onClick={() => {
+              const palette = ['#38bdf8', '#fbbf24', '#10b981', '#f43f5e', '#c084fc', '#f8fafc'];
+              const idx = palette.indexOf(drawColor);
+              setDrawColor(palette[(idx + 1) % palette.length]);
+            }}
+            title="تغییر رنگ ابزار ترسیم"
+            className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center hover:bg-slate-800/80"
+          >
+            <span
+              className="w-3.5 h-3.5 rounded-full border border-white/60"
+              style={{ backgroundColor: drawColor }}
+            />
+          </button>
+
+          {/* Magnet Toggle */}
+          <button
+            type="button"
+            onClick={() => setSnapToCandleExtreme(v => !v)}
+            title="آهنربای اسنپ روی High/Low کندل"
+            className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
+              snapToCandleExtreme
+                ? 'bg-cyan-500/20 text-cyan-300'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+            }`}
+          >
+            <Magnet className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Stay in Draw Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setStayInDrawMode(v => !v)}
+            title="ماندن پیوسته در ابزار ترسیم پس از ثبت"
+            className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
+              stayInDrawMode
+                ? 'bg-indigo-500/25 text-indigo-300'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+            }`}
+          >
+            <Pin className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Hide All Drawings Toggle */}
+          <button
+            type="button"
+            onClick={() => setHideDrawings(v => !v)}
+            title={hideDrawings ? 'نمایش مجدد ترسیم‌ها' : 'مخفی کردن تمام ترسیم‌ها'}
+            className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
+              hideDrawings
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+            }`}
+          >
+            {hideDrawings ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+
+          {/* Lock Drawings Toggle */}
+          <button
+            type="button"
+            onClick={() => setLockDrawings(v => !v)}
+            title={lockDrawings ? 'باز کردن قفل ترسیم‌ها' : 'قفل کردن ترسیم‌ها'}
+            className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center transition-colors ${
+              lockDrawings
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+            }`}
+          >
+            {lockDrawings ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+          </button>
+
+          <div className="w-5 h-px bg-slate-800 my-0.5 shrink-0" />
 
           <button
             type="button"
-            disabled={drawings.length === 0 && !pendingDrawPoint}
+            disabled={drawings.length === 0 && pendingDrawPoints.length === 0}
             onClick={() => {
-              if (pendingDrawPoint) {
-                setPendingDrawPoint(null);
-              } else {
+              if (pendingDrawPoints.length > 0) {
+                setPendingDrawPoints(prev => prev.slice(0, -1));
+              } else if (drawings.length > 0) {
+                const popped = drawings[drawings.length - 1];
                 setDrawings(prev => prev.slice(0, -1));
+                setRedoStack(prev => [...prev, popped]);
               }
             }}
-            title="واگرد آخرین ترسیم"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/80 disabled:opacity-30"
+            title="واگرد آخرین ترسیم (Undo)"
+            className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/80 disabled:opacity-30"
           >
             <Undo2 className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
-            disabled={drawings.length === 0 && !pendingDrawPoint}
+            disabled={redoStack.length === 0}
+            onClick={() => {
+              if (redoStack.length === 0) return;
+              const restored = redoStack[redoStack.length - 1];
+              setRedoStack(prev => prev.slice(0, -1));
+              setDrawings(prev => [...prev, restored]);
+            }}
+            title="بازانجام ترسیم (Redo)"
+            className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/80 disabled:opacity-30"
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={drawings.length === 0 && pendingDrawPoints.length === 0}
             onClick={() => {
               setDrawings([]);
-              setPendingDrawPoint(null);
+              setRedoStack([]);
+              setPendingDrawPoints([]);
+              setEditingNoteDraft(null);
             }}
             title="پاک کردن تمام ترسیم‌ها"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 disabled:opacity-30"
+            className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 disabled:opacity-30"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {/* Main Chart Canvas */}
+        {/* Main Chart Canvas: TradingView Lightweight Charts HTML5 Engine + Interactive Elliott Overlay */}
+        {(() => {
+          const svgPassThrough =
+            tvEngineAvailable &&
+            drawingTool === 'SELECT' &&
+            interactionMode === 'EDIT' &&
+            draggingVertexIndex === null &&
+            !draggingBottom &&
+            !draggingTmvEdge;
+
+          return (
         <div
           ref={containerRef}
           onWheel={handleWheel}
@@ -2386,7 +2803,35 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               : 'cursor-default'
           }`}
         >
-          <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} className="w-full h-full block">
+          <TradingViewLightweightCanvas
+            ref={tvBridgeRef}
+            candles={candles}
+            timeframe={timeframe}
+            assetSymbol={assetSymbol}
+            chartStyle={chartStyle}
+            scaleMode={scaleMode}
+            invertScale={invertScale}
+            magnetMode={snapToCandleExtreme}
+            autoScale={autoScale}
+            showVolume={showVolume}
+            showEMA20={showEMA20}
+            showEMA50={showEMA50}
+            showEMA200={showEMA200}
+            showSMA20={showSMA20}
+            showBB={showBB}
+            showVWAP={showVWAP}
+            showRSI={showRSI}
+            showMACD={showMACD}
+            lockNavigation={drawingTool !== 'SELECT' || interactionMode !== 'EDIT' || draggingVertexIndex !== null || draggingBottom || draggingTmvEdge}
+            onViewportChange={() => setTvSyncTick(t => t + 1)}
+            onEngineAvailabilityChange={available => setTvEngineAvailable(available)}
+            onCrosshairChange={info => setTvCrosshairInfo(info)}
+          />
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${width} ${height}`}
+            className={`w-full h-full block relative z-[2] ${svgPassThrough ? 'pointer-events-none' : 'pointer-events-auto'}`}
+          >
           <defs>
             <linearGradient id="bullVol" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
@@ -2542,254 +2987,259 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
 
-          {/* Background Grid Lines & Prices */}
-          {gridLines.map((line, idx) => (
-            <g key={`grid-${idx}`}>
-              <line
-                x1={padding.left}
-                y1={line.y}
-                x2={width - padding.right}
-                y2={line.y}
-                stroke="#17223b"
-                strokeDasharray="4 4"
-                strokeWidth="1"
-              />
-              <text
-                x={width - padding.right + 8}
-                y={line.y + 3.5}
-                fill="#64748b"
-                fontSize="10"
-                fontFamily="JetBrains Mono, monospace"
-              >
-                {line.label}
-              </text>
-            </g>
-          ))}
-
-          {/* Volume separator & Bars */}
-          {showVolume && (
+          {!tvEngineAvailable && (
             <>
-              <line
-                x1={padding.left}
-                y1={height - bottomReserved}
-                x2={width - padding.right}
-                y2={height - bottomReserved}
-                stroke="#1e293b"
-                strokeWidth="1"
-              />
-              {displayCandles.slice(visStart, visEnd + 1).map((candle, offset) => {
-                const i = visStart + offset;
-                const x = getX(i);
-                const isUp = candle.close >= candle.open;
-                const barWidth = Math.max(2, ((width - padding.left - padding.right) / Math.max(1, visSpan)) * 0.62);
-                const vHeight = (candle.volume / maxVolume) * (volumeHeight - 8);
-                const y = height - padding.bottom - rsiHeight - vHeight;
-                return (
-                  <rect
-                    key={`vol-${i}`}
-                    x={x - barWidth / 2}
-                    y={y}
-                    width={barWidth}
-                    height={vHeight}
-                    fill={isUp ? 'url(#bullVol)' : 'url(#bearVol)'}
-                    opacity="0.85"
+              {/* Background Grid Lines & Prices */}
+              {gridLines.map((line, idx) => (
+                <g key={`grid-${idx}`}>
+                  <line
+                    x1={padding.left}
+                    y1={line.y}
+                    x2={width - padding.right}
+                    y2={line.y}
+                    stroke="#17223b"
+                    strokeDasharray="4 4"
+                    strokeWidth="1"
                   />
-                );
-              })}
-            </>
-          )}
-
-          {/* Price Series Rendering by Active TradingView Chart Style */}
-          <g clipPath="url(#chartPlotClip)">
-            {(chartStyle === 'LINE' || chartStyle === 'AREA') &&
-              displayCandles.length >= 2 &&
-              (() => {
-                const pts = displayCandles
-                  .slice(visStart, visEnd + 1)
-                  .map((c, offset) => `${getX(visStart + offset).toFixed(1)},${getY(c.close).toFixed(1)}`);
-                const firstX = getX(visStart);
-                const lastX = getX(visEnd);
-                const baseY = height - bottomReserved;
-                return (
-                  <>
-                    {chartStyle === 'AREA' && (
-                      <polygon
-                        points={`${firstX},${baseY} ${pts.join(' ')} ${lastX},${baseY}`}
-                        fill="url(#areaChartFill)"
-                      />
-                    )}
-                    <polyline
-                      points={pts.join(' ')}
-                      fill="none"
-                      stroke="#22d3ee"
-                      strokeWidth="2"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                    />
-                  </>
-                );
-              })()}
-
-            {chartStyle !== 'LINE' &&
-              chartStyle !== 'AREA' &&
-              displayCandles.slice(visStart, visEnd + 1).map((candle, offset) => {
-                const i = visStart + offset;
-                const x = getX(i);
-                const openY = getY(candle.open);
-                const closeY = getY(candle.close);
-                const highY = getY(candle.high);
-                const lowY = getY(candle.low);
-                const isUp = candle.close >= candle.open;
-                const bodyColor = isUp ? '#10b981' : '#f43f5e';
-                const bodyTop = Math.min(openY, closeY);
-                const bodyHeight = Math.max(1.5, Math.abs(openY - closeY));
-                const barWidth = Math.max(2.5, ((width - padding.left - padding.right) / Math.max(1, visSpan)) * 0.62);
-                const slotWidth = Math.max(6, (width - padding.left - padding.right) / Math.max(1, visSpan));
-                const isStartCandle = Boolean(absoluteBottom && absoluteBottom.candleIndex === i);
-                const hollowFill = chartStyle === 'HOLLOW' && isUp ? '#080d1a' : bodyColor;
-
-                return (
-                  <g
-                    key={`candle-${i}`}
-                    onClick={
-                      onUpdateAbsoluteBottom && drawingTool === 'SELECT'
-                        ? e => {
-                            if (dragMovedRef.current) return;
-                            e.stopPropagation();
-                            onUpdateAbsoluteBottom({
-                              label: '0 (کف مطلق)',
-                              candleIndex: i,
-                              price: candles[i]?.low ?? candle.low,
-                              timestamp: candle.timestamp,
-                              isConfirmed: true
-                            });
-                          }
-                        : undefined
-                    }
-                    className={onUpdateAbsoluteBottom && drawingTool === 'SELECT' ? 'cursor-pointer' : undefined}
+                  <text
+                    x={width - padding.right + 8}
+                    y={line.y + 3.5}
+                    fill="#64748b"
+                    fontSize="10"
+                    fontFamily="JetBrains Mono, monospace"
                   >
-                    {isStartCandle && (
+                    {line.label}
+                  </text>
+                </g>
+              ))}
+
+              {/* Volume separator & Bars */}
+              {showVolume && (
+                <>
+                  <line
+                    x1={padding.left}
+                    y1={height - bottomReserved}
+                    x2={width - padding.right}
+                    y2={height - bottomReserved}
+                    stroke="#1e293b"
+                    strokeWidth="1"
+                  />
+                  {displayCandles.slice(visStart, visEnd + 1).map((candle, offset) => {
+                    const i = visStart + offset;
+                    const x = getX(i);
+                    const isUp = candle.close >= candle.open;
+                    const barWidth = Math.max(2, ((width - padding.left - padding.right) / Math.max(1, visSpan)) * 0.62);
+                    const vHeight = (candle.volume / maxVolume) * (volumeHeight - 8);
+                    const y = height - padding.bottom - rsiHeight - vHeight;
+                    return (
                       <rect
-                        x={x - barWidth / 2 - 3}
-                        y={highY - 3}
-                        width={barWidth + 6}
-                        height={Math.max(8, lowY - highY + 6)}
-                        rx="3"
-                        fill="#f59e0b"
-                        fillOpacity="0.16"
-                        stroke="#f59e0b"
-                        strokeWidth="1.2"
+                        key={`vol-${i}`}
+                        x={x - barWidth / 2}
+                        y={y}
+                        width={barWidth}
+                        height={vHeight}
+                        fill={isUp ? 'url(#bullVol)' : 'url(#bearVol)'}
+                        opacity="0.85"
                       />
-                    )}
-                    {chartStyle === 'BARS' ? (
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Price Series Rendering by Active TradingView Chart Style */}
+              <g clipPath="url(#chartPlotClip)">
+                {(chartStyle === 'LINE' || chartStyle === 'AREA' || chartStyle === 'BASELINE') &&
+                  displayCandles.length >= 2 &&
+                  (() => {
+                    const pts = displayCandles
+                      .slice(visStart, visEnd + 1)
+                      .map((c, offset) => `${getX(visStart + offset).toFixed(1)},${getY(c.close).toFixed(1)}`);
+                    const firstX = getX(visStart);
+                    const lastX = getX(visEnd);
+                    const baseY = height - bottomReserved;
+                    return (
                       <>
-                        <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.5" />
-                        <line x1={x - barWidth * 0.5} y1={openY} x2={x} y2={openY} stroke={bodyColor} strokeWidth="1.5" />
-                        <line x1={x} y1={closeY} x2={x + barWidth * 0.5} y2={closeY} stroke={bodyColor} strokeWidth="1.5" />
-                      </>
-                    ) : (
-                      <>
-                        <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.15" />
-                        <rect
-                          x={x - barWidth / 2}
-                          y={bodyTop}
-                          width={barWidth}
-                          height={bodyHeight}
-                          fill={hollowFill}
-                          stroke={bodyColor}
-                          strokeWidth={chartStyle === 'HOLLOW' && isUp ? '1.2' : '0.4'}
-                          rx="0.8"
+                        {chartStyle === 'AREA' && (
+                          <polygon
+                            points={`${firstX},${baseY} ${pts.join(' ')} ${lastX},${baseY}`}
+                            fill="url(#areaChartFill)"
+                          />
+                        )}
+                        <polyline
+                          points={pts.join(' ')}
+                          fill="none"
+                          stroke="#22d3ee"
+                          strokeWidth="2"
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
                         />
                       </>
-                    )}
-                    {onUpdateAbsoluteBottom && drawingTool === 'SELECT' && (
-                      <rect
-                        x={x - slotWidth / 2}
-                        y={padding.top}
-                        width={slotWidth}
-                        height={Math.max(20, height - padding.top - bottomReserved)}
-                        fill="transparent"
-                      />
-                    )}
-                  </g>
-                );
-              })}
+                    );
+                  })()}
 
-            {/* Technical Indicators Overlay: Bollinger Bands & EMAs */}
-            {showBB &&
-              bbValues.length > 0 &&
-              (() => {
-                const upperPts: string[] = [];
-                const midPts: string[] = [];
-                const lowerPts: string[] = [];
-                for (let i = visStart; i <= visEnd; i++) {
-                  const pt = bbValues[i];
-                  if (!pt) continue;
-                  const x = getX(i).toFixed(1);
-                  upperPts.push(`${x},${getY(pt.upper).toFixed(1)}`);
-                  midPts.push(`${x},${getY(pt.mid).toFixed(1)}`);
-                  lowerPts.push(`${x},${getY(pt.lower).toFixed(1)}`);
-                }
-                if (upperPts.length < 2) return null;
-                return (
-                  <g pointerEvents="none" opacity="0.82">
-                    <polyline points={upperPts.join(' ')} fill="none" stroke="#818cf8" strokeWidth="1.1" />
-                    <polyline points={midPts.join(' ')} fill="none" stroke="#6366f1" strokeWidth="1" strokeDasharray="3 3" />
-                    <polyline points={lowerPts.join(' ')} fill="none" stroke="#818cf8" strokeWidth="1.1" />
-                  </g>
-                );
-              })()}
+                {chartStyle !== 'LINE' &&
+                  chartStyle !== 'AREA' &&
+                  chartStyle !== 'BASELINE' &&
+                  displayCandles.slice(visStart, visEnd + 1).map((candle, offset) => {
+                    const i = visStart + offset;
+                    const x = getX(i);
+                    const openY = getY(candle.open);
+                    const closeY = getY(candle.close);
+                    const highY = getY(candle.high);
+                    const lowY = getY(candle.low);
+                    const isUp = candle.close >= candle.open;
+                    const bodyColor = isUp ? '#10b981' : '#f43f5e';
+                    const bodyTop = Math.min(openY, closeY);
+                    const bodyHeight = Math.max(1.5, Math.abs(openY - closeY));
+                    const barWidth = Math.max(2.5, ((width - padding.left - padding.right) / Math.max(1, visSpan)) * 0.62);
+                    const slotWidth = Math.max(6, (width - padding.left - padding.right) / Math.max(1, visSpan));
+                    const isStartCandle = Boolean(absoluteBottom && absoluteBottom.candleIndex === i);
+                    const hollowFill = chartStyle === 'HOLLOW' && isUp ? '#080d1a' : bodyColor;
 
-            {showEMA20 &&
-              ema20Values.length > 0 &&
-              (() => {
-                const pts: string[] = [];
-                for (let i = visStart; i <= visEnd; i++) {
-                  const v = ema20Values[i];
-                  if (v !== null && v !== undefined) pts.push(`${getX(i).toFixed(1)},${getY(v).toFixed(1)}`);
-                }
-                if (pts.length < 2) return null;
-                return <polyline points={pts.join(' ')} fill="none" stroke="#fbbf24" strokeWidth="1.4" pointerEvents="none" />;
-              })()}
+                    return (
+                      <g
+                        key={`candle-${i}`}
+                        onClick={
+                          onUpdateAbsoluteBottom && drawingTool === 'SELECT'
+                            ? e => {
+                                if (dragMovedRef.current) return;
+                                e.stopPropagation();
+                                onUpdateAbsoluteBottom({
+                                  label: '0 (کف مطلق)',
+                                  candleIndex: i,
+                                  price: candles[i]?.low ?? candle.low,
+                                  timestamp: candle.timestamp,
+                                  isConfirmed: true
+                                });
+                              }
+                            : undefined
+                        }
+                        className={onUpdateAbsoluteBottom && drawingTool === 'SELECT' ? 'cursor-pointer' : undefined}
+                      >
+                        {isStartCandle && (
+                          <rect
+                            x={x - barWidth / 2 - 3}
+                            y={highY - 3}
+                            width={barWidth + 6}
+                            height={Math.max(8, lowY - highY + 6)}
+                            rx="3"
+                            fill="#f59e0b"
+                            fillOpacity="0.16"
+                            stroke="#f59e0b"
+                            strokeWidth="1.2"
+                          />
+                        )}
+                        {chartStyle === 'BARS' ? (
+                          <>
+                            <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.5" />
+                            <line x1={x - barWidth * 0.5} y1={openY} x2={x} y2={openY} stroke={bodyColor} strokeWidth="1.5" />
+                            <line x1={x} y1={closeY} x2={x + barWidth * 0.5} y2={closeY} stroke={bodyColor} strokeWidth="1.5" />
+                          </>
+                        ) : (
+                          <>
+                            <line x1={x} y1={highY} x2={x} y2={lowY} stroke={bodyColor} strokeWidth="1.15" />
+                            <rect
+                              x={x - barWidth / 2}
+                              y={bodyTop}
+                              width={barWidth}
+                              height={bodyHeight}
+                              fill={hollowFill}
+                              stroke={bodyColor}
+                              strokeWidth={chartStyle === 'HOLLOW' && isUp ? '1.2' : '0.4'}
+                              rx="0.8"
+                            />
+                          </>
+                        )}
+                        {onUpdateAbsoluteBottom && drawingTool === 'SELECT' && (
+                          <rect
+                            x={x - slotWidth / 2}
+                            y={padding.top}
+                            width={slotWidth}
+                            height={Math.max(20, height - padding.top - bottomReserved)}
+                            fill="transparent"
+                          />
+                        )}
+                      </g>
+                    );
+                  })}
 
-            {showEMA50 &&
-              ema50Values.length > 0 &&
-              (() => {
-                const pts: string[] = [];
-                for (let i = visStart; i <= visEnd; i++) {
-                  const v = ema50Values[i];
-                  if (v !== null && v !== undefined) pts.push(`${getX(i).toFixed(1)},${getY(v).toFixed(1)}`);
-                }
-                if (pts.length < 2) return null;
-                return <polyline points={pts.join(' ')} fill="none" stroke="#38bdf8" strokeWidth="1.4" pointerEvents="none" />;
-              })()}
-          </g>
+                {/* Technical Indicators Overlay: Bollinger Bands & EMAs */}
+                {showBB &&
+                  bbValues.length > 0 &&
+                  (() => {
+                    const upperPts: string[] = [];
+                    const midPts: string[] = [];
+                    const lowerPts: string[] = [];
+                    for (let i = visStart; i <= visEnd; i++) {
+                      const pt = bbValues[i];
+                      if (!pt) continue;
+                      const x = getX(i).toFixed(1);
+                      upperPts.push(`${x},${getY(pt.upper).toFixed(1)}`);
+                      midPts.push(`${x},${getY(pt.mid).toFixed(1)}`);
+                      lowerPts.push(`${x},${getY(pt.lower).toFixed(1)}`);
+                    }
+                    if (upperPts.length < 2) return null;
+                    return (
+                      <g pointerEvents="none" opacity="0.82">
+                        <polyline points={upperPts.join(' ')} fill="none" stroke="#818cf8" strokeWidth="1.1" />
+                        <polyline points={midPts.join(' ')} fill="none" stroke="#6366f1" strokeWidth="1" strokeDasharray="3 3" />
+                        <polyline points={lowerPts.join(' ')} fill="none" stroke="#818cf8" strokeWidth="1.1" />
+                      </g>
+                    );
+                  })()}
 
-          {/* Current Price Line */}
-          {lastPriceY >= padding.top && lastPriceY <= height - bottomReserved && (
-            <g>
-              <line
-                x1={padding.left}
-                y1={lastPriceY}
-                x2={width - padding.right}
-                y2={lastPriceY}
-                stroke="#10b981"
-                strokeWidth="1"
-                strokeDasharray="2 2"
-                opacity="0.7"
-              />
-              <rect x={width - padding.right + 2} y={lastPriceY - 9} width="80" height="18" rx="4" fill="#10b981" />
-              <text
-                x={width - padding.right + 6}
-                y={lastPriceY + 3.5}
-                fill="#022c22"
-                fontSize="10"
-                fontWeight="bold"
-                fontFamily="JetBrains Mono, monospace"
-              >
-                {formatScalePrice(lastPrice, scaleMode, percentBaseline)}
-              </text>
-            </g>
+                {showEMA20 &&
+                  ema20Values.length > 0 &&
+                  (() => {
+                    const pts: string[] = [];
+                    for (let i = visStart; i <= visEnd; i++) {
+                      const v = ema20Values[i];
+                      if (v !== null && v !== undefined) pts.push(`${getX(i).toFixed(1)},${getY(v).toFixed(1)}`);
+                    }
+                    if (pts.length < 2) return null;
+                    return <polyline points={pts.join(' ')} fill="none" stroke="#fbbf24" strokeWidth="1.4" pointerEvents="none" />;
+                  })()}
+
+                {showEMA50 &&
+                  ema50Values.length > 0 &&
+                  (() => {
+                    const pts: string[] = [];
+                    for (let i = visStart; i <= visEnd; i++) {
+                      const v = ema50Values[i];
+                      if (v !== null && v !== undefined) pts.push(`${getX(i).toFixed(1)},${getY(v).toFixed(1)}`);
+                    }
+                    if (pts.length < 2) return null;
+                    return <polyline points={pts.join(' ')} fill="none" stroke="#38bdf8" strokeWidth="1.4" pointerEvents="none" />;
+                  })()}
+              </g>
+
+              {/* Current Price Line */}
+              {lastPriceY >= padding.top && lastPriceY <= height - bottomReserved && (
+                <g>
+                  <line
+                    x1={padding.left}
+                    y1={lastPriceY}
+                    x2={width - padding.right}
+                    y2={lastPriceY}
+                    stroke="#10b981"
+                    strokeWidth="1"
+                    strokeDasharray="2 2"
+                    opacity="0.7"
+                  />
+                  <rect x={width - padding.right + 2} y={lastPriceY - 9} width="80" height="18" rx="4" fill="#10b981" />
+                  <text
+                    x={width - padding.right + 6}
+                    y={lastPriceY + 3.5}
+                    fill="#022c22"
+                    fontSize="10"
+                    fontWeight="bold"
+                    fontFamily="JetBrains Mono, monospace"
+                  >
+                    {formatScalePrice(lastPrice, scaleMode, percentBaseline)}
+                  </text>
+                </g>
+              )}
+            </>
           )}
 
           {/* Unified Horizontal Overlays (PRZ Bounding Box, Width-Adjustable TMV Target Ribbons, Fib Extension Layers, Targets) with Shared Zero-Overlap Collision Solver */}
@@ -2886,7 +3336,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                         onMouseLeave={() => setHoveredZoneId(prev => (prev === prz.id ? null : prev))}
                         className="cursor-pointer"
                         opacity={hoveredZoneId && !isHovered ? 0.55 : prz.isPrimary ? 1 : 0.72}
-                        style={{ transition: 'opacity 160ms ease' }}
+                        style={{ transition: 'opacity 160ms ease', pointerEvents: 'auto' }}
                       >
                         {/* Transparent hit-target aligned to Glassmorphic PRZ Horizontal Container */}
                         <rect
@@ -3020,7 +3470,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                         onMouseEnter={() => setHoveredZoneId(tmv.id)}
                         onMouseLeave={() => setHoveredZoneId(prev => (prev === tmv.id ? null : prev))}
                         opacity={hoveredZoneId && !isHovered ? 0.58 : 1}
-                        style={{ transition: 'opacity 150ms ease' }}
+                        style={{ transition: 'opacity 150ms ease', pointerEvents: 'auto' }}
                       >
                         {showBand && (
                           <g>
@@ -3098,6 +3548,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                             {/* Compact Centered Left-Border Pill Grip for Horizontal Width Adjustment (↔) */}
                             <g
                               className="cursor-ew-resize"
+                              style={{ pointerEvents: 'auto' }}
                               onMouseDown={e => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -3554,7 +4005,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                               onMouseLeave={() => setHoveredExtLayerId(null)}
                               className="cursor-pointer"
                               opacity={hoveredExtLayerId && !isHovered ? 0.36 : 1}
-                              style={{ transition: 'opacity 140ms ease' }}
+                              style={{ transition: 'opacity 140ms ease', pointerEvents: 'auto' }}
                             >
                               <rect
                                 x={startX}
@@ -3909,6 +4360,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                     e.stopPropagation();
                     triggerDrillDown(legIdx);
                   }}
+                  style={{ pointerEvents: 'auto' }}
                   className={onDoubleClickWaveLeg && interactionMode === 'EDIT' ? 'cursor-pointer' : ''}
                 >
                   {(highlightedLegIndex === legIdx || validatorHighlightLeg === legIdx) && (
@@ -4130,6 +4582,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
               <g
                 key={`vertex-${idx}`}
                 className={activeScenario.isLocked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'}
+                style={{ pointerEvents: 'auto' }}
                 onMouseEnter={() => setHoveredVertex(idx)}
                 onMouseLeave={() => setHoveredVertex(null)}
                 onMouseDown={e => handleVertexMouseDown(idx, e)}
@@ -4442,6 +4895,7 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           {absoluteBottom && (
             <g
               onMouseDown={handleBottomMouseDown}
+              style={{ pointerEvents: 'auto' }}
               className="cursor-grab active:cursor-grabbing"
             >
               <circle
@@ -4468,256 +4922,410 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             </g>
           )}
 
-          {/* TradingView User Drawings + Live Two-Click Preview */}
-          <g clipPath="url(#chartPlotClip)">
-            {drawings.map(d => {
-              const p1 = d.points[0];
-              const p2 = d.points[1];
-              if (!p1) return null;
-              const x1 = getX(p1.candleIndex);
-              const y1 = getY(p1.price);
+          {/* TradingView User Drawings (15 Pro Tools) + Live Multi-Point Preview */}
+          {!hideDrawings && (
+            <g clipPath="url(#chartPlotClip)">
+              {drawings.map(d => {
+                if (d.visible === false) return null;
+                const p1 = d.points[0];
+                const p2 = d.points[1];
+                const p3 = d.points[2];
+                if (!p1) return null;
+                const x1 = getX(p1.candleIndex);
+                const y1 = getY(p1.price);
 
-              if (d.kind === 'HLINE') {
+                if (d.kind === 'HLINE') {
+                  return (
+                    <g key={d.id}>
+                      <line x1={padding.left} y1={y1} x2={width - padding.right} y2={y1} stroke={d.color} strokeWidth="1.4" strokeDasharray="5 3" />
+                      <rect x={padding.left + 6} y={y1 - 10} width="72" height="16" rx="4" fill="#080d1a" stroke={d.color} strokeWidth="0.9" />
+                      <text x={padding.left + 12} y={y1 + 1.5} fill={d.color} fontSize="8.5" fontFamily="JetBrains Mono, monospace">
+                        {formatScalePrice(p1.price, scaleMode, percentBaseline)}
+                      </text>
+                    </g>
+                  );
+                }
+                if (d.kind === 'VLINE') {
+                  return (
+                    <g key={d.id}>
+                      <line x1={x1} y1={padding.top} x2={x1} y2={height - bottomReserved} stroke={d.color} strokeWidth="1.3" strokeDasharray="4 3" />
+                    </g>
+                  );
+                }
+                if (d.kind === 'TEXT') {
+                  const textVal = d.label || 'یادداشت';
+                  const boxW = Math.max(96, Math.min(220, textVal.length * 6.5 + 18));
+                  return (
+                    <g
+                      key={d.id}
+                      style={{ pointerEvents: 'auto' }}
+                      className="cursor-pointer"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setEditingNoteDraft({ id: d.id, text: textVal });
+                      }}
+                    >
+                      <circle cx={x1} cy={y1} r="3.5" fill={d.color} />
+                      <rect x={x1 + 6} y={y1 - 11} width={boxW} height="20" rx="4" fill="#080d1a" stroke={d.color} strokeWidth="1" />
+                      <text x={x1 + 12} y={y1 + 2.5} fill="#e2e8f0" fontSize="9.5" fontWeight="600">
+                        {textVal}
+                      </text>
+                    </g>
+                  );
+                }
+                if (d.kind === 'BRUSH') {
+                  if (d.points.length < 2) return null;
+                  const pts = d.points.map(pt => `${getX(pt.candleIndex).toFixed(1)},${getY(pt.price).toFixed(1)}`).join(' ');
+                  return (
+                    <g key={d.id} pointerEvents="none">
+                      <polyline points={pts} fill="none" stroke={d.color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+                    </g>
+                  );
+                }
+                if (!p2) return null;
+                const x2 = getX(p2.candleIndex);
+                const y2 = getY(p2.price);
+
+                if (d.kind === 'TRENDLINE') {
+                  return (
+                    <g key={d.id}>
+                      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.8" />
+                      <circle cx={x1} cy={y1} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
+                      <circle cx={x2} cy={y2} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
+                    </g>
+                  );
+                }
+                if (d.kind === 'RAY') {
+                  const dx = x2 - x1;
+                  const dy = y2 - y1;
+                  const endX = width - padding.right;
+                  const scale = Math.abs(dx) > 1 ? Math.max(1, (endX - x1) / dx) : 1;
+                  const rx2 = x1 + dx * scale;
+                  const ry2 = y1 + dy * scale;
+                  return (
+                    <g key={d.id}>
+                      <line x1={x1} y1={y1} x2={rx2} y2={ry2} stroke={d.color} strokeWidth="1.7" />
+                      <circle cx={x1} cy={y1} r="3.2" fill={d.color} />
+                      <circle cx={x2} cy={y2} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
+                    </g>
+                  );
+                }
+                if (d.kind === 'EXTENDED_LINE') {
+                  const dx = x2 - x1;
+                  const dy = y2 - y1;
+                  const startX = padding.left;
+                  const endX = width - padding.right;
+                  if (Math.abs(dx) < 0.5) {
+                    return <line key={d.id} x1={x1} y1={padding.top} x2={x1} y2={height - bottomReserved} stroke={d.color} strokeWidth="1.6" />;
+                  }
+                  const slope = dy / dx;
+                  const ly1 = y1 + (startX - x1) * slope;
+                  const ly2 = y1 + (endX - x1) * slope;
+                  return (
+                    <g key={d.id}>
+                      <line x1={startX} y1={ly1} x2={endX} y2={ly2} stroke={d.color} strokeWidth="1.6" />
+                      <circle cx={x1} cy={y1} r="3" fill="#080d1a" stroke={d.color} strokeWidth="1.3" />
+                      <circle cx={x2} cy={y2} r="3" fill="#080d1a" stroke={d.color} strokeWidth="1.3" />
+                    </g>
+                  );
+                }
+                if (d.kind === 'CHANNEL') {
+                  const offY = 38;
+                  return (
+                    <g key={d.id}>
+                      <polygon points={`${x1},${y1} ${x2},${y2} ${x2},${y2 + offY} ${x1},${y1 + offY}`} fill={d.color} fillOpacity="0.08" />
+                      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.6" />
+                      <line x1={x1} y1={y1 + offY} x2={x2} y2={y2 + offY} stroke={d.color} strokeWidth="1.4" strokeDasharray="4 3" />
+                    </g>
+                  );
+                }
+                if (d.kind === 'PITCHFORK' && p3) {
+                  const x3 = getX(p3.candleIndex);
+                  const y3 = getY(p3.price);
+                  const midX = (x2 + x3) / 2;
+                  const midY = (y2 + y3) / 2;
+                  const dx = midX - x1;
+                  const dy = midY - y1;
+                  const endX = width - padding.right;
+                  const scale = Math.abs(dx) > 1 ? Math.max(1.5, (endX - x1) / dx) : 2;
+                  const exM = x1 + dx * scale;
+                  const eyM = y1 + dy * scale;
+                  const ex2 = x2 + dx * scale;
+                  const ey2 = y2 + dy * scale;
+                  const ex3 = x3 + dx * scale;
+                  const ey3 = y3 + dy * scale;
+                  return (
+                    <g key={d.id} pointerEvents="none">
+                      <polygon points={`${x2},${y2} ${ex2},${ey2} ${ex3},${ey3} ${x3},${y3}`} fill={d.color} fillOpacity="0.06" />
+                      <line x1={x1} y1={y1} x2={exM} y2={eyM} stroke={d.color} strokeWidth="1.7" />
+                      <line x1={x2} y1={y2} x2={ex2} y2={ey2} stroke={d.color} strokeWidth="1.3" strokeDasharray="4 3" />
+                      <line x1={x3} y1={y3} x2={ex3} y2={ey3} stroke={d.color} strokeWidth="1.3" strokeDasharray="4 3" />
+                      <line x1={x2} y1={y2} x2={x3} y2={y3} stroke={d.color} strokeWidth="1" opacity="0.6" />
+                      <circle cx={x1} cy={y1} r="3" fill={d.color} />
+                      <circle cx={x2} cy={y2} r="3" fill={d.color} />
+                      <circle cx={x3} cy={y3} r="3" fill={d.color} />
+                    </g>
+                  );
+                }
+                if (d.kind === 'FIB_RETRACE') {
+                  const ratios = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+                  const leftX = Math.min(x1, x2);
+                  const rightX = Math.max(x1, x2);
+                  return (
+                    <g key={d.id}>
+                      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.1" strokeDasharray="3 3" opacity="0.7" />
+                      {ratios.map(r => {
+                        const fp = p1.price + (p2.price - p1.price) * r;
+                        const fy = getY(fp);
+                        return (
+                          <g key={r}>
+                            <line x1={leftX} y1={fy} x2={rightX} y2={fy} stroke={d.color} strokeWidth={r === 0.5 || r === 0.618 ? '1.3' : '0.9'} opacity="0.85" />
+                            <text x={rightX + 4} y={fy + 3} fill={d.color} fontSize="8.5" fontFamily="JetBrains Mono, monospace">
+                              {(r * 100).toFixed(1)}% ({formatScalePrice(fp, scaleMode, percentBaseline)})
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                }
+                if (d.kind === 'FIB_EXTENSION' && p3) {
+                  const x3 = getX(p3.candleIndex);
+                  const y3 = getY(p3.price);
+                  const swing = p2.price - p1.price;
+                  const ratios = [0, 0.618, 1, 1.272, 1.618, 2.618];
+                  const leftX = Math.min(x1, x2, x3);
+                  const rightX = Math.max(width - padding.right - 90, Math.max(x2, x3) + 60);
+                  return (
+                    <g key={d.id} pointerEvents="none">
+                      <polyline points={`${x1},${y1} ${x2},${y2} ${x3},${y3}`} fill="none" stroke={d.color} strokeWidth="1.2" strokeDasharray="3 3" opacity="0.8" />
+                      {ratios.map(r => {
+                        const fp = p3.price + swing * r;
+                        const fy = getY(fp);
+                        return (
+                          <g key={r}>
+                            <line x1={leftX} y1={fy} x2={rightX} y2={fy} stroke={d.color} strokeWidth={r === 1 || r === 1.618 ? '1.4' : '0.9'} opacity="0.88" />
+                            <text x={rightX - 4} y={fy - 3} textAnchor="end" fill={d.color} fontSize="8.5" fontFamily="JetBrains Mono, monospace">
+                              {r.toFixed(3)} ({formatScalePrice(fp, scaleMode, percentBaseline)})
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                }
+                if (d.kind === 'LONG_POSITION' || d.kind === 'SHORT_POSITION') {
+                  const isLong = d.kind === 'LONG_POSITION';
+                  const entry = p1.price;
+                  const slDelta = Math.max(Math.abs(entry - p2.price), Math.max(0.01, Math.abs(entry) * 0.01));
+                  const slPrice = isLong ? Math.min(entry - 1e-6, p2.price < entry ? p2.price : entry - slDelta) : Math.max(entry + 1e-6, p2.price > entry ? p2.price : entry + slDelta);
+                  const risk = Math.abs(entry - slPrice);
+                  const tpPrice = isLong ? entry + risk * 2 : entry - risk * 2;
+                  const boxLeft = Math.min(x1, x2);
+                  const boxW = Math.max(88, Math.abs(x2 - x1));
+                  const entryY = getY(entry);
+                  const slY = getY(slPrice);
+                  const tpY = getY(tpPrice);
+                  const tpTop = Math.min(entryY, tpY);
+                  const tpH = Math.max(6, Math.abs(entryY - tpY));
+                  const slTop = Math.min(entryY, slY);
+                  const slH = Math.max(6, Math.abs(entryY - slY));
+                  return (
+                    <g key={d.id} pointerEvents="none">
+                      <rect x={boxLeft} y={tpTop} width={boxW} height={tpH} fill="#10b981" fillOpacity="0.18" stroke="#10b981" strokeWidth="1" />
+                      <rect x={boxLeft} y={slTop} width={boxW} height={slH} fill="#f43f5e" fillOpacity="0.18" stroke="#f43f5e" strokeWidth="1" />
+                      <line x1={boxLeft} y1={entryY} x2={boxLeft + boxW} y2={entryY} stroke="#e2e8f0" strokeWidth="1.2" />
+                      <rect x={boxLeft + 4} y={entryY - 9} width="128" height="17" rx="4" fill="#020617" stroke={isLong ? '#10b981' : '#f43f5e'} strokeWidth="0.9" />
+                      <text x={boxLeft + 10} y={entryY + 2.5} fill="#f8fafc" fontSize="8.5" fontFamily="JetBrains Mono, monospace">
+                        {isLong ? 'LONG' : 'SHORT'} R:R 1:2 · {formatScalePrice(tpPrice, scaleMode, percentBaseline)}
+                      </text>
+                    </g>
+                  );
+                }
+                if (d.kind === 'MEASURE') {
+                  const rx = Math.min(x1, x2);
+                  const ry = Math.min(y1, y2);
+                  const rw = Math.max(24, Math.abs(x2 - x1));
+                  const rh = Math.max(18, Math.abs(y2 - y1));
+                  const diff = p2.price - p1.price;
+                  const pct = p1.price !== 0 ? ((diff / p1.price) * 100).toFixed(2) : '0.00';
+                  const bars = Math.abs(p2.candleIndex - p1.candleIndex);
+                  const col = diff >= 0 ? '#10b981' : '#f43f5e';
+                  return (
+                    <g key={d.id} pointerEvents="none">
+                      <rect x={rx} y={ry} width={rw} height={rh} fill={col} fillOpacity="0.14" stroke={col} strokeWidth="1.2" />
+                      <rect x={rx + rw / 2 - 66} y={ry + rh + 4} width="132" height="19" rx="4" fill="#020617" stroke={col} strokeWidth="1" />
+                      <text x={rx + rw / 2} y={ry + rh + 16.5} textAnchor="middle" fill="#f8fafc" fontSize="9" fontFamily="JetBrains Mono, monospace">
+                        {`${diff >= 0 ? '+' : ''}${pct}% · ${bars} کندل`}
+                      </text>
+                    </g>
+                  );
+                }
+                return null;
+              })}
+
+              {pendingDrawPoints.length > 0 && (
+                <g pointerEvents="none">
+                  {pendingDrawPoints.map((pt, idx) => (
+                    <circle
+                      key={`pend-${idx}`}
+                      cx={getX(pt.candleIndex)}
+                      cy={getY(pt.price)}
+                      r="3.8"
+                      fill="#22d3ee"
+                      stroke="#020617"
+                      strokeWidth="1.2"
+                    />
+                  ))}
+                  {pendingDrawPoints.length >= 2 && (
+                    <polyline
+                      points={pendingDrawPoints.map(pt => `${getX(pt.candleIndex).toFixed(1)},${getY(pt.price).toFixed(1)}`).join(' ')}
+                      fill="none"
+                      stroke={drawColor}
+                      strokeWidth="1.8"
+                      strokeDasharray={drawingTool === 'BRUSH' ? undefined : '4 3'}
+                    />
+                  )}
+                  {mousePos && (
+                    <line
+                      x1={getX(pendingDrawPoints[pendingDrawPoints.length - 1].candleIndex)}
+                      y1={getY(pendingDrawPoints[pendingDrawPoints.length - 1].price)}
+                      x2={mousePos.x}
+                      y2={mousePos.y}
+                      stroke="#22d3ee"
+                      strokeWidth="1.4"
+                      strokeDasharray="4 3"
+                    />
+                  )}
+                </g>
+              )}
+            </g>
+          )}
+
+          {!tvEngineAvailable && (
+            <>
+              {/* RSI (14) Lower Sub-Pane */}
+              {showRSI && rsiValues.length > 0 && (() => {
+                const rsiTop = height - padding.bottom - rsiHeight + 6;
+                const rsiBot = height - padding.bottom - 4;
+                const rsiSpanH = Math.max(16, rsiBot - rsiTop);
+                const yRsi = (val: number) => rsiBot - (Math.max(0, Math.min(100, val)) / 100) * rsiSpanH;
+                const pts: string[] = [];
+                for (let i = visStart; i <= visEnd; i++) {
+                  const val = rsiValues[i];
+                  if (val !== null && val !== undefined) pts.push(`${getX(i).toFixed(1)},${yRsi(val).toFixed(1)}`);
+                }
+                const latestRsi = rsiValues[visEnd] ?? rsiValues[rsiValues.length - 1];
                 return (
-                  <g key={d.id}>
-                    <line x1={padding.left} y1={y1} x2={width - padding.right} y2={y1} stroke={d.color} strokeWidth="1.4" strokeDasharray="5 3" />
-                  </g>
-                );
-              }
-              if (d.kind === 'VLINE') {
-                return (
-                  <g key={d.id}>
-                    <line x1={x1} y1={padding.top} x2={x1} y2={height - bottomReserved} stroke={d.color} strokeWidth="1.3" strokeDasharray="4 3" />
-                  </g>
-                );
-              }
-              if (d.kind === 'TEXT') {
-                return (
-                  <g key={d.id}>
-                    <circle cx={x1} cy={y1} r="3.5" fill={d.color} />
-                    <rect x={x1 + 6} y={y1 - 11} width="128" height="19" rx="4" fill="#080d1a" stroke={d.color} strokeWidth="1" />
-                    <text x={x1 + 12} y={y1 + 2} fill="#e2e8f0" fontSize="9.5" fontWeight="600">
-                      {d.label || 'یادداشت'}
+                  <g pointerEvents="none">
+                    <line x1={padding.left} y1={rsiTop - 4} x2={width - padding.right} y2={rsiTop - 4} stroke="#1e293b" strokeWidth="1" />
+                    <line x1={padding.left} y1={yRsi(70)} x2={width - padding.right} y2={yRsi(70)} stroke="#475569" strokeDasharray="3 3" strokeWidth="0.8" />
+                    <line x1={padding.left} y1={yRsi(30)} x2={width - padding.right} y2={yRsi(30)} stroke="#475569" strokeDasharray="3 3" strokeWidth="0.8" />
+                    {pts.length >= 2 && <polyline points={pts.join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1.4" />}
+                    <text x={padding.left + 6} y={rsiTop + 10} fill="#a78bfa" fontSize="9" fontFamily="JetBrains Mono, monospace">
+                      RSI(14){latestRsi !== null && latestRsi !== undefined ? `: ${latestRsi.toFixed(1)}` : ''}
                     </text>
                   </g>
                 );
-              }
-              if (!p2) return null;
-              const x2 = getX(p2.candleIndex);
-              const y2 = getY(p2.price);
+              })()}
 
-              if (d.kind === 'TRENDLINE') {
+              {/* Bottom X-Axis Calendar / Time Ticks */}
+              {displayCandles.length >= 4 && (() => {
+                const tickCount = Math.min(6, Math.max(2, Math.floor((width - padding.left - padding.right) / 135)));
+                const stepIdx = Math.max(1, Math.floor(visSpan / tickCount));
+                const ticks: number[] = [];
+                for (let idx = visStart; idx <= visEnd; idx += stepIdx) {
+                  ticks.push(idx);
+                }
                 return (
-                  <g key={d.id}>
-                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.8" />
-                    <circle cx={x1} cy={y1} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
-                    <circle cx={x2} cy={y2} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
-                  </g>
-                );
-              }
-              if (d.kind === 'RAY') {
-                const dx = x2 - x1;
-                const dy = y2 - y1;
-                const endX = width - padding.right;
-                const scale = Math.abs(dx) > 1 ? Math.max(1, (endX - x1) / dx) : 1;
-                const rx2 = x1 + dx * scale;
-                const ry2 = y1 + dy * scale;
-                return (
-                  <g key={d.id}>
-                    <line x1={x1} y1={y1} x2={rx2} y2={ry2} stroke={d.color} strokeWidth="1.7" />
-                    <circle cx={x1} cy={y1} r="3.2" fill={d.color} />
-                    <circle cx={x2} cy={y2} r="3.2" fill="#080d1a" stroke={d.color} strokeWidth="1.4" />
-                  </g>
-                );
-              }
-              if (d.kind === 'CHANNEL') {
-                const offY = 38;
-                return (
-                  <g key={d.id}>
-                    <polygon points={`${x1},${y1} ${x2},${y2} ${x2},${y2 + offY} ${x1},${y1 + offY}`} fill={d.color} fillOpacity="0.08" />
-                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.6" />
-                    <line x1={x1} y1={y1 + offY} x2={x2} y2={y2 + offY} stroke={d.color} strokeWidth="1.4" strokeDasharray="4 3" />
-                  </g>
-                );
-              }
-              if (d.kind === 'FIB_RETRACE') {
-                const ratios = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-                const leftX = Math.min(x1, x2);
-                const rightX = Math.max(x1, x2);
-                return (
-                  <g key={d.id}>
-                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={d.color} strokeWidth="1.1" strokeDasharray="3 3" opacity="0.7" />
-                    {ratios.map(r => {
-                      const fp = p1.price + (p2.price - p1.price) * r;
-                      const fy = getY(fp);
+                  <g pointerEvents="none">
+                    <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#1e293b" strokeWidth="1" />
+                    {ticks.map(idx => {
+                      const c = displayCandles[idx];
+                      if (!c) return null;
+                      const tx = getX(idx);
                       return (
-                        <g key={r}>
-                          <line x1={leftX} y1={fy} x2={rightX} y2={fy} stroke={d.color} strokeWidth={r === 0.5 || r === 0.618 ? '1.3' : '0.9'} opacity="0.85" />
-                          <text x={rightX + 4} y={fy + 3} fill={d.color} fontSize="8.5" fontFamily="JetBrains Mono, monospace">
-                            {(r * 100).toFixed(1)}% ({formatScalePrice(fp, scaleMode, percentBaseline)})
-                          </text>
-                        </g>
+                        <text
+                          key={`xtick-${idx}`}
+                          x={tx}
+                          y={height - 8}
+                          textAnchor="middle"
+                          fill="#64748b"
+                          fontSize="9"
+                          fontFamily="JetBrains Mono, monospace"
+                        >
+                          {formatCandleAxisTime(c.timestamp, timeframe, true)}
+                        </text>
                       );
                     })}
                   </g>
                 );
-              }
-              if (d.kind === 'MEASURE') {
-                const rx = Math.min(x1, x2);
-                const ry = Math.min(y1, y2);
-                const rw = Math.max(24, Math.abs(x2 - x1));
-                const rh = Math.max(18, Math.abs(y2 - y1));
-                const diff = p2.price - p1.price;
-                const pct = p1.price !== 0 ? ((diff / p1.price) * 100).toFixed(2) : '0.00';
-                const bars = Math.abs(p2.candleIndex - p1.candleIndex);
-                const col = diff >= 0 ? '#10b981' : '#f43f5e';
-                return (
-                  <g key={d.id} pointerEvents="none">
-                    <rect x={rx} y={ry} width={rw} height={rh} fill={col} fillOpacity="0.14" stroke={col} strokeWidth="1.2" />
-                    <rect x={rx + rw / 2 - 66} y={ry + rh + 4} width="132" height="19" rx="4" fill="#020617" stroke={col} strokeWidth="1" />
-                    <text x={rx + rw / 2} y={ry + rh + 16.5} textAnchor="middle" fill="#f8fafc" fontSize="9" fontFamily="JetBrains Mono, monospace">
-                      {`${diff >= 0 ? '+' : ''}${pct}% · ${bars} کندل`}
-                    </text>
-                  </g>
-                );
-              }
-              return null;
-            })}
+              })()}
 
-            {pendingDrawPoint && mousePos && (
-              <line
-                x1={getX(pendingDrawPoint.candleIndex)}
-                y1={getY(pendingDrawPoint.price)}
-                x2={mousePos.x}
-                y2={mousePos.y}
-                stroke="#22d3ee"
-                strokeWidth="1.4"
-                strokeDasharray="4 3"
-                pointerEvents="none"
-              />
-            )}
-          </g>
-
-          {/* RSI (14) Lower Sub-Pane */}
-          {showRSI && rsiValues.length > 0 && (() => {
-            const rsiTop = height - padding.bottom - rsiHeight + 6;
-            const rsiBot = height - padding.bottom - 4;
-            const rsiSpanH = Math.max(16, rsiBot - rsiTop);
-            const yRsi = (val: number) => rsiBot - (Math.max(0, Math.min(100, val)) / 100) * rsiSpanH;
-            const pts: string[] = [];
-            for (let i = visStart; i <= visEnd; i++) {
-              const val = rsiValues[i];
-              if (val !== null && val !== undefined) pts.push(`${getX(i).toFixed(1)},${yRsi(val).toFixed(1)}`);
-            }
-            const latestRsi = rsiValues[visEnd] ?? rsiValues[rsiValues.length - 1];
-            return (
-              <g pointerEvents="none">
-                <line x1={padding.left} y1={rsiTop - 4} x2={width - padding.right} y2={rsiTop - 4} stroke="#1e293b" strokeWidth="1" />
-                <line x1={padding.left} y1={yRsi(70)} x2={width - padding.right} y2={yRsi(70)} stroke="#475569" strokeDasharray="3 3" strokeWidth="0.8" />
-                <line x1={padding.left} y1={yRsi(30)} x2={width - padding.right} y2={yRsi(30)} stroke="#475569" strokeDasharray="3 3" strokeWidth="0.8" />
-                {pts.length >= 2 && <polyline points={pts.join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1.4" />}
-                <text x={padding.left + 6} y={rsiTop + 10} fill="#a78bfa" fontSize="9" fontFamily="JetBrains Mono, monospace">
-                  RSI(14){latestRsi !== null && latestRsi !== undefined ? `: ${latestRsi.toFixed(1)}` : ''}
-                </text>
-              </g>
-            );
-          })()}
-
-          {/* Bottom X-Axis Calendar / Time Ticks */}
-          {displayCandles.length >= 4 && (() => {
-            const tickCount = Math.min(6, Math.max(2, Math.floor((width - padding.left - padding.right) / 135)));
-            const stepIdx = Math.max(1, Math.floor(visSpan / tickCount));
-            const ticks: number[] = [];
-            for (let idx = visStart; idx <= visEnd; idx += stepIdx) {
-              ticks.push(idx);
-            }
-            return (
-              <g pointerEvents="none">
-                <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#1e293b" strokeWidth="1" />
-                {ticks.map(idx => {
-                  const c = displayCandles[idx];
-                  if (!c) return null;
-                  const tx = getX(idx);
+              {/* Crosshair + Right Y-Axis Price Pill + Bottom Time Pill */}
+              {mousePos &&
+                mousePos.x >= padding.left &&
+                mousePos.x <= width - padding.right &&
+                mousePos.y >= padding.top &&
+                mousePos.y <= height - bottomReserved && (() => {
+                  const chInfo = getIndexAndPriceFromCoords(mousePos.x, mousePos.y, false);
+                  const usableH = Math.max(1, height - padding.top - bottomReserved);
+                  const normY = (height - bottomReserved - mousePos.y) / usableH;
+                  const rawCursorPrice = inverseTransformPrice(sMin + normY * sRange, scaleMode, percentBaseline);
+                  const chCandle = displayCandles[chInfo.candleIndex];
                   return (
-                    <text
-                      key={`xtick-${idx}`}
-                      x={tx}
-                      y={height - 8}
-                      textAnchor="middle"
-                      fill="#64748b"
-                      fontSize="9"
-                      fontFamily="JetBrains Mono, monospace"
-                    >
-                      {formatCandleAxisTime(c.timestamp, timeframe, true)}
-                    </text>
-                  );
-                })}
-              </g>
-            );
-          })()}
-
-          {/* Crosshair + Right Y-Axis Price Pill + Bottom Time Pill */}
-          {mousePos &&
-            mousePos.x >= padding.left &&
-            mousePos.x <= width - padding.right &&
-            mousePos.y >= padding.top &&
-            mousePos.y <= height - bottomReserved && (() => {
-              const chInfo = getIndexAndPriceFromCoords(mousePos.x, mousePos.y, false);
-              const usableH = Math.max(1, height - padding.top - bottomReserved);
-              const normY = (height - bottomReserved - mousePos.y) / usableH;
-              const rawCursorPrice = inverseTransformPrice(sMin + normY * sRange, scaleMode, percentBaseline);
-              const chCandle = displayCandles[chInfo.candleIndex];
-              return (
-                <g pointerEvents="none">
-                  <line
-                    x1={mousePos.x}
-                    y1={padding.top}
-                    x2={mousePos.x}
-                    y2={height - padding.bottom}
-                    stroke="#64748b"
-                    strokeWidth="1"
-                    strokeDasharray="3 3"
-                    opacity="0.65"
-                  />
-                  <line
-                    x1={padding.left}
-                    y1={mousePos.y}
-                    x2={width - padding.right}
-                    y2={mousePos.y}
-                    stroke="#64748b"
-                    strokeWidth="1"
-                    strokeDasharray="3 3"
-                    opacity="0.65"
-                  />
-                  <rect x={width - padding.right + 2} y={mousePos.y - 9} width="80" height="18" rx="4" fill="#1e293b" stroke="#64748b" strokeWidth="0.9" />
-                  <text
-                    x={width - padding.right + 6}
-                    y={mousePos.y + 3.5}
-                    fill="#f8fafc"
-                    fontSize="9.5"
-                    fontWeight="bold"
-                    fontFamily="JetBrains Mono, monospace"
-                  >
-                    {formatScalePrice(rawCursorPrice, scaleMode, percentBaseline)}
-                  </text>
-                  {chCandle && (
-                    <g>
-                      <rect x={Math.max(padding.left, Math.min(width - padding.right - 96, mousePos.x - 48))} y={height - padding.bottom + 2} width="96" height="16" rx="3" fill="#1e293b" stroke="#475569" strokeWidth="0.8" />
+                    <g pointerEvents="none">
+                      <line
+                        x1={mousePos.x}
+                        y1={padding.top}
+                        x2={mousePos.x}
+                        y2={height - padding.bottom}
+                        stroke="#64748b"
+                        strokeWidth="1"
+                        strokeDasharray="3 3"
+                        opacity="0.65"
+                      />
+                      <line
+                        x1={padding.left}
+                        y1={mousePos.y}
+                        x2={width - padding.right}
+                        y2={mousePos.y}
+                        stroke="#64748b"
+                        strokeWidth="1"
+                        strokeDasharray="3 3"
+                        opacity="0.65"
+                      />
+                      <rect x={width - padding.right + 2} y={mousePos.y - 9} width="80" height="18" rx="4" fill="#1e293b" stroke="#64748b" strokeWidth="0.9" />
                       <text
-                        x={Math.max(padding.left + 48, Math.min(width - padding.right - 48, mousePos.x))}
-                        y={height - padding.bottom + 13}
-                        textAnchor="middle"
-                        fill="#e2e8f0"
-                        fontSize="8.5"
+                        x={width - padding.right + 6}
+                        y={mousePos.y + 3.5}
+                        fill="#f8fafc"
+                        fontSize="9.5"
+                        fontWeight="bold"
                         fontFamily="JetBrains Mono, monospace"
                       >
-                        {formatCandleAxisTime(chCandle.timestamp, timeframe, true)}
+                        {formatScalePrice(rawCursorPrice, scaleMode, percentBaseline)}
                       </text>
+                      {chCandle && (
+                        <g>
+                          <rect x={Math.max(padding.left, Math.min(width - padding.right - 96, mousePos.x - 48))} y={height - padding.bottom + 2} width="96" height="16" rx="3" fill="#1e293b" stroke="#475569" strokeWidth="0.8" />
+                          <text
+                            x={Math.max(padding.left + 48, Math.min(width - padding.right - 48, mousePos.x))}
+                            y={height - padding.bottom + 13}
+                            textAnchor="middle"
+                            fill="#e2e8f0"
+                            fontSize="8.5"
+                            fontFamily="JetBrains Mono, monospace"
+                          >
+                            {formatCandleAxisTime(chCandle.timestamp, timeframe, true)}
+                          </text>
+                        </g>
+                      )}
                     </g>
-                  )}
-                </g>
-              );
-            })()}
+                  );
+                })()}
+            </>
+          )}
         </svg>
 
         {/* Glassmorphic Graphical PRZ Containers (Frosted Glass, Luminous Gradients, Neon Borders, Timeframe & Price-Level Synced) */}
@@ -4999,10 +5607,61 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </div>
         )}
 
+        {/* Inline Drawing Note Editor Popover */}
+        {editingNoteDraft && (
+          <div
+            onClick={e => e.stopPropagation()}
+            className="absolute top-14 right-4 z-30 w-72 bg-[#0b1324] border border-cyan-500/40 rounded-xl p-3 shadow-2xl space-y-2.5"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                <Type className="w-3.5 h-3.5 text-cyan-400" />
+                <span>متن یادداشت روی چارت</span>
+              </div>
+              <button type="button" onClick={() => setEditingNoteDraft(null)} className="text-slate-400 hover:text-white">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={editingNoteDraft.text}
+              onChange={e => setEditingNoteDraft({ ...editingNoteDraft, text: e.target.value })}
+              placeholder="متن یادداشت..."
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawings(prev =>
+                    prev.map(d => (d.id === editingNoteDraft.id ? { ...d, label: editingNoteDraft.text.trim() || 'یادداشت' } : d))
+                  );
+                  setEditingNoteDraft(null);
+                }}
+                className="flex-1 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg"
+              >
+                ذخیره یادداشت
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawings(prev => prev.filter(d => d.id !== editingNoteDraft.id));
+                  setEditingNoteDraft(null);
+                }}
+                className="px-2.5 py-1.5 bg-rose-950/70 hover:bg-rose-900/70 border border-rose-500/35 text-rose-200 text-xs rounded-lg"
+              >
+                حذف
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Floating Wave Metrics, Market Trend Regime & Live OHLCV HUD */}
         {(hudInfo || candles.length >= 6) && (() => {
           const hoverIdx =
-            mousePos && mousePos.x >= padding.left && mousePos.x <= width - padding.right
+            tvEngineAvailable && tvCrosshairInfo.candleIndex !== null
+              ? tvCrosshairInfo.candleIndex
+              : mousePos && mousePos.x >= padding.left && mousePos.x <= width - padding.right
               ? getIndexAndPriceFromCoords(mousePos.x, mousePos.y, false).candleIndex
               : displayCandles.length - 1;
           const activeBar = displayCandles[Math.max(0, Math.min(displayCandles.length - 1, hoverIdx))];
@@ -5074,53 +5733,89 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </div>
         )}
 
-        {/* Interactive Rule Diagnostic & Auto-Fix Overlay Panel */}
-        {diagnosticOpen && diagnosticSummary && (
+        {/* Unified Rule Diagnostics & 4-Stage Pattern Audit Drawer (Responsive) */}
+        {(diagnosticOpen || validatorOpen) && (
           <div
             onClick={e => e.stopPropagation()}
-            className="absolute top-3 left-3 bottom-14 z-30 w-[calc(100%-1.5rem)] sm:w-[430px] max-w-full flex flex-col justify-start pointer-events-auto"
+            className="absolute inset-2 sm:inset-auto sm:top-3 sm:left-3 sm:bottom-14 z-30 sm:w-[445px] max-w-full flex flex-col justify-start pointer-events-auto"
           >
-            <RuleDiagnosticsPanel
-              scenario={activeScenario}
-              summary={diagnosticSummary}
-              candles={candles}
-              parentRole={parentRole}
-              parentWaveLabel={parentWaveLabel}
-              onApplyPattern={onPatternChange}
-              onApplyVertices={onUpdateVertices}
-              onRevalidate={evaluateCurrentCount}
-              onClose={() => setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }))}
-              variant="overlay"
-            />
-          </div>
-        )}
+            <div className="flex flex-col max-h-full rounded-2xl overflow-hidden bg-[#0a101f] border border-slate-700/80 shadow-2xl">
+              <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-[#080e1d] border-b border-slate-800 shrink-0">
+                <div className="grid grid-cols-2 gap-1 flex-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => evaluateCurrentCount()}
+                    className={`py-1 px-2 rounded-md font-semibold transition-colors ${
+                      !validatorOpen ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    تشخیص و اصلاح سریع
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                      setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: true }));
+                    }}
+                    className={`py-1 px-2 rounded-md font-semibold transition-colors ${
+                      validatorOpen ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    ممیزی ۴مرحله‌ای الگو
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setValidatorHighlightLeg(null);
+                    setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                    setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                  }}
+                  title="بستن"
+                  className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
-        {/* Strict Step-by-Step PatternValidator Overlay Panel */}
-        {validatorOpen && (
-          <div
-            onClick={e => e.stopPropagation()}
-            className="absolute top-3 left-3 bottom-14 z-30 w-[calc(100%-1.5rem)] sm:w-[445px] max-w-full flex flex-col justify-start pointer-events-auto"
-          >
-            <PatternValidator
-              scenario={activeScenario}
-              candles={candles}
-              parentRole={parentRole}
-              parentWaveLabel={parentWaveLabel}
-              onApplyPattern={onPatternChange}
-              onApplyVertices={onUpdateVertices}
-              onValidationComplete={summary => onValidateActiveScenario?.(activeScenario.id, summary)}
-              onHighlightLeg={setValidatorHighlightLeg}
-              onClose={() => {
-                setValidatorHighlightLeg(null);
-                setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
-              }}
-              variant="overlay"
-            />
+              <div className="flex-1 overflow-y-auto">
+                {validatorOpen ? (
+                  <PatternValidator
+                    scenario={activeScenario}
+                    candles={candles}
+                    parentRole={parentRole}
+                    parentWaveLabel={parentWaveLabel}
+                    onApplyPattern={onPatternChange}
+                    onApplyVertices={onUpdateVertices}
+                    onValidationComplete={summary => onValidateActiveScenario?.(activeScenario.id, summary)}
+                    onHighlightLeg={setValidatorHighlightLeg}
+                    onClose={() => {
+                      setValidatorHighlightLeg(null);
+                      setValidatorOpenById(prev => ({ ...prev, [activeScenario.id]: false }));
+                    }}
+                    variant="panel"
+                  />
+                ) : diagnosticSummary ? (
+                  <RuleDiagnosticsPanel
+                    scenario={activeScenario}
+                    summary={diagnosticSummary}
+                    candles={candles}
+                    parentRole={parentRole}
+                    parentWaveLabel={parentWaveLabel}
+                    onApplyPattern={onPatternChange}
+                    onApplyVertices={onUpdateVertices}
+                    onRevalidate={evaluateCurrentCount}
+                    onClose={() => setDiagnosticOpenById(prev => ({ ...prev, [activeScenario.id]: false }))}
+                    variant="inline"
+                  />
+                ) : null}
+              </div>
+            </div>
           </div>
         )}
 
         {/* Active Mode Instruction Strip */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-2 bg-slate-950/95 border border-slate-800 px-3 py-1.5 rounded-lg text-[11px] text-slate-300 shadow-lg">
+        <div className="absolute bottom-3 right-3 max-w-[calc(100%-3.75rem)] flex flex-wrap items-center gap-2 bg-slate-950/95 border border-slate-800 px-3 py-1.5 rounded-lg text-[10.5px] sm:text-[11px] text-slate-300 shadow-lg">
           {interactionMode === 'PICK_BOTTOM' ? (
             <>
               <Crosshair className="w-3.5 h-3.5 text-amber-400" />
@@ -5186,8 +5881,30 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
             <>
               <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
               <span>
-                ابزار ترسیم فعال ({drawingTool}): {pendingDrawPoint ? 'نقطه دوم را روی چارت کلیک کنید' : 'روی چارت کلیک کنید'} · Esc برای خروج
+                ابزار ترسیم ({drawingTool}):{' '}
+                {drawingTool === 'BRUSH'
+                  ? `روی چارت کلیک کنید (${pendingDrawPoints.length} نقطه)`
+                  : drawingTool === 'PITCHFORK' || drawingTool === 'FIB_EXTENSION'
+                  ? `نقطه ${pendingDrawPoints.length + 1} از ۳ را روی چارت کلیک کنید`
+                  : drawingTool === 'HLINE' || drawingTool === 'VLINE' || drawingTool === 'TEXT'
+                  ? '۱ کلیک روی محل دلخواه در چارت'
+                  : pendingDrawPoints.length > 0
+                  ? 'نقطه دوم را روی چارت کلیک کنید'
+                  : 'نقطه اول را روی چارت کلیک کنید'}{' '}
+                · برای لغو کلید Esc را بزنید
               </span>
+              {drawingTool === 'BRUSH' && pendingDrawPoints.length >= 2 && (
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    finishBrushStroke();
+                  }}
+                  className="px-2 py-0.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[10px] font-bold"
+                >
+                  ثبت براش
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -5196,9 +5913,9 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
                 {activeScenario.isLocked
                   ? 'سناریو قفل است؛ برای تغییر نقاط قفل را باز کنید.'
                   : onDoubleClickWaveLeg && nextLowerValidTF
-                  ? `برای مشاهده داده‌ها و سناریوهای ${nextLowerValidTF} روی هر موج کلیک کنید، اسکرول برای زوم و درگ برای پن.`
+                  ? `برای مشاهده داده‌ها و سناریوهای ${nextLowerValidTF} روی هر موج کلیک کنید، اسکرول برای زوم و کشیدن برای جابجایی چارت.`
                   : onDoubleClickWaveLeg
-                  ? `در پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe}) هستید؛ نقاط را بکشید یا اسکرول کنید.`
+                  ? `در پایین‌ترین تایم‌فریم معتبر (${lowestValidTimeframe || timeframe}) هستید؛ نقاط را جابجا یا زوم کنید.`
                   : 'نقاط پیوت را بکشید، اسکرول برای زوم و برای تغییر لیبل روی هر نقطه کلیک کنید.'}
               </span>
               {!hideToolbarLockAndReset && isUserModifiedCount && (
@@ -5221,57 +5938,20 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           )}
         </div>
 
-        {/* Bottom-Left Horizontal Zones & Fibonacci Basis Strip */}
-        {!hideZoneControls && (
-          <div className="hidden lg:flex flex-col items-start gap-1.5 absolute bottom-3 left-3 z-10 pointer-events-auto">
-            {(renderedPrzBoxes.length > 0 || renderedTmvBoxes.length > 0) && (
-              <div className="flex items-center gap-1.5 bg-slate-950/90 border border-slate-800 px-2 py-1 rounded-lg text-[10px] shadow-lg">
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    togglePRZ();
-                  }}
-                  className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded whitespace-nowrap transition-colors ${
-                    effectiveShowPRZ
-                      ? 'bg-amber-500/15 text-amber-200 border border-amber-500/35'
-                      : 'text-slate-500 hover:text-slate-300'
-                  }`}
-                  title="نمایش / مخفی‌سازی مستطیل افقی بازگشت PRZ"
-                >
-                  <span className="w-2.5 h-1.5 rounded-[2px] bg-amber-400 inline-block" />
-                  <span>PRZ افقی</span>
-                </button>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleTMV();
-                  }}
-                  className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded whitespace-nowrap transition-colors ${
-                    effectiveShowTMV
-                      ? 'bg-sky-500/15 text-sky-200 border border-sky-500/35'
-                      : 'text-slate-500 hover:text-slate-300'
-                  }`}
-                  title="نمایش / مخفی‌سازی مستطیل افقی اهداف TMV"
-                >
-                  <span className="w-2.5 h-1.5 rounded-[2px] bg-sky-400 inline-block" />
-                  <span>TMV افقی</span>
-                </button>
-              </div>
-            )}
-
-            {effectiveShowFibLayers && projectionReport?.completedStructure && (
-              <div className="flex items-center gap-2 bg-slate-950/90 border border-emerald-500/35 px-2.5 py-1.5 rounded-lg text-[10.5px] text-slate-200 shadow-lg pointer-events-none">
-                <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="text-slate-400">مبنای اکستنشن:</span>
-                <strong className="text-emerald-300 font-semibold">
-                  {projectionReport.completedStructure.structureLabelFa}
-                </strong>
-                <span className="text-slate-600">·</span>
-                <span className="font-mono tabular-nums text-cyan-300">
-                  {projectionReport.extensionLayers?.length || 0} لایه
-                </span>
-              </div>
-            )}
+        {/* Bottom-Left Fibonacci Extension Basis Readout */}
+        {!hideZoneControls && effectiveShowFibLayers && projectionReport?.completedStructure && (
+          <div className="hidden lg:flex flex-col items-start gap-1.5 absolute bottom-3 left-3 z-10 pointer-events-none">
+            <div className="flex items-center gap-2 bg-slate-950/90 border border-emerald-500/35 px-2.5 py-1.5 rounded-lg text-[10.5px] text-slate-200 shadow-lg">
+              <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="text-slate-400">مبنای اکستنشن:</span>
+              <strong className="text-emerald-300 font-semibold">
+                {projectionReport.completedStructure.structureLabelFa}
+              </strong>
+              <span className="text-slate-600">·</span>
+              <span className="font-mono tabular-nums text-cyan-300">
+                {projectionReport.extensionLayers?.length || 0} لایه
+              </span>
+            </div>
           </div>
         )}
 
@@ -5297,7 +5977,10 @@ export const ChartStudio: React.FC<ChartStudioProps> = ({
           </div>
         )}
         </div>
+          );
+        })()}
       </div>
+      )}
     </div>
   );
 };

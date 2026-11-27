@@ -133,7 +133,7 @@ export const ExplainabilityPanel: React.FC<ExplainabilityPanelProps> = ({
         <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col gap-2.5">
           <div className="flex items-center gap-2 text-amber-300 font-semibold text-sm">
             <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>پیشنهاد خودکار اصلاح ساختار توسط دستیار (Copilot Action)</span>
+            <span>پیشنهاد خودکار اصلاح ساختار توسط دستیار</span>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
             {rule3Failed 

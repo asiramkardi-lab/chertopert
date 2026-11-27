@@ -239,7 +239,12 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
                       : 'bg-orange-950/55 border-orange-500/45 text-orange-200'
                   }`}
                 >
-                  غیرایده‌آل · {summary.nonIdealPatternFlag.category}
+                  غیرایده‌آل ·{' '}
+                  {summary.nonIdealPatternFlag.category === 'ANTI_DIAGONAL'
+                    ? 'آنتی‌قطری'
+                    : summary.nonIdealPatternFlag.category === 'DIAGONAL'
+                    ? 'قطری'
+                    : 'ساختار غیرایده‌آل'}
                 </span>
               )}
               {parentRole !== 'ROOT' && parentWaveLabel && (
@@ -331,7 +336,11 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
               </div>
               <div className="flex items-center gap-1.5 font-mono text-[10px]">
                 <span className="px-2 py-0.5 rounded bg-slate-950/80 border border-slate-700/80 text-slate-200">
-                  {summary.nonIdealPatternFlag.category}
+                  {summary.nonIdealPatternFlag.category === 'ANTI_DIAGONAL'
+                    ? 'آنتی‌قطری'
+                    : summary.nonIdealPatternFlag.category === 'DIAGONAL'
+                    ? 'قطری'
+                    : 'غیرایده‌آل'}
                 </span>
                 {summary.nonIdealPatternFlag.isDetected33333Diagonal && (
                   <span className="px-2 py-0.5 rounded bg-slate-950/80 border border-amber-500/40 text-amber-300">
@@ -428,7 +437,7 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
         {waveMetrics && (
           <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-800 space-y-2.5">
             <div className="flex items-center justify-between text-[11px]">
-              <span className="font-bold text-slate-200">تله‌متری هندسه و نسبت امواج</span>
+              <span className="font-bold text-slate-200">هندسه و نسبت طول امواج</span>
               <span className="text-slate-400 font-mono tabular-nums">
                 مقیاس ابطال: {summary.invalidationPrice.toLocaleString()}
               </span>
@@ -504,7 +513,7 @@ export const RuleDiagnosticsPanel: React.FC<RuleDiagnosticsPanelProps> = ({
             <div className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
               <span>قوانین بنیادین و فرکتالی (Hard Rules)</span>
               <span className="font-mono text-[10px] text-slate-400">
-                {hardRules.filter(r => r.passed).length} / {hardRules.length} پاس
+                {hardRules.filter(r => r.passed).length} / {hardRules.length} موفق
               </span>
             </div>
             <div className="space-y-1.5">

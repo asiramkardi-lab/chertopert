@@ -6,7 +6,14 @@
 
 import { Candle } from '../types/elliott';
 
-export type ChartStyleType = 'CANDLES' | 'HOLLOW' | 'HEIKIN_ASHI' | 'BARS' | 'LINE' | 'AREA';
+export type ChartStyleType =
+  | 'CANDLES'
+  | 'HOLLOW'
+  | 'HEIKIN_ASHI'
+  | 'BARS'
+  | 'LINE'
+  | 'AREA'
+  | 'BASELINE';
 
 export type PriceScaleMode = 'LINEAR' | 'LOG' | 'PERCENT';
 
@@ -14,11 +21,17 @@ export type DrawingToolKind =
   | 'SELECT'
   | 'TRENDLINE'
   | 'RAY'
+  | 'EXTENDED_LINE'
   | 'HLINE'
   | 'VLINE'
-  | 'FIB_RETRACE'
-  | 'MEASURE'
   | 'CHANNEL'
+  | 'PITCHFORK'
+  | 'FIB_RETRACE'
+  | 'FIB_EXTENSION'
+  | 'LONG_POSITION'
+  | 'SHORT_POSITION'
+  | 'MEASURE'
+  | 'BRUSH'
   | 'TEXT';
 
 export interface DrawingPoint {
@@ -34,12 +47,101 @@ export interface ChartDrawing {
   color: string;
   label?: string;
   lineWidth?: number;
+  locked?: boolean;
+  visible?: boolean;
 }
 
 export interface BollingerPoint {
   mid: number;
   upper: number;
   lower: number;
+}
+
+export interface MACDPoint {
+  macd: number;
+  signal: number | null;
+  histogram: number | null;
+}
+
+export interface TradingViewSymbolMapping {
+  tvSymbol: string;
+  isNativeOnTradingView: boolean;
+  displayNameFa: string;
+  exchangeLabel: string;
+}
+
+/**
+ * Maps internal asset IDs to official TradingView ticker symbols.
+ */
+export function mapAssetToTradingViewSymbol(assetId: string, fallbackSymbol?: string): TradingViewSymbolMapping {
+  switch (assetId) {
+    case 'BTCUSDT':
+      return {
+        tvSymbol: 'BINANCE:BTCUSDT',
+        isNativeOnTradingView: true,
+        displayNameFa: 'بیت‌کوین / تتر (Binance)',
+        exchangeLabel: 'BINANCE'
+      };
+    case 'XAUUSD':
+      return {
+        tvSymbol: 'OANDA:XAUUSD',
+        isNativeOnTradingView: true,
+        displayNameFa: 'انس جهانی طلا (XAU/USD)',
+        exchangeLabel: 'OANDA'
+      };
+    case 'TSE_SHAPNA':
+      return {
+        tvSymbol: 'BINANCE:BTCUSDT',
+        isNativeOnTradingView: false,
+        displayNameFa: 'شپنا (بورس تهران - فید محلی)',
+        exchangeLabel: 'TSE'
+      };
+    case 'TSE_ZOB':
+      return {
+        tvSymbol: 'BINANCE:BTCUSDT',
+        isNativeOnTradingView: false,
+        displayNameFa: 'ذوب‌آهن (بورس تهران - فید محلی)',
+        exchangeLabel: 'TSE'
+      };
+    case 'TSE_FARS':
+      return {
+        tvSymbol: 'BINANCE:BTCUSDT',
+        isNativeOnTradingView: false,
+        displayNameFa: 'فارس (بورس تهران - فید محلی)',
+        exchangeLabel: 'TSE'
+      };
+    default: {
+      const clean = (fallbackSymbol || assetId || 'BINANCE:BTCUSDT').replace(/\s+/g, '').toUpperCase();
+      return {
+        tvSymbol: clean.includes(':') ? clean : 'BINANCE:BTCUSDT',
+        isNativeOnTradingView: clean.includes(':'),
+        displayNameFa: fallbackSymbol || assetId,
+        exchangeLabel: 'GLOBAL'
+      };
+    }
+  }
+}
+
+/**
+ * Maps internal timeframe codes to official TradingView chart intervals.
+ */
+export function mapTimeframeToTradingViewInterval(timeframe: string): string {
+  switch (timeframe) {
+    case '15M':
+      return '15';
+    case '1H':
+      return '60';
+    case '4H':
+      return '240';
+    case '1D':
+      return 'D';
+    case '1W':
+      return 'W';
+    case '1M':
+      return 'M';
+    default:
+      return 'D';
+  }
 }
 
 /**
@@ -68,6 +170,27 @@ export function toHeikinAshi(candles: Candle[]): Candle[] {
     prevClose = haClose;
   }
   return result;
+}
+
+/**
+ * Computes Simple Moving Average (SMA) over close prices.
+ */
+export function computeSMA(candles: Candle[], period: number): Array<number | null> {
+  const n = candles.length;
+  const out: Array<number | null> = new Array(n).fill(null);
+  if (n === 0 || period <= 0 || n < period) return out;
+
+  let rolling = 0;
+  for (let i = 0; i < n; i++) {
+    rolling += candles[i].close;
+    if (i >= period) {
+      rolling -= candles[i - period].close;
+    }
+    if (i >= period - 1) {
+      out[i] = rolling / period;
+    }
+  }
+  return out;
 }
 
 /**
@@ -159,6 +282,90 @@ export function computeRSI(candles: Candle[], period: number = 14): Array<number
       const rs = avgGain / avgLoss;
       out[i] = 100 - 100 / (1 + rs);
     }
+  }
+  return out;
+}
+
+/**
+ * Computes MACD (fast EMA - slow EMA, signal EMA, and histogram).
+ */
+export function computeMACD(
+  candles: Candle[],
+  fastPeriod: number = 12,
+  slowPeriod: number = 26,
+  signalPeriod: number = 9
+): Array<MACDPoint | null> {
+  const n = candles.length;
+  const out: Array<MACDPoint | null> = new Array(n).fill(null);
+  if (n === 0 || fastPeriod <= 0 || slowPeriod <= fastPeriod || signalPeriod <= 0) return out;
+
+  const fastEma = computeEMA(candles, fastPeriod);
+  const slowEma = computeEMA(candles, slowPeriod);
+  const macdLine: Array<number | null> = new Array(n).fill(null);
+
+  for (let i = 0; i < n; i++) {
+    const f = fastEma[i];
+    const s = slowEma[i];
+    if (f !== null && s !== null) {
+      macdLine[i] = f - s;
+    }
+  }
+
+  const validMacdIndices: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (macdLine[i] !== null) validMacdIndices.push(i);
+  }
+  if (validMacdIndices.length === 0) return out;
+
+  const k = 2 / (signalPeriod + 1);
+  let signalEma: number | null = null;
+
+  for (let pos = 0; pos < validMacdIndices.length; pos++) {
+    const idx = validMacdIndices[pos];
+    const mVal = macdLine[idx]!;
+    if (pos + 1 < signalPeriod) {
+      out[idx] = { macd: mVal, signal: null, histogram: null };
+    } else if (pos + 1 === signalPeriod) {
+      let sum = 0;
+      for (let j = 0; j < signalPeriod; j++) {
+        sum += macdLine[validMacdIndices[j]]!;
+      }
+      signalEma = sum / signalPeriod;
+      out[idx] = {
+        macd: mVal,
+        signal: signalEma,
+        histogram: mVal - signalEma
+      };
+    } else {
+      signalEma = mVal * k + signalEma! * (1 - k);
+      out[idx] = {
+        macd: mVal,
+        signal: signalEma,
+        histogram: mVal - signalEma
+      };
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Computes anchored cumulative Volume-Weighted Average Price (VWAP).
+ */
+export function computeVWAP(candles: Candle[]): Array<number | null> {
+  const n = candles.length;
+  const out: Array<number | null> = new Array(n).fill(null);
+  if (n === 0) return out;
+
+  let cumPV = 0;
+  let cumVol = 0;
+  for (let i = 0; i < n; i++) {
+    const c = candles[i];
+    const typical = (c.high + c.low + c.close) / 3;
+    const vol = Math.max(0, c.volume || 0);
+    cumPV += typical * vol;
+    cumVol += vol;
+    out[i] = cumVol > 0 ? cumPV / cumVol : typical;
   }
   return out;
 }

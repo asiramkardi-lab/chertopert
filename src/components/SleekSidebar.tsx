@@ -27,6 +27,8 @@ import { AnglePenetrationWidget } from './AnglePenetrationWidget';
 import { ConfluenceZonesWidget } from './ConfluenceZonesWidget';
 import { SmartRuleAlertWidget } from './SmartRuleAlertWidget';
 import { TargetProjectionPanel } from './TargetProjectionPanel';
+import { EntryStrategyPanel } from './EntryStrategyPanel';
+import { BahariSession1819Panel } from './BahariSession1819Panel';
 import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import { RulesEngineComplianceCard } from './RulesEngineComplianceCard';
 import { AnalysisConfidenceWidget } from './AnalysisConfidenceWidget';
@@ -39,14 +41,12 @@ import {
   GitMerge,
   FolderGit2, 
   Compass, 
-  FileCode2, 
   ShieldCheck,
   CornerDownLeft,
   Layers,
   Triangle,
   Crosshair,
   ArrowUpLeft,
-  Sparkles,
   CheckCircle2,
   AlertTriangle,
   Trash2,
@@ -57,9 +57,19 @@ import {
 } from 'lucide-react';
 
 const FLAT_MARKET_PHASE_TOOLTIP =
-  "Flat patterns are primarily intended for historical knot-untying and should not be used in the current market's end-phase.";
+  'الگوی فلت عمدتاً برای گره‌گشایی ساختارهای گذشته بازار کاربرد دارد و نباید بدون احتیاط شدید در فاز پایانی فعلی استفاده شود.';
 
-export type SidebarTab = 'COPILOT' | 'FLAT_ANALYSIS' | 'TRIANGLE_ANALYSIS' | 'COMPLEX_ANALYSIS' | 'ANGLE_TARGETS' | 'FRACTAL_TREE' | 'SCENARIOS' | 'TF_BOUNDARY' | 'SDD_CODE';
+export type SidebarTab =
+  | 'COPILOT'
+  | 'PATTERN_INSPECTOR'
+  | 'FLAT_ANALYSIS'
+  | 'TRIANGLE_ANALYSIS'
+  | 'COMPLEX_ANALYSIS'
+  | 'ANGLE_TARGETS'
+  | 'FRACTAL_TREE'
+  | 'SCENARIOS'
+  | 'TF_BOUNDARY'
+  | 'SDD_CODE';
 
 interface SleekSidebarProps {
   activeScenario: WaveScenario;
@@ -79,6 +89,7 @@ interface SleekSidebarProps {
   onSelectTimeframe: (tf: string) => void;
   onValidateScenario?: (id: string, summary: ValidationSummary) => void;
   onHoverScenario?: (id: string | null) => void;
+  onHoverLeg?: (legIndex: number | null) => void;
   onUpdateVertices?: (vertices: WaveVertex[], targetScenarioId?: string) => void;
   interactionMode?: ChartInteractionMode;
   onChangeInteractionMode?: (mode: ChartInteractionMode) => void;
@@ -130,6 +141,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   onSelectTimeframe,
   onValidateScenario,
   onHoverScenario,
+  onHoverLeg,
   onUpdateVertices,
   interactionMode,
   onChangeInteractionMode,
@@ -142,10 +154,8 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   liveTreeContext
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarTab>('COPILOT');
-  const [targetsSubView, setTargetsSubView] = useState<'RADAR' | 'CONFLUENCE' | 'PRZ'>('RADAR');
-  const [showInlineFlatToggle, setShowInlineFlatToggle] = useState<boolean>(false);
-  const [showInlineTriangleToggle, setShowInlineTriangleToggle] = useState<boolean>(false);
-  const [showInlineComplexToggle, setShowInlineComplexToggle] = useState<boolean>(false);
+  const [inspectorKind, setInspectorKind] = useState<'FLAT' | 'TRIANGLE' | 'COMPLEX'>('FLAT');
+  const [targetsSubView, setTargetsSubView] = useState<'PRZ' | 'SESSION_18_19' | 'RADAR' | 'CONFLUENCE'>('PRZ');
   const [exportFeedback, setExportFeedback] = useState<{
     json: string;
     approvedCount: number;
@@ -254,16 +264,10 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   const isComplexIdentified = Boolean(liveComplexValidation.isComplexPattern);
 
   useEffect(() => {
-    setShowInlineFlatToggle(is335Identified);
-  }, [is335Identified, activeScenario.id]);
-
-  useEffect(() => {
-    setShowInlineTriangleToggle(isTriangleIdentified);
-  }, [isTriangleIdentified, activeScenario.id]);
-
-  useEffect(() => {
-    setShowInlineComplexToggle(isComplexIdentified);
-  }, [isComplexIdentified, activeScenario.id]);
+    if (isTriangleIdentified) setInspectorKind('TRIANGLE');
+    else if (isComplexIdentified) setInspectorKind('COMPLEX');
+    else if (is335Identified) setInspectorKind('FLAT');
+  }, [is335Identified, isTriangleIdentified, isComplexIdentified, activeScenario.id]);
 
   const scenarioPhaseWarningsById = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -296,87 +300,70 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
   );
 
   const tabs = [
-    { id: 'COPILOT' as SidebarTab, label: 'دستیار هوشمند و قوانین', icon: Cpu, badge: `${activeScenario.validityScore}%` },
+    { id: 'COPILOT' as SidebarTab, label: 'دستیار و قوانین', icon: Cpu, badge: `${activeScenario.validityScore}%` },
     {
-      id: 'FLAT_ANALYSIS' as SidebarTab,
-      label: 'بازرس فلت ۳-۳-۵',
-      icon: Layers,
-      badge: liveFlatFlag ? `${liveFlatFlag.bRetracePct}%` : '۳-۳-۵'
-    },
-    {
-      id: 'TRIANGLE_ANALYSIS' as SidebarTab,
-      label: 'بازرس مثلث A-B-C-D-E',
-      icon: Triangle,
-      badge: liveTriangleValidation.report.frequencyPct || 'A-E',
+      id: 'PATTERN_INSPECTOR' as SidebarTab,
+      label: 'بازرس الگو',
+      icon: isTriangleIdentified ? Triangle : isComplexIdentified ? GitMerge : Layers,
+      badge: isTriangleIdentified ? 'A-E' : isComplexIdentified ? 'W-X-Y' : is335Identified ? '۳-۳-۵' : undefined,
       hasWarning: activeInvalidTriangle
     },
-    {
-      id: 'COMPLEX_ANALYSIS' as SidebarTab,
-      label: 'بازرس ترکیبی W-X-Y',
-      icon: GitMerge,
-      badge: liveComplexValidation.report.patternSignature || 'W-X-Y'
-    },
-    { id: 'ANGLE_TARGETS' as SidebarTab, label: 'زوایا و اهداف', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
-    { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch, badge: '۴ درجه' },
+    { id: 'ANGLE_TARGETS' as SidebarTab, label: 'تارگت و پلن', icon: Crosshair, badge: `${activeScenario.confidenceScore}%` },
+    { id: 'FRACTAL_TREE' as SidebarTab, label: 'درخت فرکتالی', icon: GitBranch },
     {
       id: 'SCENARIOS' as SidebarTab,
-      label: 'سناریوهای موازی',
+      label: 'سناریوها',
       icon: FolderGit2,
       badge: `${scenarios.length}`,
       hasWarning: anyMarketPhaseWarning || anyInvalidTriangle
     },
-    { id: 'TF_BOUNDARY' as SidebarTab, label: 'محدوده تایم‌فریم', icon: Compass },
-    { id: 'SDD_CODE' as SidebarTab, label: 'سند SDD و کدها', icon: FileCode2 }
+    { id: 'TF_BOUNDARY' as SidebarTab, label: 'تایم‌فریم‌ها', icon: Compass }
   ];
 
+  const isPatternInspectorTab =
+    activeTab === 'PATTERN_INSPECTOR' ||
+    activeTab === 'FLAT_ANALYSIS' ||
+    activeTab === 'TRIANGLE_ANALYSIS' ||
+    activeTab === 'COMPLEX_ANALYSIS';
+
   return (
-    <aside className="w-full lg:w-[440px] xl:w-[480px] h-full flex flex-col bg-[#0b1120] border border-slate-800/90 rounded-2xl overflow-hidden shadow-2xl shrink-0">
-      {/* Sleek Tab Navigation Header */}
-      <div className="bg-[#0f172a]/95 border-b border-slate-800 p-2.5 flex items-center justify-between gap-1.5 overflow-x-auto scrollbar-none">
+    <aside className="w-full lg:w-[440px] xl:w-[480px] lg:h-full flex flex-col bg-[#0b1120] border border-slate-800/90 rounded-2xl overflow-hidden shadow-2xl shrink-0">
+      {/* Sleek 6-Tab Navigation Header */}
+      <div className="bg-[#0f172a]/95 border-b border-slate-800 p-2 flex items-center gap-1 overflow-x-auto scrollbar-none">
         {tabs.map(tab => {
           const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          const isFlatTabAlert = tab.id === 'FLAT_ANALYSIS' && is335Identified && !isActive;
-          const isTriangleTabAlert = tab.id === 'TRIANGLE_ANALYSIS' && isTriangleIdentified && !isActive;
+          const isActive =
+            tab.id === 'PATTERN_INSPECTOR' ? isPatternInspectorTab : activeTab === tab.id;
+          const isPatternAlert =
+            tab.id === 'PATTERN_INSPECTOR' && (is335Identified || isTriangleIdentified || isComplexIdentified) && !isActive;
           return (
             <button
               key={tab.id}
-              data-testid={
-                tab.id === 'FLAT_ANALYSIS'
-                  ? 'flat-pattern-inspector-tab'
-                  : tab.id === 'TRIANGLE_ANALYSIS'
-                  ? 'triangle-pattern-inspector-tab'
-                  : tab.id === 'COMPLEX_ANALYSIS'
-                  ? 'complex-pattern-inspector-tab'
-                  : undefined
-              }
               onClick={() => {
                 setActiveTab(tab.id);
                 if (tab.id !== 'SCENARIOS') onHoverScenario?.(null);
               }}
-              className={`flex items-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ${
+              className={`flex items-center gap-1.5 py-2 px-2.5 rounded-xl text-[11.5px] font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ${
                 isActive
-                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
-                  : isFlatTabAlert
-                  ? 'bg-amber-950/40 border border-amber-500/45 text-amber-200 hover:bg-amber-950/60'
-                  : isTriangleTabAlert
-                  ? 'bg-emerald-950/40 border border-emerald-500/45 text-emerald-200 hover:bg-emerald-950/60'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : isPatternAlert
+                  ? 'bg-amber-950/40 border border-amber-500/40 text-amber-200 hover:bg-amber-950/60'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : isFlatTabAlert ? 'text-amber-300' : isTriangleTabAlert ? 'text-emerald-300' : 'text-slate-400'}`} />
+              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : isPatternAlert ? 'text-amber-300' : 'text-slate-400'}`} />
               <span>{tab.label}</span>
               {'hasWarning' in tab && tab.hasWarning && (
                 <span
                   data-testid={
-                    tab.id === 'TRIANGLE_ANALYSIS'
+                    tab.id === 'PATTERN_INSPECTOR'
                       ? 'sidebar-triangle-tab-warning'
                       : 'sidebar-scenarios-tab-warning'
                   }
                   title={
-                    tab.id === 'TRIANGLE_ANALYSIS'
+                    tab.id === 'PATTERN_INSPECTOR'
                       ? liveTriangleValidation.invalidTriangleReasonFa ||
-                        'هشدار مثلث نامعتبر (موج ۱/۳/۵ یا ساختار غیر ۳-۳-۳-۳-۳)'
+                        'هشدار مثلث نامعتبر (قرارگیری در موج ۱/۳/۵ یا ساختار غیر ۳-۳-۳-۳-۳)'
                       : anyInvalidTriangle && !anyMarketPhaseWarning
                       ? 'سناریوی مثلث نامعتبر در لیست وجود دارد (موج ۱، ۳ یا ۵ یا نقض ساختار ۳-۳-۳-۳-۳)'
                       : anyInvalidTriangle && anyMarketPhaseWarning
@@ -390,7 +377,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               )}
               {tab.badge && (
                 <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono tabular-nums ${
-                  isActive ? 'bg-indigo-900/60 text-white' : isFlatTabAlert ? 'bg-amber-900/50 text-amber-200' : 'bg-slate-800 text-slate-400'
+                  isActive ? 'bg-indigo-900/60 text-white' : 'bg-slate-800 text-slate-400'
                 }`}>
                   {tab.badge}
                 </span>
@@ -401,7 +388,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
       </div>
 
       {/* Tab Body Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+      <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
         {/* Real-Time Bahari Smart Rule & Invalidation Alert Widget */}
         <SmartRuleAlertWidget
           scenario={activeScenario}
@@ -411,7 +398,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
           onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
         />
 
-        {/* Session 14 isInvalidTriangle Notification Banner */}
+        {/* Session 14 Invalid Triangle Notification Banner */}
         {activeInvalidTriangle && (
           <div
             data-testid="sidebar-invalid-triangle-alert"
@@ -422,7 +409,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               <div className="min-w-0 space-y-0.5">
                 <div className="font-bold text-rose-200">
-                  هشدار مثلث نامعتبر (isInvalidTriangle)
+                  هشدار مثلث نامعتبر (جایگاه یا ساختار)
                 </div>
                 <p className="text-[11px] text-rose-100/90 leading-relaxed">
                   {liveTriangleValidation.invalidTriangleReasonFa ||
@@ -516,240 +503,71 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               scenarios={scenarios}
             />
 
-            {/* Studio Sidebar Flat Pattern Inspector (Activates ONLY when a 3-3-5 scenario is selected) */}
-            {is335Identified && (
-              <div className="rounded-xl bg-[#0b1324] border border-amber-500/40 overflow-hidden">
-                <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowInlineFlatToggle(prev => !prev)}
-                    aria-expanded={showInlineFlatToggle}
-                    className="flex items-center gap-2 min-w-0 text-right flex-1"
-                  >
-                    <Layers className="w-4 h-4 text-amber-400 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
-                        <span>بازرس الگوی فلت (Flat Pattern Inspector)</span>
-                        {liveFlatFlag?.isFlaggedFlat && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        )}
-                      </div>
-                      <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
-                        {liveFlatFlag
-                          ? `B/A: ${liveFlatFlag.bRetracePct}% · C/B: ${liveFlatFlag.cPctOfB}% · ${liveFlatFlag.subtypeLabelEn}${
-                              liveFlatFlag.isRunningExcluded ? ' (حذف جاری)' : ''
-                            }`
-                          : 'ساختار ۳-۳-۵ فعال'}
-                      </div>
-                    </div>
-                  </button>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowInlineFlatToggle(prev => !prev)}
-                      className="px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 bg-amber-600/30 border-amber-500/60 text-amber-100"
-                    >
-                      {showInlineFlatToggle ? 'بستن' : 'نمایش'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('FLAT_ANALYSIS')}
-                      className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
-                      title="باز کردن تب کامل بازرس الگوی فلت ۳-۳-۵"
-                    >
-                      <ArrowUpLeft className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {showInlineFlatToggle && (
-                  <div className="p-2.5 pt-0 border-t border-slate-800/80">
-                    <FlatPatternInspector
-                      scenario={activeScenario}
-                      candles={candles}
-                      parentRole={drillContext?.role || 'ROOT'}
-                      parentWaveLabel={drillContext?.waveLabel || ''}
-                      onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Studio Sidebar Triangle Pattern Inspector (Activates when a Triangle A-B-C-D-E scenario is selected) */}
-            {isTriangleIdentified && (
-              <div
-                className={`rounded-xl bg-[#0b1324] overflow-hidden border ${
-                  activeInvalidTriangle ? 'border-rose-500/50' : 'border-emerald-500/40'
-                }`}
-              >
-                <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowInlineTriangleToggle(prev => !prev)}
-                    aria-expanded={showInlineTriangleToggle}
-                    className="flex items-center gap-2 min-w-0 text-right flex-1"
-                  >
-                    <Triangle
-                      className={`w-4 h-4 shrink-0 ${
-                        activeInvalidTriangle ? 'text-rose-400' : 'text-emerald-400'
-                      }`}
-                    />
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5 flex-wrap">
-                        <span>بازرس الگوی مثلث (A-B-C-D-E)</span>
-                        {activeInvalidTriangle ? (
-                          <span
-                            data-testid="sidebar-copilot-invalid-triangle-badge"
-                            title={
-                              liveTriangleValidation.invalidTriangleReasonFa ||
-                              'Invalid Triangle: Triangle pattern placed in wave 1, 3, or 5 or violates 3-3-3-3-3 internal structure.'
-                            }
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/60 border border-rose-500/50 text-rose-300 text-[9.5px] font-bold shrink-0 whitespace-nowrap"
-                          >
-                            <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                            <span>مثلث نامعتبر</span>
-                          </span>
-                        ) : liveTriangleValidation.isValidTriangle ? (
-                          <span
-                            title={
-                              liveTriangleValidation.isContracting
-                                ? 'Contracting Triangle (خطوط روند همگرا — ۳-۳-۳-۳-۳)'
-                                : 'Expanding Triangle (خطوط روند واگرا — ۳-۳-۳-۳-۳)'
-                            }
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/55 border border-emerald-500/45 text-emerald-300 text-[9.5px] font-bold shrink-0 whitespace-nowrap"
-                          >
-                            <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                            <span>{liveTriangleValidation.isContracting ? 'مثلث مانع' : 'مثلث گستشی'}</span>
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
-                        {liveTriangleValidation.isContracting
-                          ? 'مانع (همگرا)'
-                          : liveTriangleValidation.isExpanding
-                          ? 'گستشی (واگرا)'
-                          : 'نامعتبر'}{' '}
-                        · {liveTriangleValidation.report.subwaveSignature || '3-3-3-3-3'} ·{' '}
-                        {liveTriangleValidation.report.positionSlotLabelFa}
-                      </div>
-                    </div>
-                  </button>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowInlineTriangleToggle(prev => !prev)}
-                      className="px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 bg-emerald-600/30 border-emerald-500/60 text-emerald-100"
-                    >
-                      {showInlineTriangleToggle ? 'بستن' : 'نمایش'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('TRIANGLE_ANALYSIS')}
-                      className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
-                      title="باز کردن تب کامل بازرس الگوی مثلث A-B-C-D-E"
-                    >
-                      <ArrowUpLeft className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {showInlineTriangleToggle && (
-                  <div className="p-2.5 pt-0 border-t border-slate-800/80">
-                    <TrianglePatternInspector
-                      scenario={activeScenario}
-                      candles={candles}
-                      parentRole={drillContext?.role || 'ROOT'}
-                      parentWaveLabel={drillContext?.waveLabel || ''}
-                      onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Studio Sidebar Complex Pattern Inspector (Activates when a Complex W-X-Y scenario is selected) */}
-            {isComplexIdentified && (
-              <div className="rounded-xl bg-[#0b1324] border border-violet-500/40 overflow-hidden">
-                <div className="px-3.5 py-2.5 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowInlineComplexToggle(prev => !prev)}
-                    aria-expanded={showInlineComplexToggle}
-                    className="flex items-center gap-2 min-w-0 text-right flex-1"
-                  >
-                    <GitMerge className="w-4 h-4 text-violet-400 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
-                        <span>بازرس الگوی ترکیبی (W-X-Y)</span>
-                        {liveComplexValidation.isValidComplex && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        )}
-                      </div>
-                      <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
-                        {liveComplexValidation.report.patternSignature} ·{' '}
-                        {liveComplexValidation.isStandardCombination ? 'استاندارد' : 'غیراستاندارد'} ·{' '}
-                        {liveComplexValidation.report.xWaveCandleCount} کندل X
-                      </div>
-                    </div>
-                  </button>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowInlineComplexToggle(prev => !prev)}
-                      className="px-2.5 py-1 rounded-lg border text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0 bg-violet-600/30 border-violet-500/60 text-violet-100"
-                    >
-                      {showInlineComplexToggle ? 'بستن' : 'نمایش'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('COMPLEX_ANALYSIS')}
-                      className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300"
-                      title="باز کردن تب کامل بازرس الگوی ترکیبی W-X-Y"
-                    >
-                      <ArrowUpLeft className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {showInlineComplexToggle && (
-                  <div className="p-2.5 pt-0 border-t border-slate-800/80">
-                    <ComplexPatternInspector
-                      scenario={activeScenario}
-                      scenarios={scenarios}
-                      candles={candles}
-                      onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-                      onApplyVertices={verts => onUpdateVertices?.(verts, activeScenario.id)}
-                      compact
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Quick Shortcuts to Angle Radar & Fibonacci Confluence Zones */}
-            <div className="grid grid-cols-1 gap-2">
+            {/* Contextual Single-Line Jump Card to Pattern Inspector (zero duplication) */}
+            {(is335Identified || isTriangleIdentified || isComplexIdentified) && (
               <button
                 type="button"
                 onClick={() => {
-                  setTargetsSubView('CONFLUENCE');
-                  setActiveTab('ANGLE_TARGETS');
+                  if (isTriangleIdentified) setInspectorKind('TRIANGLE');
+                  else if (isComplexIdentified) setInspectorKind('COMPLEX');
+                  else setInspectorKind('FLAT');
+                  setActiveTab('PATTERN_INSPECTOR');
                 }}
-                className="w-full p-3 rounded-xl bg-emerald-950/25 hover:bg-emerald-950/40 border border-emerald-500/35 hover:border-emerald-400/65 flex items-center justify-between gap-2 text-right transition-colors"
+                className={`w-full p-3 rounded-xl border flex items-center justify-between gap-2 text-right transition-colors ${
+                  activeInvalidTriangle
+                    ? 'bg-rose-950/25 hover:bg-rose-950/40 border-rose-500/45'
+                    : 'bg-slate-900/80 hover:bg-slate-900 border-indigo-500/35'
+                }`}
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Sparkles className="w-4 h-4 text-emerald-300 shrink-0" />
+                <div className="flex items-center gap-2 min-w-0">
+                  {isTriangleIdentified ? (
+                    <Triangle className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : isComplexIdentified ? (
+                    <GitMerge className="w-4 h-4 text-violet-400 shrink-0" />
+                  ) : (
+                    <Layers className="w-4 h-4 text-amber-400 shrink-0" />
+                  )}
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">ابزار بصری مناطق تلاقی فیبوناچی (Confluence)</div>
-                    <div className="text-[10.5px] text-slate-400 truncate">
-                      هم‌گرایی سطوح موج‌های مختلف با افکت نوری نقاط ورود مطمئن
+                    <div className="text-xs font-bold text-white truncate">
+                      {isTriangleIdentified
+                        ? 'بازرس تخصصی مثلث A-B-C-D-E آماده بررسی است'
+                        : isComplexIdentified
+                        ? 'بازرس تخصصی الگوی ترکیبی W-X-Y آماده بررسی است'
+                        : 'بازرس تخصصی الگوی فلت ۳-۳-۵ آماده بررسی است'}
+                    </div>
+                    <div className="text-[10.5px] text-slate-400 truncate font-mono tabular-nums">
+                      {isTriangleIdentified
+                        ? `${liveTriangleValidation.isContracting ? 'مثلث انقباضی (مانع)' : liveTriangleValidation.isExpanding ? 'مثلث انبساطی (گستشی)' : 'نامعتبر'} · ${liveTriangleValidation.report.positionSlotLabelFa}`
+                        : isComplexIdentified
+                        ? `${liveComplexValidation.report.patternSignature} · ${liveComplexValidation.report.xWaveCandleCount} کندل X`
+                        : liveFlatFlag
+                        ? `B/A: ${liveFlatFlag.bRetracePct}% · C/B: ${liveFlatFlag.cPctOfB}%`
+                        : 'ساختار اصلاحی ۳-۳-۵'}
                     </div>
                   </div>
                 </div>
-                <ArrowUpLeft className="w-4 h-4 text-emerald-300 shrink-0" />
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-cyan-300 shrink-0">
+                  <span>باز کردن</span>
+                  <ArrowUpLeft className="w-3.5 h-3.5" />
+                </span>
+              </button>
+            )}
+
+            {/* Quick Navigation Strip to Targets & Session 18-19 Plan */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetsSubView('SESSION_18_19');
+                  setActiveTab('ANGLE_TARGETS');
+                }}
+                className="p-2.5 rounded-xl bg-emerald-950/25 hover:bg-emerald-950/40 border border-emerald-500/35 flex items-center justify-between gap-2 text-right transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white truncate">پلن ورود و جلسات ۱۸–۱۹</div>
+                  <div className="text-[9.5px] text-slate-400 truncate">TMV سه‌نقطه‌ای و ریسک</div>
+                </div>
+                <ArrowUpLeft className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
               </button>
 
               <button
@@ -758,18 +576,13 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                   setTargetsSubView('RADAR');
                   setActiveTab('ANGLE_TARGETS');
                 }}
-                className="w-full p-3 rounded-xl bg-cyan-950/25 hover:bg-cyan-950/40 border border-cyan-500/35 hover:border-cyan-400/65 flex items-center justify-between gap-2 text-right transition-colors"
+                className="p-2.5 rounded-xl bg-cyan-950/25 hover:bg-cyan-950/40 border border-cyan-500/35 flex items-center justify-between gap-2 text-right transition-colors"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Crosshair className="w-4 h-4 text-cyan-300 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">رادار زوایای برخورد و سطوح نفوذ</div>
-                    <div className="text-[10.5px] text-slate-400 truncate">
-                      مشاهده اهداف کوتاه‌مدت و میان‌مدت با درصد اطمینان
-                    </div>
-                  </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white truncate">رادار زوایا و PRZ</div>
+                  <div className="text-[9.5px] text-slate-400 truncate">تلاقی فیبو و اهداف</div>
                 </div>
-                <ArrowUpLeft className="w-4 h-4 text-cyan-300 shrink-0" />
+                <ArrowUpLeft className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
               </button>
             </div>
 
@@ -790,24 +603,6 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               compact
             />
 
-            {/* Pattern Management & Approved Scenario Export Toolbar */}
-            <div className="rounded-xl bg-slate-900/75 border border-slate-800 px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
-                <FolderGit2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                <span>ابزار مدیریت الگو و خروجی سناریو</span>
-              </div>
-              <button
-                type="button"
-                data-testid="sidebar-export-scenario-btn"
-                onClick={handleExportScenarios}
-                title="خروجی JSON از سناریوهای تاییدشده برای اشتراک‌گذاری و پشتیبان‌گیری"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/50 text-indigo-100 text-[11px] font-bold transition-colors whitespace-nowrap shrink-0"
-              >
-                <Download className="w-3.5 h-3.5 shrink-0" />
-                <span>Export Scenario</span>
-              </button>
-            </div>
-
             {/* Strict PatternValidator Stepper */}
             <PatternValidator
               scenario={activeScenario}
@@ -817,94 +612,169 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
               onApplyVertices={verts => onUpdateVertices?.(verts, activeScenario.id)}
               onValidationComplete={summary => onValidateScenario?.(activeScenario.id, summary)}
+              onHighlightLeg={onHoverLeg}
               variant="panel"
             />
 
-            {/* Explainability Component */}
+            {/* Explainability Component (Wired cleanly to Session 18 TMV Targets) */}
             <ExplainabilityPanel
               scenario={activeScenario}
-              onApplyAlternative={(newPattern) => onPatternChange(newPattern)}
-              onApplyExtendedAdjustment={() => {}}
+              onApplyAlternative={newPattern => onPatternChange(newPattern)}
+              onApplyExtendedAdjustment={() => {
+                setTargetsSubView('SESSION_18_19');
+                setActiveTab('ANGLE_TARGETS');
+              }}
             />
           </div>
         )}
 
-        {activeTab === 'FLAT_ANALYSIS' && (
-          <div className="space-y-4">
-            {is335Identified ? (
-              <FlatPatternInspector
-                scenario={activeScenario}
-                candles={candles}
-                parentRole={drillContext?.role || 'ROOT'}
-                parentWaveLabel={drillContext?.waveLabel || ''}
-                onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-              />
-            ) : (
-              <div
-                data-testid="flat-inspector-inactive-notice"
-                className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 space-y-2 leading-relaxed"
+        {isPatternInspectorTab && (
+          <div className="space-y-3">
+            {/* Sub-Inspector Switcher (Flat 3-3-5 / Triangle A-E / Complex W-X-Y) */}
+            <div className="grid grid-cols-3 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-[11px]">
+              <button
+                type="button"
+                data-testid="flat-pattern-inspector-tab"
+                onClick={() => {
+                  setInspectorKind('FLAT');
+                  setActiveTab('PATTERN_INSPECTOR');
+                }}
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  (activeTab === 'FLAT_ANALYSIS' || (activeTab === 'PATTERN_INSPECTOR' && inspectorKind === 'FLAT'))
+                    ? 'bg-amber-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
               >
-                <div className="flex items-center gap-2 font-bold text-amber-300">
-                  <Layers className="w-4 h-4 shrink-0" />
-                  <span>بازرس الگوی فلت (۳-۳-۵) در انتظار انتخاب سناریوی ۳-۳-۵</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  این ابزار تنها زمانی فعال می‌شود که یک سناریوی دارای ساختار ۳-۳-۵ (یا الگوی فلت) انتخاب شده باشد.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+                فلت ۳-۳-۵
+              </button>
+              <button
+                type="button"
+                data-testid="triangle-pattern-inspector-tab"
+                onClick={() => {
+                  setInspectorKind('TRIANGLE');
+                  setActiveTab('PATTERN_INSPECTOR');
+                }}
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  (activeTab === 'TRIANGLE_ANALYSIS' || (activeTab === 'PATTERN_INSPECTOR' && inspectorKind === 'TRIANGLE'))
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                مثلث A-E
+              </button>
+              <button
+                type="button"
+                data-testid="complex-pattern-inspector-tab"
+                onClick={() => {
+                  setInspectorKind('COMPLEX');
+                  setActiveTab('PATTERN_INSPECTOR');
+                }}
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  (activeTab === 'COMPLEX_ANALYSIS' || (activeTab === 'PATTERN_INSPECTOR' && inspectorKind === 'COMPLEX'))
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ترکیبی W-X-Y
+              </button>
+            </div>
 
-        {activeTab === 'TRIANGLE_ANALYSIS' && (
-          <div className="space-y-4">
-            {!isTriangleIdentified && (
-              <div
-                data-testid="triangle-inspector-inactive-notice"
-                className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-2 flex-wrap"
-              >
-                <div className="space-y-0.5 min-w-0">
-                  <div className="font-bold text-emerald-300">سناریوی فعلی مثلث نیست (شبیه‌سازی جلسه ۱۴ فعال است)</div>
-                  <p className="text-[10.5px] text-slate-400">
-                    می‌توانید قوانین جلسه ۱۴ (موقعیت ۴/B/۲، ساختار ۳-۳-۳-۳-۳، برخورد خطوط و مثال ذوب) را در شبیه‌ساز زیر آزمون کنید.
+            {(activeTab === 'FLAT_ANALYSIS' || (activeTab === 'PATTERN_INSPECTOR' && inspectorKind === 'FLAT')) && (
+              is335Identified ? (
+                <FlatPatternInspector
+                  scenario={activeScenario}
+                  candles={candles}
+                  parentRole={drillContext?.role || 'ROOT'}
+                  parentWaveLabel={drillContext?.waveLabel || ''}
+                  onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                />
+              ) : (
+                <div
+                  data-testid="flat-inspector-inactive-notice"
+                  className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 space-y-2 leading-relaxed"
+                >
+                  <div className="flex items-center gap-2 font-bold text-amber-300">
+                    <Layers className="w-4 h-4 shrink-0" />
+                    <span>بازرس الگوی فلت (۳-۳-۵) در انتظار انتخاب سناریوی ۳-۳-۵</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    این ابزار زمانی فعال می‌شود که سناریوی انتخاب‌شده دارای ساختار ۳-۳-۵ یا یکی از الگوهای فلت باشد.
                   </p>
                 </div>
-                {!activeScenario.isLocked && (
-                  <button
-                    type="button"
-                    onClick={() => onPatternChange('TRIANGLE_CONVERGING', activeScenario.id)}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-500/45 text-emerald-100 text-[10.5px] font-bold whitespace-nowrap shrink-0"
-                  >
-                    تبدیل به مثلث مانع
-                  </button>
-                )}
-              </div>
+              )
             )}
-            <TrianglePatternInspector
-              scenario={activeScenario}
-              candles={candles}
-              parentRole={drillContext?.role || 'ROOT'}
-              parentWaveLabel={drillContext?.waveLabel || ''}
-              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-            />
-          </div>
-        )}
 
-        {activeTab === 'COMPLEX_ANALYSIS' && (
-          <div className="space-y-4">
-            <ComplexPatternInspector
-              scenario={activeScenario}
-              scenarios={scenarios}
-              candles={candles}
-              onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
-              onApplyVertices={verts => onUpdateVertices?.(verts, activeScenario.id)}
-            />
+            {(activeTab === 'TRIANGLE_ANALYSIS' || (activeTab === 'PATTERN_INSPECTOR' && inspectorKind === 'TRIANGLE')) && (
+              <>
+                {!isTriangleIdentified && (
+                  <div
+                    data-testid="triangle-inspector-inactive-notice"
+                    className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-2 flex-wrap"
+                  >
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="font-bold text-emerald-300">سناریوی فعلی مثلث نیست (شبیه‌ساز جلسه ۱۴ فعال است)</div>
+                      <p className="text-[10.5px] text-slate-400">
+                        می‌توانید قوانین جلسه ۱۴ (جایگاه ۴/B/۲، ساختار ۳-۳-۳-۳-۳ و برخورد خطوط) را در شبیه‌ساز زیر بررسی کنید.
+                      </p>
+                    </div>
+                    {!activeScenario.isLocked && (
+                      <button
+                        type="button"
+                        onClick={() => onPatternChange('TRIANGLE_CONVERGING', activeScenario.id)}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-500/45 text-emerald-100 text-[10.5px] font-bold whitespace-nowrap shrink-0"
+                      >
+                        تبدیل به مثلث انقباضی (مانع)
+                      </button>
+                    )}
+                  </div>
+                )}
+                <TrianglePatternInspector
+                  scenario={activeScenario}
+                  candles={candles}
+                  parentRole={drillContext?.role || 'ROOT'}
+                  parentWaveLabel={drillContext?.waveLabel || ''}
+                  onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                />
+              </>
+            )}
+
+            {(activeTab === 'COMPLEX_ANALYSIS' || (activeTab === 'PATTERN_INSPECTOR' && inspectorKind === 'COMPLEX')) && (
+              <ComplexPatternInspector
+                scenario={activeScenario}
+                scenarios={scenarios}
+                candles={candles}
+                onApplyPattern={pattern => onPatternChange(pattern, activeScenario.id)}
+                onApplyVertices={verts => onUpdateVertices?.(verts, activeScenario.id)}
+              />
+            )}
           </div>
         )}
 
         {activeTab === 'ANGLE_TARGETS' && (
           <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setTargetsSubView('PRZ')}
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsSubView === 'PRZ'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                PRZ و TMV
+              </button>
+              <button
+                type="button"
+                onClick={() => setTargetsSubView('SESSION_18_19')}
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsSubView === 'SESSION_18_19'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                جلسات ۱۸–۱۹ و ورود
+              </button>
               <button
                 type="button"
                 onClick={() => setTargetsSubView('RADAR')}
@@ -925,18 +795,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                تلاقی فیبوناچی
-              </button>
-              <button
-                type="button"
-                onClick={() => setTargetsSubView('PRZ')}
-                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
-                  targetsSubView === 'PRZ'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                تارگت‌های PRZ
+                تلاقی فیبو
               </button>
             </div>
 
@@ -952,6 +811,19 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                 scenario={activeScenario}
                 candles={candles}
               />
+            ) : targetsSubView === 'SESSION_18_19' ? (
+              <div className="space-y-3">
+                <BahariSession1819Panel
+                  scenario={activeScenario}
+                  candles={candles}
+                  onHoverLeg={onHoverLeg}
+                />
+                <EntryStrategyPanel
+                  scenario={activeScenario}
+                  candles={candles}
+                  parentWaveLabel={drillContext?.waveLabel || ''}
+                />
+              </div>
             ) : (
               <TargetProjectionPanel
                 currentLevelScenarios={scenarios}
@@ -971,7 +843,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
         {activeTab === 'FRACTAL_TREE' && (
           <div className="space-y-4">
             <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
-              💡 <strong>راهنما:</strong> روی هر گره کلیک کنید تا وارد ساختار زیرموج‌های همان تایم‌فریم شوید یا یک شاخه سناریوی جدید بسازید.
+              <strong>راهنما:</strong> روی هر گره کلیک کنید تا وارد ساختار زیرموج‌های همان تایم‌فریم شوید یا یک شاخه سناریوی جدید بسازید.
             </div>
 
             <FractalTree
@@ -988,13 +860,13 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
         )}
 
         {activeTab === 'SCENARIOS' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {drillContext ? (
               <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/40 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-bold text-white">
                     <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
-                    <span>حالت دریل‌دان: {drillContext.waveLabel}</span>
+                    <span>بررسی زیرموج‌ها: {drillContext.waveLabel}</span>
                   </div>
                   <span className="font-mono text-[11px] text-cyan-300">
                     {drillContext.parentTimeframe} ← {drillContext.targetTimeframe}
@@ -1007,7 +879,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                       {drillContext.role === 'MOTIVE' ? 'اصلی (۵ موجی)' : 'اصلاحی (۳ موجی)'}
                     </strong>
                     {' · '}
-                    <span className="font-mono tabular-nums text-slate-400">{drillContext.candleCount} کندل متناطر</span>
+                    <span className="font-mono tabular-nums text-slate-400">{drillContext.candleCount} کندل</span>
                   </span>
                   {onExitDrill && (
                     <button
@@ -1022,120 +894,106 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
               </div>
             ) : (
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
-                <strong>جهان سناریوها:</strong> برای بررسی ساختار درونی هر موج، روی خط آن موج در نمودار کلیک کنید تا داده‌های تایم‌فریم پایین‌تر و سناریوهای آن بارگذاری شوند.
+                <strong>جهان سناریوها:</strong> برای بررسی ساختار درونی هر موج، روی خط آن موج در نمودار کلیک کنید تا داده‌ها و سناریوهای تایم‌فریم پایین‌تر بارگذاری شوند.
               </div>
             )}
 
-            {/* Quick SleekSidebar Scenario List with End-Phase Flat Warning Badges */}
+            {/* Compact Export & Flagged Warning Bar (zero duplicate scenario cards) */}
             {scenarios.length > 0 && (
               <div
                 data-testid="sleek-sidebar-scenario-list"
-                className="rounded-xl bg-slate-950/70 border border-slate-800/90 p-2.5 space-y-1.5"
+                className="rounded-xl bg-slate-950/70 border border-slate-800/90 p-2.5 space-y-2"
               >
-                <div className="flex items-center justify-between text-[10.5px] text-slate-400 px-1 gap-2">
-                  <span>لیست سریع سناریوها ({scenarios.length})</span>
+                <div className="flex items-center justify-between text-[11px] text-slate-300 gap-2">
+                  <span className="font-semibold">
+                    خروجی و پایش سلامت سناریوها ({scenarios.length})
+                  </span>
                   <button
                     type="button"
                     data-testid="sidebar-scenarios-export-btn"
                     onClick={handleExportScenarios}
-                    title="خروجی JSON از سناریوهای تاییدشده"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/45 text-indigo-100 text-[10px] font-bold transition-colors whitespace-nowrap shrink-0"
+                    title="دریافت فایل JSON از سناریوهای تاییدشده"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/45 text-indigo-100 text-[10.5px] font-bold transition-colors whitespace-nowrap shrink-0"
                   >
                     <Download className="w-3 h-3 shrink-0" />
-                    <span>Export Scenario</span>
+                    <span>خروجی JSON سناریوها</span>
                   </button>
                 </div>
-                <div className="space-y-1">
-                  {scenarios.map(sc => {
-                    const isSelected = sc.id === activeScenarioId;
-                    const hasPhaseWarn = scenarioPhaseWarningsById[sc.id];
-                    const runningExcluded = isExcludedFlat(sc, candles);
-                    const invalidTriangle = isInvalidTriangle(sc, candles, {
-                      parentRole: drillContext?.role,
-                      parentWaveLabel: drillContext?.waveLabel || sc.parentLegLabel
-                    });
-                    const triCheck =
-                      sc.patternType === 'TRIANGLE_CONVERGING' ||
-                      sc.patternType === 'TRIANGLE_EXPANDING' ||
-                      invalidTriangle
-                        ? RulesEngine.TrianglePatternValidator(
-                            sc,
-                            candles,
-                            undefined,
-                            drillContext?.role || 'ROOT',
-                            drillContext?.waveLabel || sc.parentLegLabel || ''
-                          )
-                        : null;
-                    const flaggedForRemoval = runningExcluded || invalidTriangle;
-                    return (
-                      <div
-                        key={sc.id}
-                        className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors ${
-                          isSelected
-                            ? 'bg-indigo-950/45 border-indigo-500/60 text-white'
-                            : 'bg-slate-900/60 border-slate-800/80 text-slate-300 hover:border-slate-700'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => onSelectScenario(sc.id)}
-                          className="flex items-center gap-1.5 min-w-0 flex-1 text-right"
+
+                {scenarios.some(sc => {
+                  const invTri = isInvalidTriangle(sc, candles, {
+                    parentRole: drillContext?.role,
+                    parentWaveLabel: drillContext?.waveLabel || sc.parentLegLabel
+                  });
+                  return scenarioPhaseWarningsById[sc.id] || isExcludedFlat(sc, candles) || invTri;
+                }) && (
+                  <div className="space-y-1">
+                    {scenarios.map(sc => {
+                      const hasPhaseWarn = scenarioPhaseWarningsById[sc.id];
+                      const runningExcluded = isExcludedFlat(sc, candles);
+                      const invalidTriangle = isInvalidTriangle(sc, candles, {
+                        parentRole: drillContext?.role,
+                        parentWaveLabel: drillContext?.waveLabel || sc.parentLegLabel
+                      });
+                      const triCheck =
+                        sc.patternType === 'TRIANGLE_CONVERGING' ||
+                        sc.patternType === 'TRIANGLE_EXPANDING' ||
+                        invalidTriangle
+                          ? RulesEngine.TrianglePatternValidator(
+                              sc,
+                              candles,
+                              undefined,
+                              drillContext?.role || 'ROOT',
+                              drillContext?.waveLabel || sc.parentLegLabel || ''
+                            )
+                          : null;
+                      const flaggedForRemoval = runningExcluded || invalidTriangle;
+                      if (!hasPhaseWarn && !flaggedForRemoval) return null;
+
+                      return (
+                        <div
+                          key={`flag-${sc.id}`}
+                          className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-rose-500/35 bg-rose-950/20 text-[10.5px]"
                         >
-                          <span
-                            className="w-2 h-2 rounded-sm shrink-0"
-                            style={{ backgroundColor: sc.color || '#38bdf8' }}
-                          />
-                          <span className="truncate font-semibold">{sc.name}</span>
-                          {hasPhaseWarn && (
-                            <span
-                              data-testid="sidebar-scenario-market-phase-warning"
-                              title={FLAT_MARKET_PHASE_TOOLTIP}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/50 text-rose-200 text-[9.5px] font-bold shrink-0"
-                            >
-                              <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                              <span>فلت انتهای بازار</span>
-                            </span>
-                          )}
-                          {runningExcluded && (
-                            <span
-                              title="Running Flat excluded per Session 13 — flagged for removal"
-                              className="px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
-                            >
-                              حذف جاری
-                            </span>
-                          )}
-                          {triCheck && !invalidTriangle && triCheck.triangleLabel !== 'Invalid' && (
-                            <span
-                              data-testid="sidebar-triangle-type-badge"
-                              title={
-                                triCheck.isContracting
-                                  ? 'Contracting Triangle (خطوط روند همگرا — ۳-۳-۳-۳-۳)'
-                                  : 'Expanding Triangle (خطوط روند واگرا — ۳-۳-۳-۳-۳)'
-                              }
-                              className={`px-1.5 py-0.5 rounded border text-[9px] font-bold shrink-0 whitespace-nowrap ${
-                                triCheck.isContracting
-                                  ? 'bg-emerald-950/45 border-emerald-500/40 text-emerald-300'
-                                  : 'bg-amber-950/45 border-amber-500/40 text-amber-300'
-                              }`}
-                            >
-                              {triCheck.isContracting ? 'مثلث مانع' : 'مثلث گستشی'}
-                            </span>
-                          )}
-                          {invalidTriangle && (
-                            <span
-                              data-testid="sidebar-invalid-triangle-badge"
-                              title={
-                                triCheck?.invalidTriangleReasonFa ||
-                                'Invalid Triangle: Triangle pattern placed in wave 1, 3, or 5 or violates 3-3-3-3-3 internal structure.'
-                              }
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
-                            >
-                              <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                              <span>مثلث نامعتبر</span>
-                            </span>
-                          )}
-                        </button>
-                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => onSelectScenario(sc.id)}
+                            className="flex items-center gap-1.5 min-w-0 flex-1 text-right text-slate-200"
+                          >
+                            <span className="truncate font-semibold">{sc.name}</span>
+                            {hasPhaseWarn && (
+                              <span
+                                data-testid="sidebar-scenario-market-phase-warning"
+                                title={FLAT_MARKET_PHASE_TOOLTIP}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/50 text-rose-200 text-[9.5px] font-bold shrink-0"
+                              >
+                                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                                <span>فلت انتهای بازار</span>
+                              </span>
+                            )}
+                            {runningExcluded && (
+                              <span
+                                title="فلت فرار (Running) طبق جلسه ۱۳ حذف شده و پیشنهاد می‌شود پاک شود."
+                                className="px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
+                              >
+                                فلت فرار حذف‌شده
+                              </span>
+                            )}
+                            {invalidTriangle && (
+                              <span
+                                data-testid="sidebar-invalid-triangle-badge"
+                                title={
+                                  triCheck?.invalidTriangleReasonFa ||
+                                  'مثلث نامعتبر: الگوی مثلث در موج ۱، ۳ یا ۵ مجاز نیست یا ساختار درونی ۳-۳-۳-۳-۳ ندارد.'
+                                }
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-500/40 text-rose-300 text-[9px] font-bold shrink-0 whitespace-nowrap"
+                              >
+                                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                                <span>مثلث نامعتبر</span>
+                              </span>
+                            )}
+                          </button>
+
                           {flaggedForRemoval && scenarios.length > 1 && (
                             <button
                               type="button"
@@ -1147,23 +1005,20 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
                               onClick={() => onDeleteScenario(sc.id)}
                               title={
                                 runningExcluded
-                                  ? 'Remove excluded Running Flat scenario to keep tree clean'
-                                  : 'Remove invalid Triangle scenario (wave 1/3/5 or non-3-3-3-3-3) to keep tree clean'
+                                  ? 'حذف سناریوی فلت فرار حذف‌شده برای تمیز ماندن درخت'
+                                  : 'حذف سناریوی مثلث نامعتبر (موج ۱/۳/۵ یا غیر ۳-۳-۳-۳-۳)'
                               }
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/45 text-rose-200 text-[9.5px] font-bold transition-colors whitespace-nowrap"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/45 text-rose-200 text-[9.5px] font-bold transition-colors whitespace-nowrap shrink-0"
                             >
                               <Trash2 className="w-3 h-3 shrink-0" />
                               <span>حذف</span>
                             </button>
                           )}
-                          <span className="font-mono tabular-nums text-[10px] text-slate-400 shrink-0">
-                            {sc.validityScore}%
-                          </span>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1191,7 +1046,7 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
         {activeTab === 'TF_BOUNDARY' && (
           <div className="space-y-4">
             <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
-              🧭 <strong>موتور تشخیص تایم‌فریم معتبر:</strong> ارزیابی خودکار نویز، کفایت داده و تعداد کندل‌ها جهت تشخیص بالاترین و پایین‌ترین تایم‌فریم قابل موج‌شماری.
+              <strong>موتور تشخیص تایم‌فریم معتبر:</strong> ارزیابی خودکار نویز، کفایت داده و تعداد کندل‌ها جهت تشخیص بالاترین و پایین‌ترین تایم‌فریم قابل موج‌شماری.
             </div>
 
             <TfBoundaryReport
@@ -1204,10 +1059,6 @@ export const SleekSidebar: React.FC<SleekSidebarProps> = ({
 
         {activeTab === 'SDD_CODE' && (
           <div className="space-y-4">
-            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
-              📜 <strong>مستندات و سورس‌کد:</strong> مشخصات مهندسی SDD منطبق بر GitHub Spec-Kit، کدهای آماده اجرای FastAPI برای بک‌اند و Nuxt 4 برای فرانت‌اند.
-            </div>
-
             <SddAndCodeViewer />
           </div>
         )}

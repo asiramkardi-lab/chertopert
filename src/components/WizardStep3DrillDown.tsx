@@ -23,6 +23,7 @@ import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import { PatternValidator } from './PatternValidator';
 import { TargetProjectionPanel, TargetProjectionBranchItem } from './TargetProjectionPanel';
 import { AnglePenetrationWidget } from './AnglePenetrationWidget';
+import { BahariSession1819Panel } from './BahariSession1819Panel';
 import { TopDownPipelineAudit } from './TopDownPipelineAudit';
 import {
   GitBranch,
@@ -133,7 +134,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
   onToggleShowTMV
 }) => {
   const [subTab, setSubTab] = useState<'SCENARIOS' | 'LEGS' | 'TARGETS' | 'EDIT' | 'RULES'>('SCENARIOS');
-  const [targetsViewMode, setTargetsViewMode] = useState<'ANGLE_RADAR' | 'PRZ_TMV'>('ANGLE_RADAR');
+  const [targetsViewMode, setTargetsViewMode] = useState<'ANGLE_RADAR' | 'PRZ_TMV' | 'SESSION_18_19'>('ANGLE_RADAR');
   const [validationReportsById, setValidationReportsById] = useState<Record<string, ValidationSummary>>({});
   const [expandedNodeIds, setExpandedNodeIds] = useState<Record<string, boolean>>({});
 
@@ -694,7 +695,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
               subTab === 'LEGS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
-            گام‌ها ({waveLegs.length})
+            موج‌ها ({waveLegs.length})
           </button>
           <button
             onClick={() => {
@@ -745,7 +746,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
             <div className="flex items-center justify-between gap-2 text-[11px]">
               <span className="flex items-center gap-1.5 font-bold text-cyan-300">
                 <Target className="w-3.5 h-3.5" />
-                <span>پیش‌بینی گام آخر ({activeProjection.lastLegLabel})</span>
+                <span>پیش‌بینی موج آخر ({activeProjection.lastLegLabel})</span>
               </span>
               <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-300 font-semibold">
                 <span>رادار زوایا، تارگت و PRZ</span>
@@ -1063,7 +1064,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                       <span>
                         {hasSyncedBranch
                           ? `زیرشاخه ${nextLowerTF} (${leg.syncedChildren.length})`
-                          : `ریزش به ${nextLowerTF || '—'}`}
+                          : `تحلیل ریزساختار ${nextLowerTF || '—'}`}
                       </span>
                     </button>
                   </div>
@@ -1100,11 +1101,11 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
 
         {subTab === 'TARGETS' && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
+            <div className="grid grid-cols-3 gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-[11px]">
               <button
                 type="button"
                 onClick={() => setTargetsViewMode('ANGLE_RADAR')}
-                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
                   targetsViewMode === 'ANGLE_RADAR'
                     ? 'bg-cyan-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
@@ -1115,13 +1116,24 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
               <button
                 type="button"
                 onClick={() => setTargetsViewMode('PRZ_TMV')}
-                className={`py-1.5 px-2.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
                   targetsViewMode === 'PRZ_TMV'
                     ? 'bg-indigo-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                پروجکشن PRZ و TMV
+                PRZ و TMV
+              </button>
+              <button
+                type="button"
+                onClick={() => setTargetsViewMode('SESSION_18_19')}
+                className={`py-1.5 px-2 rounded-lg font-semibold whitespace-nowrap transition-colors ${
+                  targetsViewMode === 'SESSION_18_19'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                جلسات ۱۸–۱۹
               </button>
             </div>
 
@@ -1132,7 +1144,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 parentRole={currentDrill?.role || 'ROOT'}
                 parentWaveLabel={currentDrill?.waveLabel || ''}
               />
-            ) : (
+            ) : targetsViewMode === 'PRZ_TMV' ? (
               <TargetProjectionPanel
                 currentLevelScenarios={
                   currentDrill
@@ -1158,6 +1170,12 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 showTMV={showTMV}
                 onToggleShowTMV={onToggleShowTMV}
               />
+            ) : (
+              <BahariSession1819Panel
+                scenario={activeLevelScenario}
+                candles={candles}
+                onHoverLeg={onHoverLeg}
+              />
             )}
           </div>
         )}
@@ -1174,7 +1192,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                 }`}
               >
                 <Move className="w-3.5 h-3.5" />
-                <span>درگ</span>
+                <span>جابجایی</span>
               </button>
               <button
                 onClick={() => onChangeInteractionMode('ADD_VERTEX')}
@@ -1219,7 +1237,7 @@ export const WizardStep3DrillDown: React.FC<WizardStep3DrillDownProps> = ({
                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shrink-0"
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>تأیید (Validate)</span>
+                  <span>اعتبارسنجی قوانین</span>
                 </button>
               </div>
             </div>

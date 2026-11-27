@@ -443,7 +443,7 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                         {primaryTmv.lowPrice.toLocaleString()} – {primaryTmv.highPrice.toLocaleString()}
                       </div>
                       <div className="text-[10px] text-slate-400 font-mono tabular-nums truncate">
-                        Prime: {primaryTmv.primePrice.toLocaleString()} · Ideal: {primaryTmv.ideal100Price.toLocaleString()}
+                        اولیه: {primaryTmv.primePrice.toLocaleString()} · ایده‌آل: {primaryTmv.ideal100Price.toLocaleString()}
                       </div>
                     </>
                   ) : (
@@ -548,19 +548,19 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 font-mono tabular-nums text-[10px]">
                     <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                      <div className="font-sans text-slate-400">Prime</div>
+                      <div className="font-sans text-slate-400">اولیه (موج ۱)</div>
                       <div className="font-bold text-white">{report.tmvSummary.prime.toLocaleString()}</div>
                     </div>
                     <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                      <div className="font-sans text-slate-400">Short 0.618</div>
+                      <div className="font-sans text-slate-400">کوتاه (۶۱.۸٪)</div>
                       <div className="font-bold text-cyan-300">{report.tmvSummary.short0618.toLocaleString()}</div>
                     </div>
                     <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                      <div className="font-sans text-slate-400">Ideal 1.000</div>
+                      <div className="font-sans text-slate-400">ایده‌آل (۱۰۰٪)</div>
                       <div className="font-bold text-emerald-300">{report.tmvSummary.ideal100.toLocaleString()}</div>
                     </div>
                     <div className="p-1.5 rounded bg-slate-900 border border-slate-800">
-                      <div className="font-sans text-slate-400">Alt 1.618</div>
+                      <div className="font-sans text-slate-400">کشیده (۱۶۱.۸٪)</div>
                       <div className="font-bold text-amber-300">{report.tmvSummary.alternate1618.toLocaleString()}</div>
                     </div>
                   </div>
@@ -647,11 +647,11 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                         )}
                         {s18TmvExact && s18PrimeVal !== null && s18IdealVal !== null && s18AltVal !== null && (
                           <div className="font-mono text-cyan-200/90 tabular-nums">
-                            Z+(Y-X): Prime={s18PrimeVal.toLocaleString()} · Ideal={s18IdealVal.toLocaleString()} · Alt161.8={s18AltVal.toLocaleString()} · Alt261.8={s18TmvExact.tmvAlternate2618.toLocaleString()}
+                            اهداف ۳نقطه‌ای: اولیه {s18PrimeVal.toLocaleString()} · ایده‌آل {s18IdealVal.toLocaleString()} · ۱۶۱.۸٪ {s18AltVal.toLocaleString()} · ۲۶۱.۸٪ {s18TmvExact.tmvAlternate2618.toLocaleString()}
                           </div>
                         )}
                         <div className="text-slate-400">
-                          تفاوت TMV و PRZ: TMV هدف حرکت است (باید برسد)؛ PRZ محدوده چرخش است (احتمال برگشت).
+                          نکته کلیدی: TMV هدف حرکت موج است؛ PRZ محدوده احتمالی چرخش قیمت است (ویرایش دستی نقاط X-Y-Z در تب جلسات ۱۸–۱۹).
                         </div>
                       </div>
                     )}

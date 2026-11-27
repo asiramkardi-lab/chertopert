@@ -68,7 +68,7 @@ export const AnalysisConfidenceWidget: React.FC<AnalysisConfidenceWidgetProps> =
           )}
           <div className="min-w-0">
             <div className="text-xs font-bold text-white truncate">
-              اعتبار سنجی تحلیل (Analysis Confidence)
+              اعتبارسنجی تحلیل و هم‌گرایی بازار
             </div>
             <div className="text-[10.5px] text-slate-400 truncate">{confidence.tierLabelFa}</div>
           </div>

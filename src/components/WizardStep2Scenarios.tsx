@@ -11,6 +11,7 @@ import { RulesEngine, ValidationSummary, PATTERN_LABELS_FA } from '../engine/rul
 import { ChartInteractionMode } from './ChartStudio';
 import { RuleDiagnosticsPanel } from './RuleDiagnosticsPanel';
 import { PatternValidator } from './PatternValidator';
+import { BahariSession1819Panel } from './BahariSession1819Panel';
 import {
   Eye,
   EyeOff,
@@ -495,7 +496,7 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
                 }`}
               >
                 <Move className="w-3.5 h-3.5" />
-                <span>درگ نقاط</span>
+                <span>جابجایی نقاط</span>
               </button>
               <button
                 onClick={() => onChangeInteractionMode('ADD_VERTEX')}
@@ -541,7 +542,7 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shrink-0"
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>تأیید (Validate)</span>
+                  <span>اعتبارسنجی قوانین</span>
                 </button>
               </div>
             </div>
@@ -613,6 +614,12 @@ export const WizardStep2Scenarios: React.FC<WizardStep2ScenariosProps> = ({
                 onValidateScenario?.(activeScenario.id, summary);
               }}
               variant="panel"
+            />
+
+            <BahariSession1819Panel
+              scenario={activeScenario}
+              candles={candles}
+              defaultSection="EXTENSIONS"
             />
 
             {solvableAlt && (
