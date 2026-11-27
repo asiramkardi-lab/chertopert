@@ -16,7 +16,13 @@ import {
 import { PATTERN_LABELS_FA } from '../engine/rulesEngine';
 import { TargetProjectionEngine } from '../engine/targetProjectionEngine';
 import { PatternEngines } from '../engine/patternEngines';
-import { validateWaveExtension, detectWave3Extension } from '../engine/extensionEngine';
+import {
+  validateWaveExtension,
+  detectWave3Extension,
+  TMVPrime,
+  TMVIdeal,
+  TMVAlternate
+} from '../engine/extensionEngine';
 import {
   Target,
   Layers,
@@ -234,6 +240,9 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
               : null;
           const s18WaveExtCheck = validateWaveExtension(scenario, item.candlesForBranch);
           const s18Wave3ExtCheck = detectWave3Extension(scenario);
+          const s18PrimeVal = TMVPrime(scenario);
+          const s18IdealVal = TMVIdeal(scenario);
+          const s18AltVal = TMVAlternate(scenario);
           const isDiagonalPattern =
             scenario.patternType === 'LEADING_DIAGONAL' ||
             scenario.patternType === 'ANTI_LEADING_DIAGONAL' ||
@@ -630,9 +639,15 @@ export const TargetProjectionPanel: React.FC<TargetProjectionPanelProps> = ({
                             {s18Wave3ExtCheck.status === 'BORDERLINE' ? ' · مرزی' : ''})
                           </div>
                         )}
-                        {s18TmvExact && (
+                        {s18WaveExtCheck.isWave5Extended && (
+                          <div className="text-rose-300 font-semibold">
+                            کشیدگی موج ۵ ({s18WaveExtCheck.wave5PctOf3}٪ موج ۳
+                            {s18WaveExtCheck.wave5DangerBell ? ' · زنگ خطر ریزش!' : ''})
+                          </div>
+                        )}
+                        {s18TmvExact && s18PrimeVal !== null && s18IdealVal !== null && s18AltVal !== null && (
                           <div className="font-mono text-cyan-200/90 tabular-nums">
-                            Z+(Y-X): Prime={s18TmvExact.tmvPrime.toLocaleString()} · Ideal={s18TmvExact.tmvIdeal100.toLocaleString()} · Alt161.8={s18TmvExact.tmvAlternate1618.toLocaleString()} · Alt261.8={s18TmvExact.tmvAlternate2618.toLocaleString()}
+                            Z+(Y-X): Prime={s18PrimeVal.toLocaleString()} · Ideal={s18IdealVal.toLocaleString()} · Alt161.8={s18AltVal.toLocaleString()} · Alt261.8={s18TmvExact.tmvAlternate2618.toLocaleString()}
                           </div>
                         )}
                         <div className="text-slate-400">

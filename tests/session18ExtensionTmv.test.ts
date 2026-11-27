@@ -416,4 +416,155 @@ describe('Session 18 Wave Extension & TMV/PRZ Engine (T-18.1..T-18.40)', () => {
     expect(pendingRes.status).toBe('PENDING_WAVE_4');
     expect(pendingRes.wave3Over1618).toBe(true);
   });
+
+  it('extensionEngine TMV helpers (TMVPrime, TMVIdeal, TMVAlternate) & Wave 5 validation', async () => {
+    const {
+      TMVPrime,
+      TMVIdeal,
+      TMVAlternate,
+      calculateTMVTargets,
+      detectWave5Extension,
+      validateWaveExtension
+    } = await import('../src/engine/extensionEngine');
+
+    // Bullish Wave 1 & 2 vertices: X=100, Y=200, Z=150
+    const bullScen = makeImpulseScenario([100, 200, 150, 360, 300, 500]);
+    expect(TMVPrime(bullScen)).toBe(200);
+    expect(TMVIdeal(bullScen)).toBe(250);
+    expect(TMVAlternate(bullScen)).toBe(311.8);
+    expect(TMVAlternate(bullScen, 261.8)).toBe(411.8);
+    expect(TMVAlternate(bullScen, 80)).toBeNull();
+
+    // Direct WaveVertex[] array & positional vertex args
+    const [v0, v1, v2] = bullScen.vertices;
+    expect(TMVPrime([v0, v1, v2])).toBe(200);
+    expect(TMVIdeal(v0, v1, v2)).toBe(250);
+    expect(TMVAlternate(v0, v1, v2)).toBe(311.8);
+
+    // Bearish scenario: X=400, Y=300, Z=350 -> Prime=300, Ideal=250, Alt161.8=188.2
+    const bearScen: WaveScenario = {
+      ...makeImpulseScenario([400, 300, 350]),
+      direction: 'BEARISH'
+    };
+    const bearTmv = calculateTMVTargets(bearScen);
+    expect(bearTmv.isValid).toBe(true);
+    expect(bearTmv.tmvPrime).toBe(300);
+    expect(bearTmv.tmvIdeal).toBe(250);
+    expect(bearTmv.tmvAlternate).toBe(188.2);
+
+    // Wave 5 extension detection via detectWave5Extension & validateWaveExtension
+    // In bullScen: W3=210 (150->360), W5=200 (300->500 => 95.2% < 161.8% -> NONE)
+    expect(detectWave5Extension(bullScen).isWave5Extended).toBe(false);
+
+    // W3=100 (150->250), W4=210, W5=210 (210->420 => 210% > 200% -> SEVERE_ALARM dangerBell)
+    const w5ExtScen = makeImpulseScenario([100, 200, 150, 250, 210, 420]);
+    const w5Check = detectWave5Extension(w5ExtScen);
+    expect(w5Check.isWave5Extended).toBe(true);
+    expect(w5Check.status).toBe('SEVERE_ALARM');
+    expect(w5Check.dangerBell).toBe(true);
+    expect(w5Check.takeProfitRequired).toBe(true);
+
+    // Borderline 161.8% Wave 5
+    const w5Border = detectWave5Extension({ wave3Length: 100, wave5Length: 161.8 });
+    expect(w5Border.isWave5Extended).toBe(true);
+    expect(w5Border.status).toBe('BORDERLINE');
+    expect(w5Border.dangerBell).toBe(false);
+
+    // validateWaveExtension integrates Wave 3, Wave 5, and TMV targets cleanly
+    const candles = generateRealisticCandles('TSE_ZOB', '1D', 40);
+    const fullW5Val = validateWaveExtension(w5ExtScen, candles);
+    expect(fullW5Val.isWave5Extended).toBe(true);
+    expect(fullW5Val.wave5DangerBell).toBe(true);
+    expect(fullW5Val.wave5Status).toBe('SEVERE_ALARM');
+    expect(fullW5Val.extendedWave).toBe('WAVE_5');
+    expect(fullW5Val.tmvTargets?.tmvIdeal).toBe(250);
+    expect(fullW5Val.tmvTargets?.tmvAlternate).toBe(311.8);
+  });
+
+  it('extensionEngine T-18.8 & T-18.9: validates Wave 3 extension via validateWaveExtension & detectWave3Extension', async () => {
+    const { detectWave3Extension, validateWaveExtension } = await import('../src/engine/extensionEngine');
+    const candles = generateRealisticCandles('TSE_ZOB', '1D', 40);
+
+    // T-18.8: Wave 3 > 161.8% Wave 1 (200%) & Wave 4 < 38.2% Wave 3 (25%) -> CONFIRMED
+    const scenT8 = makeImpulseScenario([100, 200, 150, 350, 300, 360]);
+    const resT8 = detectWave3Extension(scenT8);
+    expect(resT8.isWave3Extended).toBe(true);
+    expect(resT8.status).toBe('CONFIRMED');
+    expect(resT8.wave3Over1618).toBe(true);
+    expect(resT8.wave4Under382).toBe(true);
+
+    const valT8 = validateWaveExtension(scenT8, candles);
+    expect(valT8.isWave3Extended).toBe(true);
+    expect(valT8.wave3Status).toBe('CONFIRMED');
+    expect(valT8.extendedWave).toBe('WAVE_3');
+
+    // T-18.9: Wave 3 > 261.8% Wave 1 (280%) & Wave 4 < 38.2% Wave 3 (20%) -> SEVERE
+    const scenT9 = makeImpulseScenario([100, 200, 150, 430, 374, 460]);
+    const resT9 = detectWave3Extension(scenT9);
+    expect(resT9.isWave3Extended).toBe(true);
+    expect(resT9.status).toBe('CONFIRMED');
+    expect(resT9.severity).toBe('SEVERE');
+    expect(resT9.trailingStopRequired).toBe(true);
+
+    const valT9 = validateWaveExtension(scenT9, candles);
+    expect(valT9.isWave3Extended).toBe(true);
+    expect(valT9.wave3Status).toBe('CONFIRMED');
+    expect(valT9.extendedWave).toBe('WAVE_3');
+  });
+
+  it('extensionEngine exports validateWave1Extension, validateWave3Extension, validateWave5Extension & calculateTMV helpers', async () => {
+    const {
+      validateWave1Extension,
+      validateWave3Extension,
+      validateWave5Extension,
+      calculateTMVPrime,
+      calculateTMVIdeal,
+      calculateTMVAlternate
+    } = await import('../src/engine/extensionEngine');
+
+    const baseTs = 1746057600;
+    const candles: Candle[] = Array.from({ length: 30 }, (_, idx) => {
+      const price = idx < 10 ? 180 - idx * 8 : 100 + (idx - 10) * 10;
+      return {
+        time: `2025-06-${String(idx + 1).padStart(2, '0')}T00:00:00Z`,
+        timestamp: baseTs + idx * 86400,
+        open: price - 1,
+        high: idx === 0 ? 180 : price + 1,
+        low: price - 1,
+        close: price,
+        volume: 2000
+      };
+    });
+
+    const w1Scen: WaveScenario = {
+      ...makeImpulseScenario([100, 200, 175]),
+      vertices: [
+        { label: '0', price: 100, candleIndex: 10, timestamp: baseTs + 10 * 86400, isConfirmed: true },
+        { label: '1', price: 200, candleIndex: 18, timestamp: baseTs + 18 * 86400, isConfirmed: true },
+        { label: '2', price: 175, candleIndex: 23, timestamp: baseTs + 23 * 86400, isConfirmed: true }
+      ]
+    };
+    const w1Res = validateWave1Extension(w1Scen, candles);
+    expect(w1Res.isWave1Extended).toBe(true);
+    expect(w1Res.status).toBe('CONFIRMED');
+
+    const w3Res = validateWave3Extension({ wave3PctOf1: 200, wave4RetracePct: 30 });
+    expect(w3Res.isWave3Extended).toBe(true);
+    expect(w3Res.status).toBe('CONFIRMED');
+
+    const w5Res = validateWave5Extension({ wave5PctOf3: 220 });
+    expect(w5Res.isWave5Extended).toBe(true);
+    expect(w5Res.dangerBell).toBe(true);
+
+    const tmvScen = makeImpulseScenario([100, 200, 150]);
+    expect(calculateTMVPrime(tmvScen)).toBe(200);
+    expect(calculateTMVIdeal(tmvScen)).toBe(250);
+    expect(calculateTMVAlternate(tmvScen)).toBe(311.8);
+
+    // Direct numeric X=100, Y=200, Z=150 positional arguments
+    expect(calculateTMVPrime(100, 200)).toBe(200);
+    expect(calculateTMVIdeal(100, 200, 150)).toBe(250);
+    expect(calculateTMVAlternate(100, 200, 150)).toBe(311.8);
+    expect(calculateTMVAlternate(100, 200, 150, 261.8)).toBe(411.8);
+  });
 });
